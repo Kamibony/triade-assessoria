@@ -1,0 +1,29 @@
+name: Deploy to Firebase Hosting
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repozitára
+        uses: actions/checkout@v4
+
+      - name: Nastavenie Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Inštalácia závislostí
+        run: npm ci
+
+      - name: Build projektu (Vite)
+        run: npm run build
+
+      - name: Nasadenie do Firebase
+        run: npx firebase deploy --only hosting --project triade-assessoria
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
