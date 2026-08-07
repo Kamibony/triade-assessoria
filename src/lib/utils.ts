@@ -5,7 +5,7 @@ export function cn(...classes: (string | undefined | null | false | { [key: stri
       if (typeof c === 'string') return c;
       if (typeof c === 'object') {
         return Object.entries(c)
-          .filter(([_, value]) => Boolean(value))
+          .filter(([, value]) => Boolean(value))
           .map(([key]) => key)
           .join(' ');
       }
