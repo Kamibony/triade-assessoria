@@ -24,6 +24,7 @@
     "zx": "^8.8.5"
   },
   "devDependencies": {
+    "@types/handlebars": "^4.0.40",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2"
   }
