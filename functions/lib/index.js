@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.checkEligibility = exports.eligibilityChecker = exports.eligibilityResultSchema = exports.ngoProfileSchema = exports.ai = void 0;
+exports.checkEligibilityFunction = exports.parsePdfProfileFunction = exports.eligibilityChecker = exports.parsePdfToProfile = exports.eligibilityResultSchema = exports.ngoProfileSchema = exports.ai = void 0;
 const admin = __importStar(require("firebase-admin"));
 const genkit_1 = require("genkit");
 const googleai_1 = require("@genkit-ai/googleai");
@@ -57,7 +57,35 @@ exports.ngoProfileSchema = zod_1.z.object({
 exports.eligibilityResultSchema = zod_1.z.object({
     eligible: zod_1.z.boolean().describe("Se a ONG é elegível para o Edital nº 023/2026"),
     reasoning: zod_1.z.string().describe("Explicação detalhada do motivo da elegibilidade ou inelegibilidade"),
-    recommendations: zod_1.z.array(zod_1.z.string()).describe("Lista de recomendações acionáveis para a ONG melhorar sua chance de aprovação ou se adequar ao edital")
+    recommendations: zod_1.z.array(zod_1.z.string()).describe("Lista de recomendações acionáveis para a ONG melhorar sua chance de aprovação ou se adequar ao edital"),
+    actionPlan: zod_1.z.array(zod_1.z.string()).optional().describe("Plano de Adequação: passo a passo estruturado para regularização (apenas se inelegível)")
+});
+exports.parsePdfToProfile = exports.ai.defineFlow({
+    name: 'parsePdfToProfile',
+    inputSchema: zod_1.z.object({
+        pdfBase64: zod_1.z.string().describe("Arquivo PDF codificado em Base64"),
+    }),
+    outputSchema: exports.ngoProfileSchema,
+}, async (input) => {
+    const prompt = `Você é um especialista em análise de documentos legais de ONGs no Brasil.
+Eu enviarei o Estatuto Social ou Cartão CNPJ de uma ONG.
+Extraia as informações necessárias e preencha o perfil da ONG (ngoProfileSchema) com precisão.
+Se o documento não mencionar o status da documentação, presuma 'Pendente'. Se não houver clareza sobre projetos anteriores, presuma falso.
+Sempre retorne os dados em português do Brasil (pt-BR).`;
+    const response = await exports.ai.generate({
+        model: googleai_2.gemini20ProExp0205,
+        messages: [
+            { role: 'user', content: [
+                    { text: prompt },
+                    { media: { url: `data:application/pdf;base64,${input.pdfBase64}` } }
+                ] }
+        ],
+        output: { schema: exports.ngoProfileSchema }
+    });
+    if (!response.output) {
+        throw new Error("Falha ao extrair dados do PDF");
+    }
+    return response.output;
 });
 exports.eligibilityChecker = exports.ai.defineFlow({
     name: 'eligibilityChecker',
@@ -77,18 +105,23 @@ Status da Documentação: ${profile.documentationStatus}
 Projetos Culturais Anteriores: ${profile.previousProjectsApproved ? 'Sim' : 'Não'}
 Atividades Principais: ${profile.coreActivities.join(', ')}
 
-Avalie os critérios, forneça uma justificativa clara e inclua recomendações. Responda estritamente em português do Brasil (pt-BR).`;
+Avalie os critérios, forneça uma justificativa clara e inclua recomendações.
+Se a ONG for INELEGÍVEL, você DEVE gerar um 'actionPlan' (Plano de Adequação) com um passo a passo estruturado e detalhado para que a ONG possa corrigir suas pendências (ex: regularizar certidões, alterar estatuto, etc.) e se inscrever em editais futuros.
+Responda estritamente em português do Brasil (pt-BR).`;
     const response = await exports.ai.generate({
-        model: googleai_2.gemini15Flash,
+        model: googleai_2.gemini20ProExp0205,
         prompt: prompt,
         output: { schema: exports.eligibilityResultSchema }
     });
     if (!response.output) {
-        throw new Error("Failed to generate response");
+        throw new Error("Falha ao gerar resposta de elegibilidade");
     }
     return response.output;
 });
-exports.checkEligibility = (0, https_1.onCallGenkit)({
+exports.parsePdfProfileFunction = (0, https_1.onCallGenkit)({
+    secrets: [geminiApiKey]
+}, exports.parsePdfToProfile);
+exports.checkEligibilityFunction = (0, https_1.onCallGenkit)({
     secrets: [geminiApiKey]
 }, exports.eligibilityChecker);
 //# sourceMappingURL=index.js.map

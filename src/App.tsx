@@ -1,4 +1,3 @@
-
 import { Hero } from './components/sections/Hero';
 import { Problem } from './components/sections/Problem';
 import { Solution } from './components/sections/Solution';
@@ -8,12 +7,14 @@ import { SocialProof } from './components/sections/SocialProof';
 import { FAQ } from './components/sections/FAQ';
 import { Footer } from './components/sections/Footer';
 import { FloatingWhatsApp } from './components/ui/FloatingWhatsApp';
+import { MagicEligibility } from './components/MagicEligibility';
 
 function App() {
   return (
     <div className="min-h-screen bg-background text-foreground selection:bg-primary/30 selection:text-primary-foreground font-sans">
       <main>
         <Hero />
+        <MagicEligibility />
         <Problem />
         <Solution />
         <Comparison />
