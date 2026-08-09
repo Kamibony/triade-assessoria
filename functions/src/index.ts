@@ -1,17 +1,13 @@
 import * as admin from 'firebase-admin';
 import { genkit } from 'genkit';
-import { googleAI } from '@genkit-ai/googleai';
-import { defineSecret } from 'firebase-functions/params';
 import { z } from 'zod';
-import { gemini20ProExp0205 } from '@genkit-ai/googleai';
+import { vertexAI, gemini25ProPreview0325 } from '@genkit-ai/vertexai';
 import { onCall } from 'firebase-functions/v2/https';
 
 admin.initializeApp();
 
-const geminiApiKey = defineSecret('GEMINI_API_KEY');
-
 export const ai = genkit({
-    plugins: [googleAI()],
+    plugins: [vertexAI()],
 });
 
 export const ngoProfileSchema = z.object({
@@ -46,7 +42,7 @@ Se o documento não mencionar o status da documentação, presuma 'Pendente'. Se
 Sempre retorne os dados em português do Brasil (pt-BR).`;
 
         const response = await ai.generate({
-            model: gemini20ProExp0205,
+            model: gemini25ProPreview0325,
             messages: [
                 { role: 'user', content: [
                     { text: prompt },
@@ -88,7 +84,7 @@ Se a ONG for INELEGÍVEL, você DEVE gerar um 'actionPlan' (Plano de Adequação
 Responda estritamente em português do Brasil (pt-BR).`;
 
         const response = await ai.generate({
-            model: gemini20ProExp0205,
+            model: gemini25ProPreview0325,
             prompt: prompt,
             output: { schema: eligibilityResultSchema }
         });
@@ -101,14 +97,12 @@ Responda estritamente em português do Brasil (pt-BR).`;
 );
 
 export const parsePdfProfileFunction = onCall({
-    secrets: [geminiApiKey],
     cors: true
 }, async (request) => {
     return await parsePdfToProfile(request.data);
 });
 
 export const checkEligibilityFunction = onCall({
-    secrets: [geminiApiKey],
     cors: true
 }, async (request) => {
     return await eligibilityChecker(request.data);
