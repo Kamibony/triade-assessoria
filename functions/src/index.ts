@@ -6,11 +6,11 @@ import { onCall } from 'firebase-functions/v2/https';
 
 admin.initializeApp();
 
-export const ai = genkit({
+const ai = genkit({
     plugins: [vertexAI()],
 });
 
-export const ngoProfileSchema = z.object({
+const ngoProfileSchema = z.object({
     name: z.string().describe("Nome da ONG"),
     foundationDate: z.string().describe("Data de fundação da ONG (YYYY-MM-DD)"),
     location: z.string().describe("Localização da sede (Cidade/Estado)"),
@@ -19,14 +19,14 @@ export const ngoProfileSchema = z.object({
     coreActivities: z.array(z.string()).describe("Lista de atividades principais da ONG")
 });
 
-export const eligibilityResultSchema = z.object({
+const eligibilityResultSchema = z.object({
     eligible: z.boolean().describe("Se a ONG é elegível para o Edital nº 023/2026"),
     reasoning: z.string().describe("Explicação detalhada do motivo da elegibilidade ou inelegibilidade"),
     recommendations: z.array(z.string()).describe("Lista de recomendações acionáveis para a ONG melhorar sua chance de aprovação ou se adequar ao edital"),
     actionPlan: z.array(z.string()).optional().describe("Plano de Adequação: passo a passo estruturado para regularização (apenas se inelegível)")
 });
 
-export const parsePdfToProfile = ai.defineFlow(
+const parsePdfToProfile = ai.defineFlow(
     {
         name: 'parsePdfToProfile',
         inputSchema: z.object({
@@ -59,7 +59,7 @@ Sempre retorne os dados em português do Brasil (pt-BR).`;
     }
 );
 
-export const eligibilityChecker = ai.defineFlow(
+const eligibilityChecker = ai.defineFlow(
     {
         name: 'eligibilityChecker',
         inputSchema: ngoProfileSchema,
