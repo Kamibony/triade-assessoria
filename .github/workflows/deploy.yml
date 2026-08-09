@@ -9,24 +9,24 @@ jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repozitára
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Nastavenie Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Inštalácia závislostí
+      - name: Install Frontend Dependencies
         run: npm ci
 
-      - name: Build projektu (Vite)
+      - name: Build Frontend (Vite)
         run: npm run build
 
-      - name: Inštalácia závislostí a build pre Functions
+      - name: Install Dependencies and Build Functions
         run: cd functions && npm ci && npm run build
 
-      - name: Nasadenie do Firebase (Hosting a Functions)
+      - name: Deploy to Firebase (Hosting and Functions)
         run: npx firebase-tools deploy --only hosting,functions --project triade-assessoria
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
