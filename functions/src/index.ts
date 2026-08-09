@@ -1,13 +1,13 @@
 import * as admin from 'firebase-admin';
 import { genkit } from 'genkit';
 import { z } from 'zod';
-import { vertexAI, gemini25ProPreview0325 } from '@genkit-ai/vertexai';
+import { vertexAI } from '@genkit-ai/google-genai';
 import { onCall } from 'firebase-functions/v2/https';
 
 admin.initializeApp();
 
 const ai = genkit({
-    plugins: [vertexAI()],
+    plugins: [vertexAI({ projectId: 'triade-assessoria', location: 'us-central1' })],
 });
 
 const ngoProfileSchema = z.object({
@@ -42,7 +42,7 @@ Se o documento não mencionar o status da documentação, presuma 'Pendente'. Se
 Sempre retorne os dados em português do Brasil (pt-BR).`;
 
         const response = await ai.generate({
-            model: gemini25ProPreview0325,
+            model: 'vertexai/gemini-2.5-pro',
             messages: [
                 { role: 'user', content: [
                     { text: prompt },
@@ -84,7 +84,7 @@ Se a ONG for INELEGÍVEL, você DEVE gerar um 'actionPlan' (Plano de Adequação
 Responda estritamente em português do Brasil (pt-BR).`;
 
         const response = await ai.generate({
-            model: gemini25ProPreview0325,
+            model: 'vertexai/gemini-2.5-pro',
             prompt: prompt,
             output: { schema: eligibilityResultSchema }
         });
