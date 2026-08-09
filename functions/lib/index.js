@@ -37,11 +37,11 @@ exports.checkEligibilityFunction = exports.parsePdfProfileFunction = void 0;
 const admin = __importStar(require("firebase-admin"));
 const genkit_1 = require("genkit");
 const zod_1 = require("zod");
-const vertexai_1 = require("@genkit-ai/vertexai");
+const google_genai_1 = require("@genkit-ai/google-genai");
 const https_1 = require("firebase-functions/v2/https");
 admin.initializeApp();
 const ai = (0, genkit_1.genkit)({
-    plugins: [(0, vertexai_1.vertexAI)()],
+    plugins: [(0, google_genai_1.vertexAI)({ projectId: 'triade-assessoria', location: 'us-central1' })],
 });
 const ngoProfileSchema = zod_1.z.object({
     name: zod_1.z.string().describe("Nome da ONG"),
@@ -70,7 +70,7 @@ Extraia as informações necessárias e preencha o perfil da ONG (ngoProfileSche
 Se o documento não mencionar o status da documentação, presuma 'Pendente'. Se não houver clareza sobre projetos anteriores, presuma falso.
 Sempre retorne os dados em português do Brasil (pt-BR).`;
     const response = await ai.generate({
-        model: vertexai_1.gemini25ProPreview0325,
+        model: 'vertexai/gemini-2.5-pro',
         messages: [
             { role: 'user', content: [
                     { text: prompt },
@@ -106,7 +106,7 @@ Avalie os critérios, forneça uma justificativa clara e inclua recomendações.
 Se a ONG for INELEGÍVEL, você DEVE gerar um 'actionPlan' (Plano de Adequação) com um passo a passo estruturado e detalhado para que a ONG possa corrigir suas pendências (ex: regularizar certidões, alterar estatuto, etc.) e se inscrever em editais futuros.
 Responda estritamente em português do Brasil (pt-BR).`;
     const response = await ai.generate({
-        model: vertexai_1.gemini25ProPreview0325,
+        model: 'vertexai/gemini-2.5-pro',
         prompt: prompt,
         output: { schema: eligibilityResultSchema }
     });
