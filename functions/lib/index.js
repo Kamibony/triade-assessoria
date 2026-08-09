@@ -119,9 +119,11 @@ Responda estritamente em português do Brasil (pt-BR).`;
     return response.output;
 });
 exports.parsePdfProfileFunction = (0, https_1.onCallGenkit)({
-    secrets: [geminiApiKey]
+    secrets: [geminiApiKey],
+    cors: true
 }, exports.parsePdfToProfile);
 exports.checkEligibilityFunction = (0, https_1.onCallGenkit)({
-    secrets: [geminiApiKey]
+    secrets: [geminiApiKey],
+    cors: true
 }, exports.eligibilityChecker);
 //# sourceMappingURL=index.js.map

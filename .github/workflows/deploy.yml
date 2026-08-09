@@ -1,4 +1,4 @@
-name: Deploy to Firebase Hosting
+name: Deploy to Firebase Hosting and Functions
 
 on:
   push:
@@ -23,7 +23,10 @@ jobs:
       - name: Build projektu (Vite)
         run: npm run build
 
-      - name: Nasadenie do Firebase
-        run: npx firebase deploy --only hosting --project triade-assessoria
+      - name: Inštalácia závislostí a build pre Functions
+        run: cd functions && npm ci && npm run build
+
+      - name: Nasadenie do Firebase (Hosting a Functions)
+        run: npx firebase-tools deploy --only hosting,functions --project triade-assessoria
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
