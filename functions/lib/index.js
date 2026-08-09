@@ -36,15 +36,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.checkEligibilityFunction = exports.parsePdfProfileFunction = exports.eligibilityChecker = exports.parsePdfToProfile = exports.eligibilityResultSchema = exports.ngoProfileSchema = exports.ai = void 0;
 const admin = __importStar(require("firebase-admin"));
 const genkit_1 = require("genkit");
-const googleai_1 = require("@genkit-ai/googleai");
-const params_1 = require("firebase-functions/params");
 const zod_1 = require("zod");
-const googleai_2 = require("@genkit-ai/googleai");
+const vertexai_1 = require("@genkit-ai/vertexai");
 const https_1 = require("firebase-functions/v2/https");
 admin.initializeApp();
-const geminiApiKey = (0, params_1.defineSecret)('GEMINI_API_KEY');
 exports.ai = (0, genkit_1.genkit)({
-    plugins: [(0, googleai_1.googleAI)()],
+    plugins: [(0, vertexai_1.vertexAI)()],
 });
 exports.ngoProfileSchema = zod_1.z.object({
     name: zod_1.z.string().describe("Nome da ONG"),
@@ -73,7 +70,7 @@ Extraia as informações necessárias e preencha o perfil da ONG (ngoProfileSche
 Se o documento não mencionar o status da documentação, presuma 'Pendente'. Se não houver clareza sobre projetos anteriores, presuma falso.
 Sempre retorne os dados em português do Brasil (pt-BR).`;
     const response = await exports.ai.generate({
-        model: googleai_2.gemini20ProExp0205,
+        model: vertexai_1.gemini25ProPreview0325,
         messages: [
             { role: 'user', content: [
                     { text: prompt },
@@ -109,7 +106,7 @@ Avalie os critérios, forneça uma justificativa clara e inclua recomendações.
 Se a ONG for INELEGÍVEL, você DEVE gerar um 'actionPlan' (Plano de Adequação) com um passo a passo estruturado e detalhado para que a ONG possa corrigir suas pendências (ex: regularizar certidões, alterar estatuto, etc.) e se inscrever em editais futuros.
 Responda estritamente em português do Brasil (pt-BR).`;
     const response = await exports.ai.generate({
-        model: googleai_2.gemini20ProExp0205,
+        model: vertexai_1.gemini25ProPreview0325,
         prompt: prompt,
         output: { schema: exports.eligibilityResultSchema }
     });
@@ -119,13 +116,11 @@ Responda estritamente em português do Brasil (pt-BR).`;
     return response.output;
 });
 exports.parsePdfProfileFunction = (0, https_1.onCall)({
-    secrets: [geminiApiKey],
     cors: true
 }, async (request) => {
     return await (0, exports.parsePdfToProfile)(request.data);
 });
 exports.checkEligibilityFunction = (0, https_1.onCall)({
-    secrets: [geminiApiKey],
     cors: true
 }, async (request) => {
     return await (0, exports.eligibilityChecker)(request.data);
