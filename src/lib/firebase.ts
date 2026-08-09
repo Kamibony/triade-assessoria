@@ -5,12 +5,12 @@ import { getFunctions } from "firebase/functions";
 // Idealmente seria preenchido com process.env.VITE_FIREBASE_API_KEY etc.
 const firebaseConfig = {
   apiKey: "demo-api-key",
-  authDomain: "demo-project.firebaseapp.com",
-  projectId: "demo-project",
-  storageBucket: "demo-project.appspot.com",
+  authDomain: "triade-assessoria.firebaseapp.com",
+  projectId: "triade-assessoria",
+  storageBucket: "triade-assessoria.appspot.com",
   messagingSenderId: "1234567890",
   appId: "1:1234567890:web:abcdef"
 };
 
 const app = initializeApp(firebaseConfig);
-export const functions = getFunctions(app);
+export const functions = getFunctions(app, 'us-central1');

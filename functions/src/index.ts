@@ -101,9 +101,11 @@ Responda estritamente em português do Brasil (pt-BR).`;
 );
 
 export const parsePdfProfileFunction = onCallGenkit({
-    secrets: [geminiApiKey]
+    secrets: [geminiApiKey],
+    cors: true
 }, parsePdfToProfile);
 
 export const checkEligibilityFunction = onCallGenkit({
-    secrets: [geminiApiKey]
+    secrets: [geminiApiKey],
+    cors: true
 }, eligibilityChecker);
