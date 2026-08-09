@@ -4,7 +4,7 @@ import { googleAI } from '@genkit-ai/googleai';
 import { defineSecret } from 'firebase-functions/params';
 import { z } from 'zod';
 import { gemini20ProExp0205 } from '@genkit-ai/googleai';
-import { onCallGenkit } from 'firebase-functions/https';
+import { onCall } from 'firebase-functions/v2/https';
 
 admin.initializeApp();
 
@@ -100,12 +100,16 @@ Responda estritamente em português do Brasil (pt-BR).`;
     }
 );
 
-export const parsePdfProfileFunction = onCallGenkit({
+export const parsePdfProfileFunction = onCall({
     secrets: [geminiApiKey],
     cors: true
-}, parsePdfToProfile);
+}, async (request) => {
+    return await parsePdfToProfile(request.data);
+});
 
-export const checkEligibilityFunction = onCallGenkit({
+export const checkEligibilityFunction = onCall({
     secrets: [geminiApiKey],
     cors: true
-}, eligibilityChecker);
+}, async (request) => {
+    return await eligibilityChecker(request.data);
+});

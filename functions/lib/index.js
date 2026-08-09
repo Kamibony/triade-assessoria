@@ -40,7 +40,7 @@ const googleai_1 = require("@genkit-ai/googleai");
 const params_1 = require("firebase-functions/params");
 const zod_1 = require("zod");
 const googleai_2 = require("@genkit-ai/googleai");
-const https_1 = require("firebase-functions/https");
+const https_1 = require("firebase-functions/v2/https");
 admin.initializeApp();
 const geminiApiKey = (0, params_1.defineSecret)('GEMINI_API_KEY');
 exports.ai = (0, genkit_1.genkit)({
@@ -118,12 +118,16 @@ Responda estritamente em português do Brasil (pt-BR).`;
     }
     return response.output;
 });
-exports.parsePdfProfileFunction = (0, https_1.onCallGenkit)({
+exports.parsePdfProfileFunction = (0, https_1.onCall)({
     secrets: [geminiApiKey],
     cors: true
-}, exports.parsePdfToProfile);
-exports.checkEligibilityFunction = (0, https_1.onCallGenkit)({
+}, async (request) => {
+    return await (0, exports.parsePdfToProfile)(request.data);
+});
+exports.checkEligibilityFunction = (0, https_1.onCall)({
     secrets: [geminiApiKey],
     cors: true
-}, exports.eligibilityChecker);
+}, async (request) => {
+    return await (0, exports.eligibilityChecker)(request.data);
+});
 //# sourceMappingURL=index.js.map
