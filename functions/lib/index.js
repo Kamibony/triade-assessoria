@@ -33,17 +33,17 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.checkEligibilityFunction = exports.parsePdfProfileFunction = exports.eligibilityChecker = exports.parsePdfToProfile = exports.eligibilityResultSchema = exports.ngoProfileSchema = exports.ai = void 0;
+exports.checkEligibilityFunction = exports.parsePdfProfileFunction = void 0;
 const admin = __importStar(require("firebase-admin"));
 const genkit_1 = require("genkit");
 const zod_1 = require("zod");
 const vertexai_1 = require("@genkit-ai/vertexai");
 const https_1 = require("firebase-functions/v2/https");
 admin.initializeApp();
-exports.ai = (0, genkit_1.genkit)({
+const ai = (0, genkit_1.genkit)({
     plugins: [(0, vertexai_1.vertexAI)()],
 });
-exports.ngoProfileSchema = zod_1.z.object({
+const ngoProfileSchema = zod_1.z.object({
     name: zod_1.z.string().describe("Nome da ONG"),
     foundationDate: zod_1.z.string().describe("Data de fundação da ONG (YYYY-MM-DD)"),
     location: zod_1.z.string().describe("Localização da sede (Cidade/Estado)"),
@@ -51,25 +51,25 @@ exports.ngoProfileSchema = zod_1.z.object({
     previousProjectsApproved: zod_1.z.boolean().describe("Se a ONG já teve projetos culturais aprovados anteriormente"),
     coreActivities: zod_1.z.array(zod_1.z.string()).describe("Lista de atividades principais da ONG")
 });
-exports.eligibilityResultSchema = zod_1.z.object({
+const eligibilityResultSchema = zod_1.z.object({
     eligible: zod_1.z.boolean().describe("Se a ONG é elegível para o Edital nº 023/2026"),
     reasoning: zod_1.z.string().describe("Explicação detalhada do motivo da elegibilidade ou inelegibilidade"),
     recommendations: zod_1.z.array(zod_1.z.string()).describe("Lista de recomendações acionáveis para a ONG melhorar sua chance de aprovação ou se adequar ao edital"),
     actionPlan: zod_1.z.array(zod_1.z.string()).optional().describe("Plano de Adequação: passo a passo estruturado para regularização (apenas se inelegível)")
 });
-exports.parsePdfToProfile = exports.ai.defineFlow({
+const parsePdfToProfile = ai.defineFlow({
     name: 'parsePdfToProfile',
     inputSchema: zod_1.z.object({
         pdfBase64: zod_1.z.string().describe("Arquivo PDF codificado em Base64"),
     }),
-    outputSchema: exports.ngoProfileSchema,
+    outputSchema: ngoProfileSchema,
 }, async (input) => {
     const prompt = `Você é um especialista em análise de documentos legais de ONGs no Brasil.
 Eu enviarei o Estatuto Social ou Cartão CNPJ de uma ONG.
 Extraia as informações necessárias e preencha o perfil da ONG (ngoProfileSchema) com precisão.
 Se o documento não mencionar o status da documentação, presuma 'Pendente'. Se não houver clareza sobre projetos anteriores, presuma falso.
 Sempre retorne os dados em português do Brasil (pt-BR).`;
-    const response = await exports.ai.generate({
+    const response = await ai.generate({
         model: vertexai_1.gemini25ProPreview0325,
         messages: [
             { role: 'user', content: [
@@ -77,17 +77,17 @@ Sempre retorne os dados em português do Brasil (pt-BR).`;
                     { media: { url: `data:application/pdf;base64,${input.pdfBase64}` } }
                 ] }
         ],
-        output: { schema: exports.ngoProfileSchema }
+        output: { schema: ngoProfileSchema }
     });
     if (!response.output) {
         throw new Error("Falha ao extrair dados do PDF");
     }
     return response.output;
 });
-exports.eligibilityChecker = exports.ai.defineFlow({
+const eligibilityChecker = ai.defineFlow({
     name: 'eligibilityChecker',
-    inputSchema: exports.ngoProfileSchema,
-    outputSchema: exports.eligibilityResultSchema,
+    inputSchema: ngoProfileSchema,
+    outputSchema: eligibilityResultSchema,
 }, async (profile) => {
     const prompt = `Você é um agente especialista em avaliação de projetos culturais para leis de incentivo no Brasil, atuando pela Tríade Assessoria.
 
@@ -105,10 +105,10 @@ Atividades Principais: ${profile.coreActivities.join(', ')}
 Avalie os critérios, forneça uma justificativa clara e inclua recomendações.
 Se a ONG for INELEGÍVEL, você DEVE gerar um 'actionPlan' (Plano de Adequação) com um passo a passo estruturado e detalhado para que a ONG possa corrigir suas pendências (ex: regularizar certidões, alterar estatuto, etc.) e se inscrever em editais futuros.
 Responda estritamente em português do Brasil (pt-BR).`;
-    const response = await exports.ai.generate({
+    const response = await ai.generate({
         model: vertexai_1.gemini25ProPreview0325,
         prompt: prompt,
-        output: { schema: exports.eligibilityResultSchema }
+        output: { schema: eligibilityResultSchema }
     });
     if (!response.output) {
         throw new Error("Falha ao gerar resposta de elegibilidade");
@@ -118,11 +118,11 @@ Responda estritamente em português do Brasil (pt-BR).`;
 exports.parsePdfProfileFunction = (0, https_1.onCall)({
     cors: true
 }, async (request) => {
-    return await (0, exports.parsePdfToProfile)(request.data);
+    return await parsePdfToProfile(request.data);
 });
 exports.checkEligibilityFunction = (0, https_1.onCall)({
     cors: true
 }, async (request) => {
-    return await (0, exports.eligibilityChecker)(request.data);
+    return await eligibilityChecker(request.data);
 });
 //# sourceMappingURL=index.js.map
