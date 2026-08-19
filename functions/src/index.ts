@@ -42,7 +42,7 @@ Se o documento não mencionar o status da documentação, presuma 'Pendente'. Se
 Sempre retorne os dados em português do Brasil (pt-BR).`;
 
         const response = await ai.generate({
-            model: 'vertexai/gemini-2.5-pro',
+            model: 'vertexai/gemini-2.5-flash',
             messages: [
                 { role: 'user', content: [
                     { text: prompt },
@@ -84,7 +84,7 @@ Se a ONG for INELEGÍVEL, você DEVE gerar um 'actionPlan' (Plano de Adequação
 Responda estritamente em português do Brasil (pt-BR).`;
 
         const response = await ai.generate({
-            model: 'vertexai/gemini-2.5-pro',
+            model: 'vertexai/gemini-2.5-flash',
             prompt: prompt,
             output: { schema: eligibilityResultSchema }
         });
