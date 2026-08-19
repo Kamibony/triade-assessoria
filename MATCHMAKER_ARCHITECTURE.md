@@ -95,27 +95,33 @@ Stores the generated matches between NGOs and Editais.
 - **Task**: Compare the NGO's capabilities with the Edital's requirements. Calculate a match score (0-100), determine boolean eligibility, and generate a brief explanation and recommendations.
 - **Output**: Saves a new record in the `matches` collection.
 
-## Implementation Plan
+## Implementation Plan & Architecture Critique
 
-1. **Phase 1: Foundation (Backend Schemas)**
-   - Define Zod schemas for `editais` and `matches` in `functions/src/index.ts`.
-   - Ensure Firestore rules are updated (if applicable) to secure the new collections.
+### Architect's Critique of the Original 5-Phase Plan
+The original 5-phase plan is overly fragmented and creates unnecessary silos between dependent components.
+- **Separating Schemas and Extraction (Phases 1 & 2):** Building Zod schemas in isolation without actively testing them against the actual Gemini extraction outputs risks creating theoretical schemas that fail when exposed to real-world Edital PDFs. These must be built and tested concurrently.
+- **Isolating Frontend Integration (Phase 4):** Delaying UI integration until the entire backend is built means we lose the opportunity for early user feedback. Stakeholders won't be able to visualize the Matchmaking Engine's output until late in the cycle, which risks misalignment on the "Action Plan" and scoring criteria.
 
-2. **Phase 2: Edital Extraction Workflow**
-   - Create a Genkit flow `extractEditalRules` in `functions/src/index.ts`.
-   - Expose it as an `onCall` Cloud Function.
-   - (Optional) Set up an event-driven `onDocumentCreated` trigger for the `editais` collection to run extraction automatically when a raw document is uploaded.
+### Optimized 3-Milestone Roadmap
+To streamline implementation, ensure end-to-end context continuity, and accelerate feedback, I propose the following consolidated roadmap:
 
-3. **Phase 3: Matchmaking Engine**
-   - Create a Genkit flow `scoreMatch` in `functions/src/index.ts` that takes an NGO profile and an Edital profile as input.
-   - Implement an orchestrator function that fetches active Editais and relevant NGOs from Firestore, and batches calls to `scoreMatch`.
+#### Milestone 1: Data Models & Edital Extraction Pipeline (Combines Old Phases 1 & 2)
+**Rationale:** Schemas dictate the AI's output; therefore, defining schemas and building the extraction flow are inseparable tasks.
+- Define Zod schemas for `editais` in `functions/src/index.ts`.
+- Immediately build the `extractEditalRules` Genkit flow and test it against sample Editais.
+- Deploy the flow as an `onCall` Cloud Function and implement the `onDocumentCreated` trigger.
+- Configure basic Firestore security rules.
 
-4. **Phase 4: Frontend Integration**
-   - Update the React application (`src/`) to include dashboards for:
-     - Viewing available Editais.
-     - Viewing an NGO's match scores for different Editais.
-     - Displaying the AI-generated "Action Plan" for ineligible Editais.
+#### Milestone 2: Matchmaking Engine & Initial Frontend MVP (Combines Old Phases 3 & 4)
+**Rationale:** Scoring matches has no value if users cannot see the results. Building the UI alongside the Matchmaking Engine allows immediate validation of the AI's reasoning and scoring logic.
+- Define the `matches` Zod schema and implement the `scoreMatch` Genkit flow.
+- Build the orchestrator function to batch matches.
+- Develop the React (`src/`) dashboards concurrently to display:
+  - The list of available Editais.
+  - The NGO's match scores and the AI-generated "Action Plan".
 
-5. **Phase 5: Refinement & Cost Optimization**
-   - Switch Genkit models to `gemini-2.5-flash` where complex reasoning isn't required to save costs.
-   - Implement caching strategies for match scores to prevent redundant AI invocations.
+#### Milestone 3: Optimization, Automation & Cost-Reduction (Expands Old Phase 5)
+**Rationale:** Optimization should occur once the baseline system is proven to work end-to-end.
+- Evaluate AI outputs and downgrade to `gemini-2.5-flash` for flows where complex reasoning is not strictly required.
+- Implement caching for match scores to avoid redundant Genkit runs.
+- Set up Cloud Scheduler jobs for automated, periodic match recalculations as new Editais are ingested or NGO profiles change.
