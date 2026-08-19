@@ -29,12 +29,6 @@ export declare const parsePdfProfileFunction: import("firebase-functions/v2/http
     previousProjectsApproved: boolean;
     coreActivities: string[];
 }>, unknown>;
-export declare const checkEligibilityFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
-    eligible: boolean;
-    reasoning: string;
-    recommendations: string[];
-    actionPlan?: string[] | undefined;
-}>, unknown>;
 export declare const extractEditalRulesFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     title: string;
     issuer: string;
@@ -48,13 +42,7 @@ export declare const extractEditalRulesFunction: import("firebase-functions/v2/h
         allowedActivities: string[];
     };
 }>, unknown>;
-export declare const triggerMatchOrchestrator: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+export declare const onEditalCreated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").QueryDocumentSnapshot | undefined, {
     editalId: string;
-    oscId: string;
-    matchScore: number;
-    eligibility: boolean;
-    reasoning: string;
-    actionPlan?: string[] | undefined;
-    matchId: string;
-}>, unknown>;
+}>>;
 //# sourceMappingURL=index.d.ts.map
