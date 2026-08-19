@@ -70,7 +70,7 @@ Extraia as informações necessárias e preencha o perfil da ONG (ngoProfileSche
 Se o documento não mencionar o status da documentação, presuma 'Pendente'. Se não houver clareza sobre projetos anteriores, presuma falso.
 Sempre retorne os dados em português do Brasil (pt-BR).`;
     const response = await ai.generate({
-        model: 'vertexai/gemini-2.5-pro',
+        model: 'vertexai/gemini-2.5-flash',
         messages: [
             { role: 'user', content: [
                     { text: prompt },
@@ -106,7 +106,7 @@ Avalie os critérios, forneça uma justificativa clara e inclua recomendações.
 Se a ONG for INELEGÍVEL, você DEVE gerar um 'actionPlan' (Plano de Adequação) com um passo a passo estruturado e detalhado para que a ONG possa corrigir suas pendências (ex: regularizar certidões, alterar estatuto, etc.) e se inscrever em editais futuros.
 Responda estritamente em português do Brasil (pt-BR).`;
     const response = await ai.generate({
-        model: 'vertexai/gemini-2.5-pro',
+        model: 'vertexai/gemini-2.5-flash',
         prompt: prompt,
         output: { schema: eligibilityResultSchema }
     });
