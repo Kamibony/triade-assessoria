@@ -3,7 +3,7 @@ import * as admin from 'firebase-admin';
 import { genkit } from 'genkit';
 import { z } from 'zod';
 import { vertexAI } from '@genkit-ai/google-genai';
-import { onCall } from 'firebase-functions/v2/https';
+import { onCall, HttpsError } from 'firebase-functions/v2/https';
 
 admin.initializeApp();
 
@@ -45,12 +45,6 @@ export const matchSchema = z.object({
 });
 
 
-const eligibilityResultSchema = z.object({
-    eligible: z.boolean().describe("Se a ONG é elegível para o Edital nº 023/2026"),
-    reasoning: z.string().describe("Explicação detalhada do motivo da elegibilidade ou inelegibilidade"),
-    recommendations: z.array(z.string()).describe("Lista de recomendações acionáveis para a ONG melhorar sua chance de aprovação ou se adequar ao edital"),
-    actionPlan: z.array(z.string()).optional().describe("Plano de Adequação: passo a passo estruturado para regularização (apenas se inelegível)")
-});
 
 const parsePdfToProfile = ai.defineFlow(
     {
@@ -85,42 +79,6 @@ Sempre retorne os dados em português do Brasil (pt-BR).`;
     }
 );
 
-const eligibilityChecker = ai.defineFlow(
-    {
-        name: 'eligibilityChecker',
-        inputSchema: ngoProfileSchema,
-        outputSchema: eligibilityResultSchema,
-    },
-    async (profile) => {
-        const prompt = `Você é um agente especialista em avaliação de projetos culturais para leis de incentivo no Brasil, atuando pela Tríade Assessoria.
-
-A sua tarefa é analisar o perfil de uma ONG e determinar se ela é elegível para participar do Edital do ICMS Cultural da Paraíba (Edital nº 023/2026).
-Para ser elegível, a ONG deve ter pelo menos 2 anos de fundação, estar localizada no estado da Paraíba (PB), ter documentação 'Em dia' e realizar atividades no setor cultural.
-
-Perfil da ONG:
-Nome: ${profile.name}
-Data de Fundação: ${profile.foundationDate}
-Localização: ${profile.location}
-Status da Documentação: ${profile.documentationStatus}
-Projetos Culturais Anteriores: ${profile.previousProjectsApproved ? 'Sim' : 'Não'}
-Atividades Principais: ${profile.coreActivities.join(', ')}
-
-Avalie os critérios, forneça uma justificativa clara e inclua recomendações.
-Se a ONG for INELEGÍVEL, você DEVE gerar um 'actionPlan' (Plano de Adequação) com um passo a passo estruturado e detalhado para que a ONG possa corrigir suas pendências (ex: regularizar certidões, alterar estatuto, etc.) e se inscrever em editais futuros.
-Responda estritamente em português do Brasil (pt-BR).`;
-
-        const response = await ai.generate({
-            model: 'vertexai/gemini-2.5-flash',
-            prompt: prompt,
-            output: { schema: eligibilityResultSchema }
-        });
-
-        if (!response.output) {
-            throw new Error("Falha ao gerar resposta de elegibilidade");
-        }
-        return response.output;
-    }
-);
 
 
 const scoreMatch = ai.defineFlow(
@@ -187,6 +145,9 @@ Responda estritamente em português do Brasil (pt-BR).
 export const parsePdfProfileFunction = onCall({
     cors: true
 }, async (request) => {
+    if (!request.auth) {
+        throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    }
     return await parsePdfToProfile(request.data);
 });
 
@@ -234,54 +195,70 @@ Sempre retorne os dados no formato estruturado solicitado em português do Brasi
     }
 );
 
-export const checkEligibilityFunction = onCall({
-    cors: true
-}, async (request) => {
-    return await eligibilityChecker(request.data);
-});
 
 export const extractEditalRulesFunction = onCall({
     cors: true
 }, async (request) => {
+    if (!request.auth) {
+        throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    }
     return await extractEditalRules(request.data);
 });
 
 
 
-export const triggerMatchOrchestrator = onCall({
-    cors: true
-}, async (request) => {
-    const data = request.data as { oscId: string; editalId: string };
-    if (!data.oscId || !data.editalId) {
-        throw new Error("Missing oscId or editalId");
+import { onDocumentCreated } from 'firebase-functions/v2/firestore';
+
+export const onEditalCreated = onDocumentCreated('editais/{editalId}', async (event) => {
+    const editalSnapshot = event.data;
+    if (!editalSnapshot) {
+        console.log("No data associated with the event.");
+        return;
     }
 
+    const editalData = editalSnapshot.data() as z.infer<typeof editalSchema>;
+    const editalId = event.params.editalId;
     const db = getFirestore();
-    const oscDoc = await db.collection('oscs').doc(data.oscId).get();
-    const editalDoc = await db.collection('editais').doc(data.editalId).get();
 
-    if (!oscDoc.exists || !editalDoc.exists) {
-        throw new Error("OSC or Edital not found");
+        const oscsSnapshot = await db.collection('oscs').get();
+
+    const BATCH_SIZE = 10;
+    let successful = 0;
+    let failed = 0;
+
+    for (let i = 0; i < oscsSnapshot.docs.length; i += BATCH_SIZE) {
+        const chunk = oscsSnapshot.docs.slice(i, i + BATCH_SIZE);
+
+        const matchPromises = chunk.map(async (oscDoc) => {
+            const oscData = oscDoc.data() as z.infer<typeof ngoProfileSchema>;
+            const oscId = oscDoc.id;
+
+            try {
+                const matchResult = await scoreMatch({
+                    osc: oscData,
+                    edital: editalData,
+                    oscId: oscId,
+                    editalId: editalId
+                });
+
+                const matchRef = db.collection('matches').doc();
+                await matchRef.set({
+                    ...matchResult,
+                    id: matchRef.id,
+                    createdAt: FieldValue.serverTimestamp()
+                });
+                console.log(`Successfully processed match for OSC ${oscId} and Edital ${editalId}`);
+                return matchResult;
+            } catch (error) {
+                console.error(`Failed to process match for OSC ${oscId} and Edital ${editalId}`, error);
+                throw error; // Rethrow to be caught by allSettled
+            }
+        });
+
+        const results = await Promise.allSettled(matchPromises);
+        successful += results.filter(r => r.status === 'fulfilled').length;
+        failed += results.filter(r => r.status === 'rejected').length;
     }
 
-    const oscData = oscDoc.data();
-    const editalData = editalDoc.data();
-
-    // Call Genkit Flow
-    const matchResult = await scoreMatch({
-        osc: oscData as z.infer<typeof ngoProfileSchema>,
-        edital: editalData as z.infer<typeof editalSchema>,
-        oscId: data.oscId,
-        editalId: data.editalId
-    });
-
-    // Save to Firestore matches collection
-    const matchRef = db.collection('matches').doc();
-    await matchRef.set({
-        ...matchResult,
-        id: matchRef.id,
-        createdAt: FieldValue.serverTimestamp()
-    });
-
-    return { matchId: matchRef.id, ...matchResult };
+    console.log(`Batch matchmaking complete. ${successful} successful, ${failed} failed.`);
 });
