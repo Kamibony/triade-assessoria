@@ -1,0 +1,15 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /oscs/{osc} {
+      allow read, write: if true;
+    }
+    match /editais/{edital} {
+      allow read, write: if true;
+    }
+    match /matches/{match} {
+      allow read: if true;
+      allow write: if true;
+    }
+  }
+}
