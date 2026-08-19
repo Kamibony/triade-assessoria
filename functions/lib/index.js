@@ -33,7 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.extractEditalRulesFunction = exports.checkEligibilityFunction = exports.parsePdfProfileFunction = void 0;
+exports.triggerMatchOrchestrator = exports.extractEditalRulesFunction = exports.checkEligibilityFunction = exports.parsePdfProfileFunction = exports.matchSchema = void 0;
+const firestore_1 = require("firebase-admin/firestore");
 const admin = __importStar(require("firebase-admin"));
 const genkit_1 = require("genkit");
 const zod_1 = require("zod");
@@ -63,6 +64,14 @@ const editalSchema = zod_1.z.object({
         requiredDocumentation: zod_1.z.array(zod_1.z.string()).describe("Lista de documentações exigidas"),
         allowedActivities: zod_1.z.array(zod_1.z.string()).describe("Lista de atividades permitidas ou focos de atuação"),
     }).describe("Critérios de elegibilidade do edital")
+});
+exports.matchSchema = zod_1.z.object({
+    editalId: zod_1.z.string().describe("ID do edital analisado"),
+    oscId: zod_1.z.string().describe("ID da ONG analisada"),
+    matchScore: zod_1.z.number().min(0).max(100).describe("Score de match entre a ONG e o Edital (0 a 100)"),
+    eligibility: zod_1.z.boolean().describe("Se a ONG é elegível (true) ou não (false)"),
+    reasoning: zod_1.z.string().describe("Justificativa detalhada do AI para o score e elegibilidade"),
+    actionPlan: zod_1.z.array(zod_1.z.string()).optional().describe("Plano de Ação sugerido caso a ONG não seja elegível ou tenha score baixo")
 });
 const eligibilityResultSchema = zod_1.z.object({
     eligible: zod_1.z.boolean().describe("Se a ONG é elegível para o Edital nº 023/2026"),
@@ -128,6 +137,59 @@ Responda estritamente em português do Brasil (pt-BR).`;
     }
     return response.output;
 });
+const scoreMatch = ai.defineFlow({
+    name: 'scoreMatch',
+    inputSchema: zod_1.z.object({
+        osc: ngoProfileSchema,
+        edital: editalSchema,
+        oscId: zod_1.z.string(),
+        editalId: zod_1.z.string()
+    }),
+    outputSchema: exports.matchSchema,
+}, async (input) => {
+    const prompt = `Você é um agente especialista em avaliação de projetos culturais para leis de incentivo no Brasil, atuando pela Tríade Assessoria.
+
+A sua tarefa é cruzar os dados de uma ONG com as regras e critérios de elegibilidade de um Edital específico e determinar o Match (compatibilidade).
+
+Perfil da ONG:
+Nome: ${input.osc.name}
+Data de Fundação: ${input.osc.foundationDate}
+Localização: ${input.osc.location}
+Status da Documentação: ${input.osc.documentationStatus}
+Projetos Culturais Anteriores: ${input.osc.previousProjectsApproved ? 'Sim' : 'Não'}
+Atividades Principais: ${input.osc.coreActivities.join(', ')}
+
+Regras do Edital:
+Título: ${input.edital.title}
+Emissor: ${input.edital.issuer}
+Critérios de Elegibilidade:
+- Anos mínimos de atividade: ${input.edital.eligibilityCriteria.minYearsActive}
+- Localizações exigidas: ${input.edital.eligibilityCriteria.requiredLocations.join(', ')}
+- Documentação exigida: ${input.edital.eligibilityCriteria.requiredDocumentation.join(', ')}
+- Atividades permitidas: ${input.edital.eligibilityCriteria.allowedActivities.join(', ')}
+
+Avalie os critérios cruzando a ONG com o Edital.
+Gere um 'matchScore' de 0 a 100 indicando o grau de compatibilidade.
+Determine 'eligibility' (true ou false).
+Forneça um 'reasoning' (justificativa detalhada para a nota e elegibilidade).
+Se a ONG for INELEGÍVEL ou tiver nota baixa, você DEVE gerar um 'actionPlan' (Plano de Ação) estruturado.
+Responda estritamente em português do Brasil (pt-BR).
+`;
+    const response = await ai.generate({
+        model: 'vertexai/gemini-2.5-flash',
+        prompt: prompt,
+        output: { schema: exports.matchSchema }
+    });
+    if (!response.output) {
+        throw new Error("Falha ao gerar resultado de match");
+    }
+    // Garante que os IDs repassados na entrada retornem na saída
+    return {
+        ...response.output,
+        editalId: input.editalId,
+        oscId: input.oscId
+    };
+});
 exports.parsePdfProfileFunction = (0, https_1.onCall)({
     cors: true
 }, async (request) => {
@@ -149,6 +211,7 @@ Sua tarefa é ler atentamente o texto ou o documento PDF do edital fornecido e e
 
 Se alguma informação não estiver explícita, você deve tentar deduzir com base no contexto geral ou, se impossível, preencher de forma condizente. Não invente informações.
 Sempre retorne os dados no formato estruturado solicitado em português do Brasil (pt-BR).`;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const content = [{ text: prompt }];
     if (input.pdfBase64) {
         content.push({ media: { url: `data:application/pdf;base64,${input.pdfBase64}` } });
@@ -177,5 +240,36 @@ exports.extractEditalRulesFunction = (0, https_1.onCall)({
     cors: true
 }, async (request) => {
     return await extractEditalRules(request.data);
+});
+exports.triggerMatchOrchestrator = (0, https_1.onCall)({
+    cors: true
+}, async (request) => {
+    const data = request.data;
+    if (!data.oscId || !data.editalId) {
+        throw new Error("Missing oscId or editalId");
+    }
+    const db = (0, firestore_1.getFirestore)();
+    const oscDoc = await db.collection('oscs').doc(data.oscId).get();
+    const editalDoc = await db.collection('editais').doc(data.editalId).get();
+    if (!oscDoc.exists || !editalDoc.exists) {
+        throw new Error("OSC or Edital not found");
+    }
+    const oscData = oscDoc.data();
+    const editalData = editalDoc.data();
+    // Call Genkit Flow
+    const matchResult = await scoreMatch({
+        osc: oscData,
+        edital: editalData,
+        oscId: data.oscId,
+        editalId: data.editalId
+    });
+    // Save to Firestore matches collection
+    const matchRef = db.collection('matches').doc();
+    await matchRef.set({
+        ...matchResult,
+        id: matchRef.id,
+        createdAt: firestore_1.FieldValue.serverTimestamp()
+    });
+    return { matchId: matchRef.id, ...matchResult };
 });
 //# sourceMappingURL=index.js.map
