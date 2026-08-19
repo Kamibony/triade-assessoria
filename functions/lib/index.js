@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.checkEligibilityFunction = exports.parsePdfProfileFunction = void 0;
+exports.extractEditalRulesFunction = exports.checkEligibilityFunction = exports.parsePdfProfileFunction = void 0;
 const admin = __importStar(require("firebase-admin"));
 const genkit_1 = require("genkit");
 const zod_1 = require("zod");
@@ -50,6 +50,19 @@ const ngoProfileSchema = zod_1.z.object({
     documentationStatus: zod_1.z.enum(['Em dia', 'Pendente', 'Irregular']).describe("Status das certidões negativas e documentação básica"),
     previousProjectsApproved: zod_1.z.boolean().describe("Se a ONG já teve projetos culturais aprovados anteriormente"),
     coreActivities: zod_1.z.array(zod_1.z.string()).describe("Lista de atividades principais da ONG")
+});
+const editalSchema = zod_1.z.object({
+    title: zod_1.z.string().describe("Título do edital"),
+    issuer: zod_1.z.string().describe("Órgão emissor ou financiador do edital"),
+    publicationDate: zod_1.z.string().describe("Data de publicação do edital (YYYY-MM-DD)"),
+    deadline: zod_1.z.string().describe("Data limite para inscrições ou submissões (YYYY-MM-DD)"),
+    totalBudget: zod_1.z.number().describe("Orçamento total previsto no edital"),
+    eligibilityCriteria: zod_1.z.object({
+        minYearsActive: zod_1.z.number().describe("Mínimo de anos de atividade exigido da ONG"),
+        requiredLocations: zod_1.z.array(zod_1.z.string()).describe("Lista de estados ou cidades exigidos para participação (ex: ['PB', 'PE'])"),
+        requiredDocumentation: zod_1.z.array(zod_1.z.string()).describe("Lista de documentações exigidas"),
+        allowedActivities: zod_1.z.array(zod_1.z.string()).describe("Lista de atividades permitidas ou focos de atuação"),
+    }).describe("Critérios de elegibilidade do edital")
 });
 const eligibilityResultSchema = zod_1.z.object({
     eligible: zod_1.z.boolean().describe("Se a ONG é elegível para o Edital nº 023/2026"),
@@ -120,9 +133,49 @@ exports.parsePdfProfileFunction = (0, https_1.onCall)({
 }, async (request) => {
     return await parsePdfToProfile(request.data);
 });
+const extractEditalRules = ai.defineFlow({
+    name: 'extractEditalRules',
+    inputSchema: zod_1.z.object({
+        text: zod_1.z.string().optional().describe("Texto bruto do edital"),
+        pdfBase64: zod_1.z.string().optional().describe("Arquivo PDF do edital codificado em Base64"),
+    }),
+    outputSchema: editalSchema,
+}, async (input) => {
+    if (!input.text && !input.pdfBase64) {
+        throw new Error("É necessário fornecer 'text' ou 'pdfBase64' do edital.");
+    }
+    const prompt = `Você é um agente especialista em análise de editais governamentais e privados de financiamento (Grants/Tenders) no Brasil.
+Sua tarefa é ler atentamente o texto ou o documento PDF do edital fornecido e extrair com precisão as regras, informações financeiras, datas importantes e os critérios de elegibilidade para ONGs (Organizações da Sociedade Civil - OSCs).
+
+Se alguma informação não estiver explícita, você deve tentar deduzir com base no contexto geral ou, se impossível, preencher de forma condizente. Não invente informações.
+Sempre retorne os dados no formato estruturado solicitado em português do Brasil (pt-BR).`;
+    const content = [{ text: prompt }];
+    if (input.pdfBase64) {
+        content.push({ media: { url: `data:application/pdf;base64,${input.pdfBase64}` } });
+    }
+    else if (input.text) {
+        content.push({ text: `Texto do edital:\n\n${input.text}` });
+    }
+    const response = await ai.generate({
+        model: 'vertexai/gemini-2.5-flash',
+        messages: [
+            { role: 'user', content: content }
+        ],
+        output: { schema: editalSchema }
+    });
+    if (!response.output) {
+        throw new Error("Falha ao extrair as regras do edital");
+    }
+    return response.output;
+});
 exports.checkEligibilityFunction = (0, https_1.onCall)({
     cors: true
 }, async (request) => {
     return await eligibilityChecker(request.data);
+});
+exports.extractEditalRulesFunction = (0, https_1.onCall)({
+    cors: true
+}, async (request) => {
+    return await extractEditalRules(request.data);
 });
 //# sourceMappingURL=index.js.map
