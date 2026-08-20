@@ -53,6 +53,7 @@ export declare function processMatchEvaluation(oscId: string, editalId: string, 
     id: string;
     createdAt: FieldValue;
 } | null>;
+export declare const matchEvaluatorWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
 export declare const onEditalCreated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").QueryDocumentSnapshot | undefined, {
     editalId: string;
 }>>;
