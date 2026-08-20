@@ -264,12 +264,6 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
     if (!shouldRecalculate) {
         return existingMatchData;
     }
-    else if (!existingMatchData) {
-        shouldRecalculate = true;
-    }
-    if (!shouldRecalculate) {
-        return existingMatchData;
-    }
     console.log(`Evaluating match for OSC ${oscId} and Edital ${editalId}`);
     const matchResult = await scoreMatch({
         osc: oscData,
@@ -380,7 +374,7 @@ exports.onOscUpdated = (0, firestore_2.onDocumentUpdated)('oscs/{oscId}', async 
     await Promise.all(enqueuePromises);
     console.log(`Enqueued ${editaisSnapshot.docs.length} match tasks for OSC update ${oscId}.`);
 });
-exports.scheduledMatchSweeper = (0, scheduler_1.onSchedule)('every 1 weeks', async () => {
+exports.scheduledMatchSweeper = (0, scheduler_1.onSchedule)('0 0 * * 0', async () => {
     const db = (0, firestore_1.getFirestore)();
     const editaisSnapshot = await db.collection('editais').get();
     const oscsSnapshot = await db.collection('oscs').get();
