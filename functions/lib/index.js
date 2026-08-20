@@ -44,45 +44,18 @@ const zod_1 = require("zod");
 const google_genai_1 = require("@genkit-ai/google-genai");
 const https_1 = require("firebase-functions/v2/https");
 const tasks_1 = require("firebase-functions/v2/tasks");
+const schemas_js_1 = require("./shared/schemas.js");
+Object.defineProperty(exports, "matchSchema", { enumerable: true, get: function () { return schemas_js_1.matchSchema; } });
 admin.initializeApp();
 const ai = (0, genkit_1.genkit)({
     plugins: [(0, google_genai_1.vertexAI)({ projectId: process.env.GCLOUD_PROJECT || 'triade-assessoria', location: 'us-central1' })],
-});
-const ngoProfileSchema = zod_1.z.object({
-    name: zod_1.z.string().describe("Nome da ONG"),
-    foundationDate: zod_1.z.string().describe("Data de fundação da ONG (YYYY-MM-DD)"),
-    location: zod_1.z.string().describe("Localização da sede (Cidade/Estado)"),
-    documentationStatus: zod_1.z.enum(['Em dia', 'Pendente', 'Irregular']).describe("Status das certidões negativas e documentação básica"),
-    previousProjectsApproved: zod_1.z.boolean().describe("Se a ONG já teve projetos culturais aprovados anteriormente"),
-    coreActivities: zod_1.z.array(zod_1.z.string()).describe("Lista de atividades principais da ONG")
-});
-const editalSchema = zod_1.z.object({
-    title: zod_1.z.string().describe("Título do edital"),
-    issuer: zod_1.z.string().describe("Órgão emissor ou financiador do edital"),
-    publicationDate: zod_1.z.string().describe("Data de publicação do edital (YYYY-MM-DD)"),
-    deadline: zod_1.z.string().describe("Data limite para inscrições ou submissões (YYYY-MM-DD)"),
-    totalBudget: zod_1.z.number().describe("Orçamento total previsto no edital"),
-    eligibilityCriteria: zod_1.z.object({
-        minYearsActive: zod_1.z.number().describe("Mínimo de anos de atividade exigido da ONG"),
-        requiredLocations: zod_1.z.array(zod_1.z.string()).describe("Lista de estados ou cidades exigidos para participação (ex: ['PB', 'PE'])"),
-        requiredDocumentation: zod_1.z.array(zod_1.z.string()).describe("Lista de documentações exigidas"),
-        allowedActivities: zod_1.z.array(zod_1.z.string()).describe("Lista de atividades permitidas ou focos de atuação"),
-    }).describe("Critérios de elegibilidade do edital")
-});
-exports.matchSchema = zod_1.z.object({
-    editalId: zod_1.z.string().describe("ID do edital analisado"),
-    oscId: zod_1.z.string().describe("ID da ONG analisada"),
-    matchScore: zod_1.z.number().min(0).max(100).describe("Score de match entre a ONG e o Edital (0 a 100)"),
-    eligibility: zod_1.z.boolean().describe("Se a ONG é elegível (true) ou não (false)"),
-    reasoning: zod_1.z.string().describe("Justificativa detalhada do AI para o score e elegibilidade"),
-    actionPlan: zod_1.z.array(zod_1.z.string()).optional().describe("Plano de Ação sugerido caso a ONG não seja elegível ou tenha score baixo")
 });
 const parsePdfToProfile = ai.defineFlow({
     name: 'parsePdfToProfile',
     inputSchema: zod_1.z.object({
         pdfBase64: zod_1.z.string().describe("Arquivo PDF codificado em Base64"),
     }),
-    outputSchema: ngoProfileSchema,
+    outputSchema: schemas_js_1.ngoProfileSchema,
 }, async (input) => {
     const prompt = `Você é um especialista em análise de documentos legais de ONGs no Brasil.
 Eu enviarei o Estatuto Social ou Cartão CNPJ de uma ONG.
@@ -97,7 +70,7 @@ Sempre retorne os dados em português do Brasil (pt-BR).`;
                     { media: { url: `data:application/pdf;base64,${input.pdfBase64}` } }
                 ] }
         ],
-        output: { schema: ngoProfileSchema }
+        output: { schema: schemas_js_1.ngoProfileSchema }
     });
     if (!response.output) {
         throw new Error("Falha ao extrair dados do PDF");
@@ -107,12 +80,12 @@ Sempre retorne os dados em português do Brasil (pt-BR).`;
 const scoreMatch = ai.defineFlow({
     name: 'scoreMatch',
     inputSchema: zod_1.z.object({
-        osc: ngoProfileSchema,
-        edital: editalSchema,
+        osc: schemas_js_1.ngoProfileSchema,
+        edital: schemas_js_1.editalSchema,
         oscId: zod_1.z.string(),
         editalId: zod_1.z.string()
     }),
-    outputSchema: exports.matchSchema,
+    outputSchema: schemas_js_1.matchSchema,
 }, async (input) => {
     const prompt = `Você é um agente especialista em avaliação de projetos culturais para leis de incentivo no Brasil, atuando pela Tríade Assessoria.
 
@@ -145,7 +118,7 @@ Responda estritamente em português do Brasil (pt-BR).
     const response = await ai.generate({
         model: 'vertexai/gemini-2.5-flash',
         prompt: prompt,
-        output: { schema: exports.matchSchema }
+        output: { schema: schemas_js_1.matchSchema }
     });
     if (!response.output) {
         throw new Error("Falha ao gerar resultado de match");
@@ -171,7 +144,7 @@ const extractEditalRules = ai.defineFlow({
         text: zod_1.z.string().optional().describe("Texto bruto do edital"),
         pdfBase64: zod_1.z.string().optional().describe("Arquivo PDF do edital codificado em Base64"),
     }),
-    outputSchema: editalSchema,
+    outputSchema: schemas_js_1.editalSchema,
 }, async (input) => {
     if (!input.text && !input.pdfBase64) {
         throw new Error("É necessário fornecer 'text' ou 'pdfBase64' do edital.");
@@ -194,7 +167,7 @@ Sempre retorne os dados no formato estruturado solicitado em português do Brasi
         messages: [
             { role: 'user', content: content }
         ],
-        output: { schema: editalSchema }
+        output: { schema: schemas_js_1.editalSchema }
     });
     if (!response.output) {
         throw new Error("Falha ao extrair as regras do edital");
@@ -221,8 +194,8 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
     const rawOscData = oscDoc.data();
     const rawEditalData = editalDoc.data();
     // Fix 4: Dirty Data Resilience (use safeParse)
-    const oscParseResult = ngoProfileSchema.safeParse(rawOscData);
-    const editalParseResult = editalSchema.safeParse(rawEditalData);
+    const oscParseResult = schemas_js_1.ngoProfileSchema.safeParse(rawOscData);
+    const editalParseResult = schemas_js_1.editalSchema.safeParse(rawEditalData);
     if (!oscParseResult.success) {
         console.warn(`Invalid OSC data for ${oscId}:`, oscParseResult.error);
         throw new Error(`Invalid OSC data for ${oscId}`);
@@ -284,6 +257,12 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
             // Missing createdAt timestamp
             shouldRecalculate = true;
         }
+    }
+    else if (!existingMatchData) {
+        shouldRecalculate = true;
+    }
+    if (!shouldRecalculate) {
+        return existingMatchData;
     }
     else if (!existingMatchData) {
         shouldRecalculate = true;

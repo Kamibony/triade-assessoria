@@ -1,0 +1,93 @@
+import { z } from 'zod';
+export declare const ngoProfileSchema: z.ZodObject<{
+    name: z.ZodString;
+    foundationDate: z.ZodString;
+    location: z.ZodString;
+    documentationStatus: z.ZodEnum<["Em dia", "Pendente", "Irregular"]>;
+    previousProjectsApproved: z.ZodBoolean;
+    coreActivities: z.ZodArray<z.ZodString, "many">;
+}, "strip", z.ZodTypeAny, {
+    name: string;
+    foundationDate: string;
+    location: string;
+    documentationStatus: "Em dia" | "Irregular" | "Pendente";
+    previousProjectsApproved: boolean;
+    coreActivities: string[];
+}, {
+    name: string;
+    foundationDate: string;
+    location: string;
+    documentationStatus: "Em dia" | "Irregular" | "Pendente";
+    previousProjectsApproved: boolean;
+    coreActivities: string[];
+}>;
+export declare const editalSchema: z.ZodObject<{
+    title: z.ZodString;
+    issuer: z.ZodString;
+    publicationDate: z.ZodString;
+    deadline: z.ZodString;
+    totalBudget: z.ZodNumber;
+    eligibilityCriteria: z.ZodObject<{
+        minYearsActive: z.ZodNumber;
+        requiredLocations: z.ZodArray<z.ZodString, "many">;
+        requiredDocumentation: z.ZodArray<z.ZodString, "many">;
+        allowedActivities: z.ZodArray<z.ZodString, "many">;
+    }, "strip", z.ZodTypeAny, {
+        minYearsActive: number;
+        requiredLocations: string[];
+        requiredDocumentation: string[];
+        allowedActivities: string[];
+    }, {
+        minYearsActive: number;
+        requiredLocations: string[];
+        requiredDocumentation: string[];
+        allowedActivities: string[];
+    }>;
+}, "strip", z.ZodTypeAny, {
+    title: string;
+    issuer: string;
+    publicationDate: string;
+    deadline: string;
+    totalBudget: number;
+    eligibilityCriteria: {
+        minYearsActive: number;
+        requiredLocations: string[];
+        requiredDocumentation: string[];
+        allowedActivities: string[];
+    };
+}, {
+    title: string;
+    issuer: string;
+    publicationDate: string;
+    deadline: string;
+    totalBudget: number;
+    eligibilityCriteria: {
+        minYearsActive: number;
+        requiredLocations: string[];
+        requiredDocumentation: string[];
+        allowedActivities: string[];
+    };
+}>;
+export declare const matchSchema: z.ZodObject<{
+    editalId: z.ZodString;
+    oscId: z.ZodString;
+    matchScore: z.ZodNumber;
+    eligibility: z.ZodBoolean;
+    reasoning: z.ZodString;
+    actionPlan: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+}, "strip", z.ZodTypeAny, {
+    editalId: string;
+    oscId: string;
+    matchScore: number;
+    eligibility: boolean;
+    reasoning: string;
+    actionPlan?: string[] | undefined;
+}, {
+    editalId: string;
+    oscId: string;
+    matchScore: number;
+    eligibility: boolean;
+    reasoning: string;
+    actionPlan?: string[] | undefined;
+}>;
+//# sourceMappingURL=schemas.d.ts.map
