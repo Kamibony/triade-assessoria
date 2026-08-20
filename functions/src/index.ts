@@ -1,3 +1,4 @@
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import * as admin from 'firebase-admin';
 import { genkit } from 'genkit';
@@ -207,7 +208,68 @@ export const extractEditalRulesFunction = onCall({
 
 
 
-import { onDocumentCreated } from 'firebase-functions/v2/firestore';
+import { onDocumentCreated, onDocumentUpdated } from 'firebase-functions/v2/firestore';
+
+
+export async function processMatchEvaluation(oscId: string, editalId: string, forceRecalculate: boolean = false) {
+    const db = getFirestore();
+
+    // Fetch OSC and Edital
+    const oscDoc = await db.collection('oscs').doc(oscId).get();
+    const editalDoc = await db.collection('editais').doc(editalId).get();
+
+    if (!oscDoc.exists || !editalDoc.exists) {
+        throw new Error(`OSC (${oscId}) or Edital (${editalId}) not found`);
+    }
+
+    const oscData = oscDoc.data() as z.infer<typeof ngoProfileSchema> & { updatedAt?: { toMillis: () => number, seconds?: number } };
+    const editalData = editalDoc.data() as z.infer<typeof editalSchema> & { updatedAt?: { toMillis: () => number, seconds?: number } };
+
+    // Check for existing match
+    const matchesQuery = await db.collection('matches')
+        .where('oscId', '==', oscId)
+        .where('editalId', '==', editalId)
+        .limit(1)
+        .get();
+
+    let existingMatchRef: FirebaseFirestore.DocumentReference | null = null;
+    let existingMatchData: Record<string, unknown> | null = null;
+
+    if (!matchesQuery.empty) {
+        existingMatchRef = matchesQuery.docs[0]?.ref || null;
+        existingMatchData = matchesQuery.docs[0]?.data() || null;
+    }
+
+    // Cache logic
+    if (!forceRecalculate && existingMatchData && existingMatchData.createdAt && (existingMatchData.createdAt as { toMillis?: () => number }).toMillis) {
+        const matchTime = (existingMatchData.createdAt as { toMillis: () => number }).toMillis();
+        const oscUpdateTime = oscData.updatedAt && oscData.updatedAt.toMillis ? oscData.updatedAt.toMillis() : 0;
+        const editalUpdateTime = editalData.updatedAt && editalData.updatedAt.toMillis ? editalData.updatedAt.toMillis() : 0;
+
+        if (matchTime >= oscUpdateTime && matchTime >= editalUpdateTime) {
+            console.log(`Returning cached match for OSC ${oscId} and Edital ${editalId}`);
+            return existingMatchData;
+        }
+    }
+
+    console.log(`Evaluating match for OSC ${oscId} and Edital ${editalId}`);
+    const matchResult = await scoreMatch({
+        osc: oscData,
+        edital: editalData,
+        oscId: oscId,
+        editalId: editalId
+    });
+
+    const matchRef = existingMatchRef || db.collection('matches').doc();
+    const matchDocData = {
+        ...matchResult,
+        id: matchRef.id,
+        createdAt: FieldValue.serverTimestamp()
+    };
+
+    await matchRef.set(matchDocData, { merge: true });
+    return matchDocData;
+}
 
 export const onEditalCreated = onDocumentCreated('editais/{editalId}', async (event) => {
     const editalSnapshot = event.data;
@@ -216,11 +278,9 @@ export const onEditalCreated = onDocumentCreated('editais/{editalId}', async (ev
         return;
     }
 
-    const editalData = editalSnapshot.data() as z.infer<typeof editalSchema>;
     const editalId = event.params.editalId;
     const db = getFirestore();
-
-        const oscsSnapshot = await db.collection('oscs').get();
+    const oscsSnapshot = await db.collection('oscs').get();
 
     const BATCH_SIZE = 10;
     let successful = 0;
@@ -230,28 +290,14 @@ export const onEditalCreated = onDocumentCreated('editais/{editalId}', async (ev
         const chunk = oscsSnapshot.docs.slice(i, i + BATCH_SIZE);
 
         const matchPromises = chunk.map(async (oscDoc) => {
-            const oscData = oscDoc.data() as z.infer<typeof ngoProfileSchema>;
             const oscId = oscDoc.id;
-
             try {
-                const matchResult = await scoreMatch({
-                    osc: oscData,
-                    edital: editalData,
-                    oscId: oscId,
-                    editalId: editalId
-                });
-
-                const matchRef = db.collection('matches').doc();
-                await matchRef.set({
-                    ...matchResult,
-                    id: matchRef.id,
-                    createdAt: FieldValue.serverTimestamp()
-                });
+                const matchResult = await processMatchEvaluation(oscId, editalId);
                 console.log(`Successfully processed match for OSC ${oscId} and Edital ${editalId}`);
                 return matchResult;
             } catch (error) {
                 console.error(`Failed to process match for OSC ${oscId} and Edital ${editalId}`, error);
-                throw error; // Rethrow to be caught by allSettled
+                throw error;
             }
         });
 
@@ -261,4 +307,118 @@ export const onEditalCreated = onDocumentCreated('editais/{editalId}', async (ev
     }
 
     console.log(`Batch matchmaking complete. ${successful} successful, ${failed} failed.`);
+});
+
+
+export const triggerMatchOrchestrator = onCall({
+    cors: true
+}, async (request) => {
+    if (!request.auth) {
+        throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    }
+
+    const { editalId, oscId, forceRecalculate } = request.data;
+
+    if (!editalId || !oscId) {
+        throw new HttpsError('invalid-argument', 'Missing editalId or oscId.');
+    }
+
+    try {
+        const matchResult = await processMatchEvaluation(oscId, editalId, forceRecalculate);
+        return matchResult;
+    } catch (error: unknown) {
+        console.error('Error generating match:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Internal error generating match.';
+        throw new HttpsError('internal', errorMessage);
+    }
+});
+
+
+export const onOscUpdated = onDocumentUpdated('oscs/{oscId}', async (event) => {
+    const oscSnapshot = event.data?.after;
+    if (!oscSnapshot) {
+        console.log("No data associated with the event.");
+        return;
+    }
+
+    const oscId = event.params.oscId;
+    const db = getFirestore();
+
+    // Fetch all open editais (assuming we might want a status check, for now fetch all)
+    // Actually we will just fetch all editais for simplicity based on the current schema logic
+    const editaisSnapshot = await db.collection('editais').get();
+
+    const BATCH_SIZE = 10;
+    let successful = 0;
+    let failed = 0;
+
+    for (let i = 0; i < editaisSnapshot.docs.length; i += BATCH_SIZE) {
+        const chunk = editaisSnapshot.docs.slice(i, i + BATCH_SIZE);
+
+        const matchPromises = chunk.map(async (editalDoc) => {
+            const editalId = editalDoc.id;
+            try {
+                const matchResult = await processMatchEvaluation(oscId, editalId);
+                console.log(`Successfully processed match for OSC ${oscId} and Edital ${editalId}`);
+                return matchResult;
+            } catch (error) {
+                console.error(`Failed to process match for OSC ${oscId} and Edital ${editalId}`, error);
+                throw error;
+            }
+        });
+
+        const results = await Promise.allSettled(matchPromises);
+        successful += results.filter(r => r.status === 'fulfilled').length;
+        failed += results.filter(r => r.status === 'rejected').length;
+    }
+
+    console.log(`Batch matchmaking complete for OSC update. ${successful} successful, ${failed} failed.`);
+});
+
+
+export const scheduledMatchSweeper = onSchedule('every 1 weeks', async () => {
+    const db = getFirestore();
+    const editaisSnapshot = await db.collection('editais').get();
+    const oscsSnapshot = await db.collection('oscs').get();
+
+    const oscIds = oscsSnapshot.docs.map(doc => doc.id);
+    let successful = 0;
+    let failed = 0;
+    const BATCH_SIZE = 10;
+
+    for (const editalDoc of editaisSnapshot.docs) {
+        const editalId = editalDoc.id;
+
+        // Check which OSCs already have matches for this Edital
+        const matchesQuery = await db.collection('matches')
+            .where('editalId', '==', editalId)
+            .get();
+
+        const matchedOscIds = new Set(matchesQuery.docs.map(doc => doc.data().oscId));
+
+        // Find missing oscIds
+        const missingOscIds = oscIds.filter(id => !matchedOscIds.has(id));
+
+        console.log(`Sweeping ${missingOscIds.length} missing matches for Edital ${editalId}`);
+
+        for (let i = 0; i < missingOscIds.length; i += BATCH_SIZE) {
+            const chunk = missingOscIds.slice(i, i + BATCH_SIZE);
+
+            const matchPromises = chunk.map(async (oscId) => {
+                try {
+                    const matchResult = await processMatchEvaluation(oscId, editalId);
+                    return matchResult;
+                } catch (error) {
+                    console.error(`Sweeper failed for OSC ${oscId} and Edital ${editalId}`, error);
+                    throw error;
+                }
+            });
+
+            const results = await Promise.allSettled(matchPromises);
+            successful += results.filter(r => r.status === 'fulfilled').length;
+            failed += results.filter(r => r.status === 'rejected').length;
+        }
+    }
+
+    console.log(`Weekly sweeper complete. ${successful} successful, ${failed} failed.`);
 });

@@ -1,3 +1,4 @@
+import { FieldValue } from 'firebase-admin/firestore';
 import { z } from 'zod';
 export declare const matchSchema: z.ZodObject<{
     editalId: z.ZodString;
@@ -42,7 +43,31 @@ export declare const extractEditalRulesFunction: import("firebase-functions/v2/h
         allowedActivities: string[];
     };
 }>, unknown>;
+export declare function processMatchEvaluation(oscId: string, editalId: string, forceRecalculate?: boolean): Promise<Record<string, unknown> | {
+    editalId: string;
+    oscId: string;
+    matchScore: number;
+    eligibility: boolean;
+    reasoning: string;
+    actionPlan?: string[] | undefined;
+    id: string;
+    createdAt: FieldValue;
+}>;
 export declare const onEditalCreated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").QueryDocumentSnapshot | undefined, {
     editalId: string;
 }>>;
+export declare const triggerMatchOrchestrator: import("firebase-functions/v2/https").CallableFunction<any, Promise<Record<string, unknown> | {
+    editalId: string;
+    oscId: string;
+    matchScore: number;
+    eligibility: boolean;
+    reasoning: string;
+    actionPlan?: string[] | undefined;
+    id: string;
+    createdAt: FieldValue;
+}>, unknown>;
+export declare const onOscUpdated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").Change<import("firebase-functions/v2/firestore").QueryDocumentSnapshot> | undefined, {
+    oscId: string;
+}>>;
+export declare const scheduledMatchSweeper: import("firebase-functions/v2/scheduler").ScheduleFunction;
 //# sourceMappingURL=index.d.ts.map
