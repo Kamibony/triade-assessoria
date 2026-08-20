@@ -407,7 +407,7 @@ export const onOscUpdated = onDocumentUpdated('oscs/{oscId}', async (event) => {
 });
 
 
-export const scheduledMatchSweeper = onSchedule('every 1 weeks', async () => {
+export const scheduledMatchSweeper = onSchedule('0 0 * * 0', async () => {
     const db = getFirestore();
     const editaisSnapshot = await db.collection('editais').get();
     const oscsSnapshot = await db.collection('oscs').get();
