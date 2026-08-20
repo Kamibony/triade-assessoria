@@ -264,6 +264,12 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
     if (!shouldRecalculate) {
         return existingMatchData;
     }
+    else if (!existingMatchData) {
+        shouldRecalculate = true;
+    }
+    if (!shouldRecalculate) {
+        return existingMatchData;
+    }
     console.log(`Evaluating match for OSC ${oscId} and Edital ${editalId}`);
     const matchResult = await scoreMatch({
         osc: oscData,
