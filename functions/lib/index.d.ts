@@ -1,27 +1,6 @@
 import { FieldValue } from 'firebase-admin/firestore';
-import { z } from 'zod';
-export declare const matchSchema: z.ZodObject<{
-    editalId: z.ZodString;
-    oscId: z.ZodString;
-    matchScore: z.ZodNumber;
-    eligibility: z.ZodBoolean;
-    reasoning: z.ZodString;
-    actionPlan: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
-}, "strip", z.ZodTypeAny, {
-    editalId: string;
-    oscId: string;
-    matchScore: number;
-    eligibility: boolean;
-    reasoning: string;
-    actionPlan?: string[] | undefined;
-}, {
-    editalId: string;
-    oscId: string;
-    matchScore: number;
-    eligibility: boolean;
-    reasoning: string;
-    actionPlan?: string[] | undefined;
-}>;
+import { matchSchema } from './shared/schemas.js';
+export { matchSchema };
 export declare const parsePdfProfileFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     name: string;
     foundationDate: string;
@@ -52,7 +31,8 @@ export declare function processMatchEvaluation(oscId: string, editalId: string, 
     actionPlan?: string[] | undefined;
     id: string;
     createdAt: FieldValue;
-}>;
+} | null>;
+export declare const matchEvaluatorWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
 export declare const onEditalCreated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").QueryDocumentSnapshot | undefined, {
     editalId: string;
 }>>;
@@ -65,7 +45,7 @@ export declare const triggerMatchOrchestrator: import("firebase-functions/v2/htt
     actionPlan?: string[] | undefined;
     id: string;
     createdAt: FieldValue;
-}>, unknown>;
+} | null>, unknown>;
 export declare const onOscUpdated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").Change<import("firebase-functions/v2/firestore").QueryDocumentSnapshot> | undefined, {
     oscId: string;
 }>>;

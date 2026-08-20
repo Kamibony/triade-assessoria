@@ -1,35 +1,11 @@
-export interface NgoProfile {
-    id: string;
-    name: string;
-    foundationDate: string;
-    location: string;
-    documentationStatus: 'Em dia' | 'Pendente' | 'Irregular';
-    previousProjectsApproved: boolean;
-    coreActivities: string[];
-}
+import { z } from 'zod';
+import { ngoProfileSchema, editalSchema, matchSchema } from '../../functions/src/shared/schemas';
 
-export interface Edital {
-    id: string;
-    title: string;
-    issuer: string;
-    publicationDate: string;
-    deadline: string;
-    totalBudget: number;
-    eligibilityCriteria: {
-        minYearsActive: number;
-        requiredLocations: string[];
-        requiredDocumentation: string[];
-        allowedActivities: string[];
-    };
-}
+export type NgoProfile = z.infer<typeof ngoProfileSchema> & { id: string };
 
-export interface MatchResult {
+export type Edital = z.infer<typeof editalSchema> & { id: string };
+
+export type MatchResult = z.infer<typeof matchSchema> & {
     id?: string;
-    editalId: string;
-    oscId: string;
-    matchScore: number;
-    eligibility: boolean;
-    reasoning: string;
-    actionPlan?: string[];
     createdAt?: { toMillis?: () => number; seconds?: number; nanoseconds?: number; };
-}
+};
