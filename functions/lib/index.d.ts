@@ -33,6 +33,13 @@ export declare function processMatchEvaluation(oscId: string, editalId: string, 
     createdAt: FieldValue;
 } | null>;
 export declare const matchEvaluatorWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
+export declare const ingestOscDataFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    results: {
+        cnpj: string;
+        status: string;
+        error?: string;
+    }[];
+}>, unknown>;
 export declare const onEditalCreated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").QueryDocumentSnapshot | undefined, {
     editalId: string;
 }>>;

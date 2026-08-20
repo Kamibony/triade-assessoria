@@ -315,6 +315,90 @@ export const matchEvaluatorWorker = onTaskDispatched({
 });
 
 
+export const ingestOscDataFunction = onCall({
+    cors: true,
+    timeoutSeconds: 540,
+}, async (request) => {
+    if (!request.auth) {
+        throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    }
+
+    const { cnpjs } = request.data as { cnpjs?: string[] };
+    if (!cnpjs || !Array.isArray(cnpjs) || cnpjs.length === 0) {
+        throw new HttpsError('invalid-argument', 'A list of CNPJs is required.');
+    }
+
+    const db = getFirestore();
+    const results: { cnpj: string; status: string; error?: string }[] = [];
+
+    for (const cnpj of cnpjs) {
+        try {
+            // Clean CNPJ (remove non-digits)
+            const cleanCnpj = cnpj.replace(/\D/g, '');
+            if (cleanCnpj.length !== 14) {
+                results.push({ cnpj, status: 'error', error: 'Invalid CNPJ length' });
+                continue;
+            }
+
+            const response = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cleanCnpj}`);
+            if (!response.ok) {
+                results.push({ cnpj, status: 'error', error: `BrasilAPI returned ${response.status}` });
+                continue;
+            }
+
+            const rawData = await response.json();
+
+            // Transform data to match ngoProfileSchema
+            const name = rawData.razao_social || 'Nome Desconhecido';
+            const foundationDate = rawData.data_inicio_atividade || new Date().toISOString().split('T')[0];
+            const city = rawData.municipio || 'Cidade Desconhecida';
+            const state = rawData.uf || 'UF';
+            const location = `${city}/${state}`;
+
+            // Add dummy data for required fields not in BrasilAPI
+            const transformedData = {
+                name,
+                foundationDate,
+                location,
+                documentationStatus: 'Pendente',
+                previousProjectsApproved: false,
+                coreActivities: ['Assistência Social', 'Educação'], // Default dummy activities
+            };
+
+            const parseResult = ngoProfileSchema.safeParse(transformedData);
+            if (!parseResult.success) {
+                results.push({ cnpj, status: 'error', error: 'Failed schema validation', });
+                console.warn(`Validation failed for CNPJ ${cnpj}:`, parseResult.error);
+                continue;
+            }
+
+            const oscRef = db.collection('oscs').doc(cleanCnpj);
+            const oscDoc = await oscRef.get();
+            const now = FieldValue.serverTimestamp();
+
+            const upsertData = {
+                ...parseResult.data,
+                cnpj: cleanCnpj,
+                updatedAt: now,
+            };
+
+            if (!oscDoc.exists) {
+                Object.assign(upsertData, { createdAt: now });
+            }
+
+            await oscRef.set(upsertData, { merge: true });
+            results.push({ cnpj, status: 'success' });
+
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            results.push({ cnpj, status: 'error', error: errorMessage });
+            console.error(`Error processing CNPJ ${cnpj}:`, error);
+        }
+    }
+
+    return { results };
+});
+
 export const onEditalCreated = onDocumentCreated('editais/{editalId}', async (event) => {
     const editalSnapshot = event.data;
     if (!editalSnapshot) {
