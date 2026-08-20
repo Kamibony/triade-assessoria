@@ -52,7 +52,7 @@ export declare function processMatchEvaluation(oscId: string, editalId: string, 
     actionPlan?: string[] | undefined;
     id: string;
     createdAt: FieldValue;
-}>;
+} | null>;
 export declare const onEditalCreated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").QueryDocumentSnapshot | undefined, {
     editalId: string;
 }>>;
@@ -65,7 +65,7 @@ export declare const triggerMatchOrchestrator: import("firebase-functions/v2/htt
     actionPlan?: string[] | undefined;
     id: string;
     createdAt: FieldValue;
-}>, unknown>;
+} | null>, unknown>;
 export declare const onOscUpdated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").Change<import("firebase-functions/v2/firestore").QueryDocumentSnapshot> | undefined, {
     oscId: string;
 }>>;

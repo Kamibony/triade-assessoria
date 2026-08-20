@@ -44,7 +44,7 @@ const google_genai_1 = require("@genkit-ai/google-genai");
 const https_1 = require("firebase-functions/v2/https");
 admin.initializeApp();
 const ai = (0, genkit_1.genkit)({
-    plugins: [(0, google_genai_1.vertexAI)({ projectId: 'triade-assessoria', location: 'us-central1' })],
+    plugins: [(0, google_genai_1.vertexAI)({ projectId: process.env.GCLOUD_PROJECT || 'triade-assessoria', location: 'us-central1' })],
 });
 const ngoProfileSchema = zod_1.z.object({
     name: zod_1.z.string().describe("Nome da ONG"),
@@ -216,8 +216,21 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
     if (!oscDoc.exists || !editalDoc.exists) {
         throw new Error(`OSC (${oscId}) or Edital (${editalId}) not found`);
     }
-    const oscData = oscDoc.data();
-    const editalData = editalDoc.data();
+    const rawOscData = oscDoc.data();
+    const rawEditalData = editalDoc.data();
+    // Fix 4: Dirty Data Resilience (use safeParse)
+    const oscParseResult = ngoProfileSchema.safeParse(rawOscData);
+    const editalParseResult = editalSchema.safeParse(rawEditalData);
+    if (!oscParseResult.success) {
+        console.warn(`Invalid OSC data for ${oscId}:`, oscParseResult.error);
+        throw new Error(`Invalid OSC data for ${oscId}`);
+    }
+    if (!editalParseResult.success) {
+        console.warn(`Invalid Edital data for ${editalId}:`, editalParseResult.error);
+        throw new Error(`Invalid Edital data for ${editalId}`);
+    }
+    const oscData = oscParseResult.data;
+    const editalData = editalParseResult.data;
     // Check for existing match
     const matchesQuery = await db.collection('matches')
         .where('oscId', '==', oscId)
@@ -230,15 +243,51 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
         existingMatchRef = matchesQuery.docs[0]?.ref || null;
         existingMatchData = matchesQuery.docs[0]?.data() || null;
     }
-    // Cache logic
-    if (!forceRecalculate && existingMatchData && existingMatchData.createdAt && existingMatchData.createdAt.toMillis) {
-        const matchTime = existingMatchData.createdAt.toMillis();
-        const oscUpdateTime = oscData.updatedAt && oscData.updatedAt.toMillis ? oscData.updatedAt.toMillis() : 0;
-        const editalUpdateTime = editalData.updatedAt && editalData.updatedAt.toMillis ? editalData.updatedAt.toMillis() : 0;
-        if (matchTime >= oscUpdateTime && matchTime >= editalUpdateTime) {
-            console.log(`Returning cached match for OSC ${oscId} and Edital ${editalId}`);
-            return existingMatchData;
+    // Helper for safe timestamp extraction
+    const getMillis = (field) => {
+        if (!field)
+            return null;
+        if (typeof field.toMillis === 'function')
+            return field.toMillis();
+        if (field instanceof Date)
+            return field.getTime();
+        if (typeof field === 'string' || typeof field === 'number') {
+            const date = new Date(field);
+            if (!isNaN(date.getTime()))
+                return date.getTime();
         }
+        return null;
+    };
+    // Fix 6: Robust timestamp validation for caching
+    let shouldRecalculate = forceRecalculate;
+    if (!shouldRecalculate && existingMatchData) {
+        if (existingMatchData.createdAt) {
+            const matchTime = getMillis(existingMatchData.createdAt);
+            const oscUpdateTime = getMillis(rawOscData?.updatedAt);
+            const editalUpdateTime = getMillis(rawEditalData?.updatedAt);
+            // If we can't reliably determine any timestamp, force recalculation
+            if (matchTime === null || oscUpdateTime === null || editalUpdateTime === null) {
+                shouldRecalculate = true;
+            }
+            else if (matchTime >= oscUpdateTime && matchTime >= editalUpdateTime) {
+                console.log(`Returning cached match for OSC ${oscId} and Edital ${editalId}`);
+                return existingMatchData;
+            }
+            else {
+                // Cache is stale
+                shouldRecalculate = true;
+            }
+        }
+        else {
+            // Missing createdAt timestamp
+            shouldRecalculate = true;
+        }
+    }
+    else if (!existingMatchData) {
+        shouldRecalculate = true;
+    }
+    if (!shouldRecalculate) {
+        return existingMatchData;
     }
     console.log(`Evaluating match for OSC ${oscId} and Edital ${editalId}`);
     const matchResult = await scoreMatch({
@@ -310,8 +359,18 @@ exports.triggerMatchOrchestrator = (0, https_1.onCall)({
 });
 exports.onOscUpdated = (0, firestore_2.onDocumentUpdated)('oscs/{oscId}', async (event) => {
     const oscSnapshot = event.data?.after;
-    if (!oscSnapshot) {
+    const oscBefore = event.data?.before;
+    if (!oscSnapshot || !oscBefore) {
         console.log("No data associated with the event.");
+        return;
+    }
+    const beforeData = oscBefore.data();
+    const afterData = oscSnapshot.data();
+    // Fix 1: Trigger Cascades - Strict diff check
+    const criticalFields = ['location', 'coreActivities', 'documentationStatus', 'foundationDate', 'previousProjectsApproved'];
+    const hasCriticalChanges = criticalFields.some(field => JSON.stringify(beforeData[field]) !== JSON.stringify(afterData[field]));
+    if (!hasCriticalChanges) {
+        console.log(`No critical fields changed for OSC ${event.params.oscId}. Skipping match evaluation.`);
         return;
     }
     const oscId = event.params.oscId;
