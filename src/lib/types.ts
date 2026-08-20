@@ -31,4 +31,5 @@ export interface MatchResult {
     eligibility: boolean;
     reasoning: string;
     actionPlan?: string[];
+    createdAt?: { toMillis?: () => number; seconds?: number; nanoseconds?: number; };
 }

@@ -3,16 +3,10 @@ import { useParams, Link } from 'react-router-dom';
 import { collection, query, where, getDocs, getFirestore } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../lib/firebase';
-import { Loader2, CheckCircle, XCircle, ArrowLeft, FileText } from 'lucide-react';
+import { Loader2, CheckCircle, XCircle, ArrowLeft, FileText, Clock, RefreshCw } from 'lucide-react';
 import { motion } from 'framer-motion';
+import type { MatchResult } from '../lib/types';
 
-interface MatchResult {
-    id?: string;
-    matchScore: number;
-    eligibility: boolean;
-    reasoning: string;
-    actionPlan?: string[];
-}
 
 export function NgoMatchView() {
     const { editalId } = useParams();
@@ -48,11 +42,11 @@ export function NgoMatchView() {
         fetchMatch();
     }, [editalId]);
 
-    const handleGenerateMatch = async () => {
+    const handleGenerateMatch = async (forceRecalculate: boolean = false) => {
         setGenerating(true);
         try {
             const orchestrator = httpsCallable(functions, 'triggerMatchOrchestrator');
-            const response = await orchestrator({ editalId, oscId: currentOscId });
+            const response = await orchestrator({ editalId, oscId: currentOscId, forceRecalculate });
             setMatch(response.data as MatchResult);
         } catch (error) {
             console.error("Error generating match:", error);
@@ -60,6 +54,21 @@ export function NgoMatchView() {
         } finally {
             setGenerating(false);
         }
+    };
+
+    const formatTimeAgo = (timestamp: { toMillis?: () => number, seconds?: number }) => {
+        if (!timestamp) return "Data desconhecida";
+        // Handle both Firestore Timestamp and JS Date/millis
+        const millis = timestamp.toMillis ? timestamp.toMillis() : (timestamp.seconds ? timestamp.seconds * 1000 : Number(timestamp));
+
+        // When forcing a recalculate, the server timestamp sentinel comes back unparsed, making millis NaN.
+        if (isNaN(millis)) return "Agora mesmo";
+
+        const now = new Date().getTime();
+        const diffDays = Math.floor((now - millis) / (1000 * 60 * 60 * 24));
+        if (diffDays === 0) return "Hoje";
+        if (diffDays === 1) return "Ontem";
+        return `${diffDays} dias atrás`;
     };
 
     if (loading) {
@@ -78,7 +87,7 @@ export function NgoMatchView() {
                         <h2 className="text-2xl font-bold mb-4">Análise de Compatibilidade</h2>
                         <p className="text-muted-foreground mb-8">O sistema de Inteligência Artificial ainda não analisou o seu perfil para este edital específico.</p>
                         <button
-                            onClick={handleGenerateMatch}
+                            onClick={() => handleGenerateMatch(false)}
                             disabled={generating}
                             className="bg-primary text-primary-foreground px-8 py-3 rounded-full font-bold text-lg hover:opacity-90 transition-opacity flex items-center gap-2 mx-auto disabled:opacity-50"
                         >
@@ -87,8 +96,27 @@ export function NgoMatchView() {
                     </div>
                 ) : (
                     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-                         <div className="flex flex-col items-center mb-8 text-center border-b pb-8">
-                             <div className="flex items-center justify-center w-32 h-32 rounded-full border-8 mb-4 relative" style={{ borderColor: `hsl(var(--muted))` }}>
+                         <div className="flex flex-col items-center mb-8 text-center border-b pb-8 relative">
+                             {/* Cache Info & Override */}
+                             <div className="absolute top-0 right-0 flex flex-col items-end gap-2">
+                                 {match.createdAt && (
+                                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-full">
+                                         <Clock className="w-3.5 h-3.5" />
+                                         <span>Calculado: {formatTimeAgo(match.createdAt)}</span>
+                                     </div>
+                                 )}
+                                 <button
+                                     onClick={() => handleGenerateMatch(true)}
+                                     disabled={generating}
+                                     className="flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors bg-primary/10 px-3 py-1.5 rounded-full disabled:opacity-50"
+                                     title="Forçar recálculo da análise ignorando o cache"
+                                 >
+                                     <RefreshCw className={`w-3.5 h-3.5 ${generating ? 'animate-spin' : ''}`} />
+                                     Recalcular
+                                 </button>
+                             </div>
+
+                             <div className="flex items-center justify-center w-32 h-32 rounded-full border-8 mb-4 mt-6 md:mt-0 relative" style={{ borderColor: `hsl(var(--muted))` }}>
                                 <svg className="absolute top-0 left-0 w-full h-full -rotate-90">
                                     <circle cx="50%" cy="50%" r="46%" fill="transparent" stroke="currentColor" strokeWidth="8%" className={match.matchScore >= 70 ? 'text-emerald-500' : match.matchScore >= 40 ? 'text-amber-500' : 'text-destructive'} strokeDasharray="289%" strokeDashoffset={`${289 - (289 * match.matchScore) / 100}%`} style={{ transition: 'stroke-dashoffset 1s ease-out' }} />
                                 </svg>
