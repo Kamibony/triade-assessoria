@@ -1,15 +1,17 @@
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getFunctions } from 'firebase-admin/functions';
 import * as admin from 'firebase-admin';
 import { genkit } from 'genkit';
 import { z } from 'zod';
 import { vertexAI } from '@genkit-ai/google-genai';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 
 admin.initializeApp();
 
 const ai = genkit({
-    plugins: [vertexAI({ projectId: 'triade-assessoria', location: 'us-central1' })],
+    plugins: [vertexAI({ projectId: process.env.GCLOUD_PROJECT || 'triade-assessoria', location: 'us-central1' })],
 });
 
 const ngoProfileSchema = z.object({
@@ -222,8 +224,24 @@ export async function processMatchEvaluation(oscId: string, editalId: string, fo
         throw new Error(`OSC (${oscId}) or Edital (${editalId}) not found`);
     }
 
-    const oscData = oscDoc.data() as z.infer<typeof ngoProfileSchema> & { updatedAt?: { toMillis: () => number, seconds?: number } };
-    const editalData = editalDoc.data() as z.infer<typeof editalSchema> & { updatedAt?: { toMillis: () => number, seconds?: number } };
+    const rawOscData = oscDoc.data();
+    const rawEditalData = editalDoc.data();
+
+    // Fix 4: Dirty Data Resilience (use safeParse)
+    const oscParseResult = ngoProfileSchema.safeParse(rawOscData);
+    const editalParseResult = editalSchema.safeParse(rawEditalData);
+
+    if (!oscParseResult.success) {
+        console.warn(`Invalid OSC data for ${oscId}:`, oscParseResult.error);
+        throw new Error(`Invalid OSC data for ${oscId}`);
+    }
+    if (!editalParseResult.success) {
+        console.warn(`Invalid Edital data for ${editalId}:`, editalParseResult.error);
+        throw new Error(`Invalid Edital data for ${editalId}`);
+    }
+
+    const oscData = oscParseResult.data;
+    const editalData = editalParseResult.data;
 
     // Check for existing match
     const matchesQuery = await db.collection('matches')
@@ -240,16 +258,47 @@ export async function processMatchEvaluation(oscId: string, editalId: string, fo
         existingMatchData = matchesQuery.docs[0]?.data() || null;
     }
 
-    // Cache logic
-    if (!forceRecalculate && existingMatchData && existingMatchData.createdAt && (existingMatchData.createdAt as { toMillis?: () => number }).toMillis) {
-        const matchTime = (existingMatchData.createdAt as { toMillis: () => number }).toMillis();
-        const oscUpdateTime = oscData.updatedAt && oscData.updatedAt.toMillis ? oscData.updatedAt.toMillis() : 0;
-        const editalUpdateTime = editalData.updatedAt && editalData.updatedAt.toMillis ? editalData.updatedAt.toMillis() : 0;
-
-        if (matchTime >= oscUpdateTime && matchTime >= editalUpdateTime) {
-            console.log(`Returning cached match for OSC ${oscId} and Edital ${editalId}`);
-            return existingMatchData;
+    // Helper for safe timestamp extraction
+    const getMillis = (field: any): number | null => {
+        if (!field) return null;
+        if (typeof field.toMillis === 'function') return field.toMillis();
+        if (field instanceof Date) return field.getTime();
+        if (typeof field === 'string' || typeof field === 'number') {
+            const date = new Date(field);
+            if (!isNaN(date.getTime())) return date.getTime();
         }
+        return null;
+    };
+
+    // Fix 6: Robust timestamp validation for caching
+    let shouldRecalculate = forceRecalculate;
+
+    if (!shouldRecalculate && existingMatchData) {
+        if (existingMatchData.createdAt) {
+            const matchTime = getMillis(existingMatchData.createdAt);
+            const oscUpdateTime = getMillis(rawOscData?.updatedAt);
+            const editalUpdateTime = getMillis(rawEditalData?.updatedAt);
+
+            // If we can't reliably determine any timestamp, force recalculation
+            if (matchTime === null || oscUpdateTime === null || editalUpdateTime === null) {
+                shouldRecalculate = true;
+            } else if (matchTime >= oscUpdateTime && matchTime >= editalUpdateTime) {
+                console.log(`Returning cached match for OSC ${oscId} and Edital ${editalId}`);
+                return existingMatchData;
+            } else {
+                // Cache is stale
+                shouldRecalculate = true;
+            }
+        } else {
+            // Missing createdAt timestamp
+            shouldRecalculate = true;
+        }
+    } else if (!existingMatchData) {
+        shouldRecalculate = true;
+    }
+
+    if (!shouldRecalculate) {
+        return existingMatchData;
     }
 
     console.log(`Evaluating match for OSC ${oscId} and Edital ${editalId}`);
@@ -271,6 +320,33 @@ export async function processMatchEvaluation(oscId: string, editalId: string, fo
     return matchDocData;
 }
 
+export const matchEvaluatorWorker = onTaskDispatched({
+    retryConfig: {
+        maxAttempts: 3,
+        minBackoffSeconds: 30,
+    },
+    rateLimits: {
+        maxConcurrentDispatches: 5, // Prevent Vertex AI rate limits (HTTP 429)
+    },
+    timeoutSeconds: 540 // Allow enough time for Genkit execution
+}, async (request) => {
+    const { oscId, editalId } = request.data as { oscId: string, editalId: string };
+
+    if (!oscId || !editalId) {
+        console.error("Invalid task payload: missing oscId or editalId.");
+        return;
+    }
+
+    try {
+        await processMatchEvaluation(oscId, editalId);
+        console.log(`Successfully processed task for OSC ${oscId} and Edital ${editalId}`);
+    } catch (error) {
+        console.error(`Task execution failed for OSC ${oscId} and Edital ${editalId}`, error);
+        throw error; // Let the queue handle the retry
+    }
+});
+
+
 export const onEditalCreated = onDocumentCreated('editais/{editalId}', async (event) => {
     const editalSnapshot = event.data;
     if (!editalSnapshot) {
@@ -282,31 +358,17 @@ export const onEditalCreated = onDocumentCreated('editais/{editalId}', async (ev
     const db = getFirestore();
     const oscsSnapshot = await db.collection('oscs').get();
 
-    const BATCH_SIZE = 10;
-    let successful = 0;
-    let failed = 0;
+    const queue = getFunctions().taskQueue('matchEvaluatorWorker');
 
-    for (let i = 0; i < oscsSnapshot.docs.length; i += BATCH_SIZE) {
-        const chunk = oscsSnapshot.docs.slice(i, i + BATCH_SIZE);
-
-        const matchPromises = chunk.map(async (oscDoc) => {
-            const oscId = oscDoc.id;
-            try {
-                const matchResult = await processMatchEvaluation(oscId, editalId);
-                console.log(`Successfully processed match for OSC ${oscId} and Edital ${editalId}`);
-                return matchResult;
-            } catch (error) {
-                console.error(`Failed to process match for OSC ${oscId} and Edital ${editalId}`, error);
-                throw error;
-            }
+    const enqueuePromises = oscsSnapshot.docs.map(oscDoc => {
+        return queue.enqueue({
+            oscId: oscDoc.id,
+            editalId: editalId
         });
+    });
 
-        const results = await Promise.allSettled(matchPromises);
-        successful += results.filter(r => r.status === 'fulfilled').length;
-        failed += results.filter(r => r.status === 'rejected').length;
-    }
-
-    console.log(`Batch matchmaking complete. ${successful} successful, ${failed} failed.`);
+    await Promise.all(enqueuePromises);
+    console.log(`Enqueued ${oscsSnapshot.docs.length} match tasks for new Edital ${editalId}.`);
 });
 
 
@@ -336,8 +398,24 @@ export const triggerMatchOrchestrator = onCall({
 
 export const onOscUpdated = onDocumentUpdated('oscs/{oscId}', async (event) => {
     const oscSnapshot = event.data?.after;
-    if (!oscSnapshot) {
+    const oscBefore = event.data?.before;
+
+    if (!oscSnapshot || !oscBefore) {
         console.log("No data associated with the event.");
+        return;
+    }
+
+    const beforeData = oscBefore.data();
+    const afterData = oscSnapshot.data();
+
+    // Fix 1: Trigger Cascades - Strict diff check
+    const criticalFields = ['location', 'coreActivities', 'documentationStatus', 'foundationDate', 'previousProjectsApproved'];
+    const hasCriticalChanges = criticalFields.some(field =>
+        JSON.stringify(beforeData[field]) !== JSON.stringify(afterData[field])
+    );
+
+    if (!hasCriticalChanges) {
+        console.log(`No critical fields changed for OSC ${event.params.oscId}. Skipping match evaluation.`);
         return;
     }
 
@@ -347,32 +425,17 @@ export const onOscUpdated = onDocumentUpdated('oscs/{oscId}', async (event) => {
     // Fetch all open editais (assuming we might want a status check, for now fetch all)
     // Actually we will just fetch all editais for simplicity based on the current schema logic
     const editaisSnapshot = await db.collection('editais').get();
+    const queue = getFunctions().taskQueue('matchEvaluatorWorker');
 
-    const BATCH_SIZE = 10;
-    let successful = 0;
-    let failed = 0;
-
-    for (let i = 0; i < editaisSnapshot.docs.length; i += BATCH_SIZE) {
-        const chunk = editaisSnapshot.docs.slice(i, i + BATCH_SIZE);
-
-        const matchPromises = chunk.map(async (editalDoc) => {
-            const editalId = editalDoc.id;
-            try {
-                const matchResult = await processMatchEvaluation(oscId, editalId);
-                console.log(`Successfully processed match for OSC ${oscId} and Edital ${editalId}`);
-                return matchResult;
-            } catch (error) {
-                console.error(`Failed to process match for OSC ${oscId} and Edital ${editalId}`, error);
-                throw error;
-            }
+    const enqueuePromises = editaisSnapshot.docs.map(editalDoc => {
+        return queue.enqueue({
+            oscId: oscId,
+            editalId: editalDoc.id
         });
+    });
 
-        const results = await Promise.allSettled(matchPromises);
-        successful += results.filter(r => r.status === 'fulfilled').length;
-        failed += results.filter(r => r.status === 'rejected').length;
-    }
-
-    console.log(`Batch matchmaking complete for OSC update. ${successful} successful, ${failed} failed.`);
+    await Promise.all(enqueuePromises);
+    console.log(`Enqueued ${editaisSnapshot.docs.length} match tasks for OSC update ${oscId}.`);
 });
 
 
@@ -380,11 +443,10 @@ export const scheduledMatchSweeper = onSchedule('every 1 weeks', async () => {
     const db = getFirestore();
     const editaisSnapshot = await db.collection('editais').get();
     const oscsSnapshot = await db.collection('oscs').get();
+    const queue = getFunctions().taskQueue('matchEvaluatorWorker');
 
     const oscIds = oscsSnapshot.docs.map(doc => doc.id);
-    let successful = 0;
-    let failed = 0;
-    const BATCH_SIZE = 10;
+    let enqueuedCount = 0;
 
     for (const editalDoc of editaisSnapshot.docs) {
         const editalId = editalDoc.id;
@@ -401,24 +463,16 @@ export const scheduledMatchSweeper = onSchedule('every 1 weeks', async () => {
 
         console.log(`Sweeping ${missingOscIds.length} missing matches for Edital ${editalId}`);
 
-        for (let i = 0; i < missingOscIds.length; i += BATCH_SIZE) {
-            const chunk = missingOscIds.slice(i, i + BATCH_SIZE);
-
-            const matchPromises = chunk.map(async (oscId) => {
-                try {
-                    const matchResult = await processMatchEvaluation(oscId, editalId);
-                    return matchResult;
-                } catch (error) {
-                    console.error(`Sweeper failed for OSC ${oscId} and Edital ${editalId}`, error);
-                    throw error;
-                }
+        const enqueuePromises = missingOscIds.map(oscId => {
+            return queue.enqueue({
+                oscId: oscId,
+                editalId: editalId
             });
+        });
 
-            const results = await Promise.allSettled(matchPromises);
-            successful += results.filter(r => r.status === 'fulfilled').length;
-            failed += results.filter(r => r.status === 'rejected').length;
-        }
+        await Promise.all(enqueuePromises);
+        enqueuedCount += missingOscIds.length;
     }
 
-    console.log(`Weekly sweeper complete. ${successful} successful, ${failed} failed.`);
+    console.log(`Weekly sweeper complete. Enqueued ${enqueuedCount} missing matches.`);
 });
