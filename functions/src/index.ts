@@ -623,7 +623,7 @@ export const onOscUpdated = onDocumentUpdated('oscs/{oscId}', async (event) => {
 });
 
 
-export const ingestGoogleAlertsRss = onSchedule('0 2 * * *', async () => {
+export async function processRssFeeds() {
     const RSS_URLS = [
         // Mock Google Alerts RSS URLs
         "https://news.google.com/rss/search?q=edital+ONG+OR+OSC+brasil",
@@ -693,6 +693,30 @@ export const ingestGoogleAlertsRss = onSchedule('0 2 * * *', async () => {
     }
 
     console.log(`Ingestion complete. Processed ${processedCount} items, saved ${savedCount} valid editais.`);
+    return { processedCount, savedCount };
+}
+
+export const ingestGoogleAlertsRss = onSchedule('0 2 * * *', async () => {
+    await processRssFeeds();
+});
+
+export const manualTriggerRssSyncFunction = onCall({
+    cors: true,
+    timeoutSeconds: 540,
+}, async () => {
+    // TODO: Re-enable auth checks once Auth is implemented.
+    // if (!request.auth) {
+    //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    // }
+
+    try {
+        const result = await processRssFeeds();
+        return result;
+    } catch (error: unknown) {
+        console.error('Error in manualTriggerRssSyncFunction:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Internal error during manual RSS sync.';
+        throw new HttpsError('internal', errorMessage);
+    }
 });
 
 

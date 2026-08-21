@@ -19,6 +19,8 @@ export function AdminDashboard() {
   const [rssKeywords, setRssKeywords] = useState('');
   const [isAddingRss, setIsAddingRss] = useState(false);
   const [rssLoading, setRssLoading] = useState(true);
+  const [isSyncingRss, setIsSyncingRss] = useState(false);
+  const [syncResult, setSyncResult] = useState<{type: 'success' | 'error', message: string} | null>(null);
 
   // OSC Importer State
   const [uf, setUf] = useState('');
@@ -71,6 +73,30 @@ export function AdminDashboard() {
     } catch (error) {
       console.error("Error toggling RSS status:", error);
       alert("Failed to update status.");
+    }
+  };
+
+  const handleForceSyncRss = async () => {
+    setIsSyncingRss(true);
+    setSyncResult(null);
+
+    try {
+      const manualTriggerRssSync = httpsCallable(functions, 'manualTriggerRssSyncFunction');
+      const result = await manualTriggerRssSync();
+
+      const data = result.data as { processedCount?: number; savedCount?: number };
+      setSyncResult({
+        type: 'success',
+        message: `Sync completed successfully. Processed ${data.processedCount || 0} links, saved ${data.savedCount || 0} editais.`
+      });
+    } catch (error: unknown) {
+      console.error("Error forcing RSS sync:", error);
+      setSyncResult({
+        type: 'error',
+        message: error instanceof Error ? error.message : String(error) || 'Failed to sync RSS.'
+      });
+    } finally {
+      setIsSyncingRss(false);
     }
   };
 
@@ -182,6 +208,32 @@ export function AdminDashboard() {
                   </li>
                 ))}
               </ul>
+            )}
+          </div>
+
+          <div className="mt-6 border-t pt-4">
+            <Button
+              variant="outline"
+              onClick={handleForceSyncRss}
+              disabled={isSyncingRss}
+              className="w-full"
+            >
+              {isSyncingRss ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+              Force Sync RSS
+            </Button>
+            {syncResult && (
+              <div className={`mt-4 p-3 rounded-md border flex items-start ${
+                syncResult.type === 'success'
+                  ? 'bg-green-500/10 border-green-500/50 text-green-600 dark:text-green-400'
+                  : 'bg-destructive/10 border-destructive/50 text-destructive'
+              }`}>
+                {syncResult.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 mr-2 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 mr-2 shrink-0 mt-0.5" />
+                )}
+                <p className="text-xs">{syncResult.message}</p>
+              </div>
             )}
           </div>
         </div>
