@@ -36,3 +36,15 @@ export const triageSchema = z.object({
     isValidEdital: z.boolean().describe("True se a página contiver as regras de um edital ou for o documento oficial do edital. False se for apenas uma notícia SOBRE o edital."),
     reason: z.string().describe("Justificativa para a decisão")
 });
+
+export const copilotResponseSchema = z.object({
+    matchedOscs: z.array(z.object({
+        oscId: z.string().describe("ID da ONG"),
+        name: z.string().describe("Nome da ONG"),
+        location: z.string().describe("Localização da ONG"),
+        coreActivities: z.array(z.string()).describe("Principais atividades da ONG"),
+        reasoning: z.string().describe("Breve explicação do porquê esta ONG é um bom match")
+    })).describe("Lista de ONGs que melhor correspondem à pesquisa"),
+    outreachMessage: z.string().describe("Mensagem de contato (email ou WhatsApp) rascunhada, personalizada para engajar essas ONGs e informá-las sobre a oportunidade"),
+    explanation: z.string().describe("Explicação geral sobre os resultados encontrados para o operador")
+});

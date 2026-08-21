@@ -100,4 +100,47 @@ export declare const triageSchema: z.ZodObject<{
     isValidEdital: boolean;
     reason: string;
 }>;
+export declare const copilotResponseSchema: z.ZodObject<{
+    matchedOscs: z.ZodArray<z.ZodObject<{
+        oscId: z.ZodString;
+        name: z.ZodString;
+        location: z.ZodString;
+        coreActivities: z.ZodArray<z.ZodString, "many">;
+        reasoning: z.ZodString;
+    }, "strip", z.ZodTypeAny, {
+        oscId: string;
+        name: string;
+        location: string;
+        coreActivities: string[];
+        reasoning: string;
+    }, {
+        oscId: string;
+        name: string;
+        location: string;
+        coreActivities: string[];
+        reasoning: string;
+    }>, "many">;
+    outreachMessage: z.ZodString;
+    explanation: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    matchedOscs: {
+        oscId: string;
+        name: string;
+        location: string;
+        coreActivities: string[];
+        reasoning: string;
+    }[];
+    outreachMessage: string;
+    explanation: string;
+}, {
+    matchedOscs: {
+        oscId: string;
+        name: string;
+        location: string;
+        coreActivities: string[];
+        reasoning: string;
+    }[];
+    outreachMessage: string;
+    explanation: string;
+}>;
 //# sourceMappingURL=schemas.d.ts.map

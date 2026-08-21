@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.triageSchema = exports.matchSchema = exports.editalSchema = exports.ngoProfileSchema = void 0;
+exports.copilotResponseSchema = exports.triageSchema = exports.matchSchema = exports.editalSchema = exports.ngoProfileSchema = void 0;
 const zod_1 = require("zod");
 exports.ngoProfileSchema = zod_1.z.object({
     name: zod_1.z.string().describe("Nome da ONG"),
@@ -34,5 +34,16 @@ exports.matchSchema = zod_1.z.object({
 exports.triageSchema = zod_1.z.object({
     isValidEdital: zod_1.z.boolean().describe("True se a página contiver as regras de um edital ou for o documento oficial do edital. False se for apenas uma notícia SOBRE o edital."),
     reason: zod_1.z.string().describe("Justificativa para a decisão")
+});
+exports.copilotResponseSchema = zod_1.z.object({
+    matchedOscs: zod_1.z.array(zod_1.z.object({
+        oscId: zod_1.z.string().describe("ID da ONG"),
+        name: zod_1.z.string().describe("Nome da ONG"),
+        location: zod_1.z.string().describe("Localização da ONG"),
+        coreActivities: zod_1.z.array(zod_1.z.string()).describe("Principais atividades da ONG"),
+        reasoning: zod_1.z.string().describe("Breve explicação do porquê esta ONG é um bom match")
+    })).describe("Lista de ONGs que melhor correspondem à pesquisa"),
+    outreachMessage: zod_1.z.string().describe("Mensagem de contato (email ou WhatsApp) rascunhada, personalizada para engajar essas ONGs e informá-las sobre a oportunidade"),
+    explanation: zod_1.z.string().describe("Explicação geral sobre os resultados encontrados para o operador")
 });
 //# sourceMappingURL=schemas.js.map
