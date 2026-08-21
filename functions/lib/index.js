@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.ingestManualEditalFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = exports.matchSchema = void 0;
+exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = exports.matchSchema = void 0;
 exports.processMatchEvaluation = processMatchEvaluation;
 exports.discoverProsasEditais = discoverProsasEditais;
 exports.processRssFeeds = processRssFeeds;
@@ -188,6 +188,8 @@ const extractEditalRules = ai.defineFlow({
     }
     const prompt = `Você é um agente especialista em análise de editais governamentais e privados de financiamento (Grants/Tenders) no Brasil.
 Sua tarefa é ler atentamente o texto ou o documento PDF do edital fornecido e extrair com precisão as regras, informações financeiras, datas importantes e os critérios de elegibilidade para ONGs (Organizações da Sociedade Civil - OSCs).
+
+Preste MUITA ATENÇÃO à "Abrangência" (Geographic Reach) do edital. Se um edital tiver abrangência Nacional ou cobrir a região Nordeste, você DEVE sinalizá-lo como válido para OSCs locais (ex: incluindo 'PB', 'Nordeste' ou 'Nacional' em requiredLocations), IGNORANDO COMPLETAMENTE o endereço físico ou sede da instituição financiadora. O que importa é onde o projeto pode ser executado.
 
 Se alguma informação não estiver explícita, você deve tentar deduzir com base no contexto geral ou, se impossível, preencher de forma condizente. Não invente informações.
 Sempre retorne os dados no formato estruturado solicitado em português do Brasil (pt-BR).`;
@@ -727,6 +729,104 @@ exports.ingestManualEditalFunction = (0, https_1.onCall)({
     catch (error) {
         console.error('Error in ingestManualEditalFunction:', error);
         const errorMessage = error instanceof Error ? error.message : 'Internal error during manual edital ingestion.';
+        throw new https_1.HttpsError('internal', errorMessage);
+    }
+});
+const searchDatabaseTool = ai.defineTool({
+    name: 'searchDatabaseTool',
+    description: 'Searches the Firestore database for NGOs (OSCs) and Editais (Grants) to find matches.',
+    inputSchema: zod_1.z.object({
+        city: zod_1.z.string().optional().describe("City name to filter NGOs"),
+        state: zod_1.z.string().optional().describe("State abbreviation or name to filter NGOs"),
+        activity: zod_1.z.string().optional().describe("Core activity to filter NGOs (e.g., 'Educação', 'Cultura')"),
+        limit: zod_1.z.number().optional().default(10).describe("Maximum number of NGOs to return"),
+    }),
+    outputSchema: zod_1.z.object({
+        oscs: zod_1.z.array(schemas_js_1.ngoProfileSchema.extend({ oscId: zod_1.z.string() })),
+        editais: zod_1.z.array(schemas_js_1.editalSchema.extend({ editalId: zod_1.z.string() })),
+    })
+}, async (input) => {
+    const db = (0, firestore_1.getFirestore)();
+    // Fetch up to 10 editais for context
+    const editaisSnapshot = await db.collection('editais').limit(10).get();
+    const editais = editaisSnapshot.docs.map(doc => ({
+        ...doc.data(),
+        editalId: doc.id
+    }));
+    // Fetch NGOs with basic filtering
+    const oscsQuery = db.collection('oscs');
+    // We will just fetch a chunk and filter in memory if queries get complex,
+    // or apply simple filters
+    const oscsSnapshot = await oscsQuery.limit(input.limit || 50).get();
+    let oscs = oscsSnapshot.docs.map(doc => ({
+        ...doc.data(),
+        oscId: doc.id
+    }));
+    // Apply basic in-memory filters for simplicity given complex NoSQL querying constraints
+    if (input.city) {
+        const lowerCity = input.city.toLowerCase();
+        oscs = oscs.filter((osc) => osc.location.toLowerCase().includes(lowerCity));
+    }
+    if (input.state) {
+        const lowerState = input.state.toLowerCase();
+        oscs = oscs.filter((osc) => osc.location.toLowerCase().includes(lowerState));
+    }
+    if (input.activity) {
+        const lowerActivity = input.activity.toLowerCase();
+        oscs = oscs.filter((osc) => osc.coreActivities.some((act) => act.toLowerCase().includes(lowerActivity)));
+    }
+    // Return up to the requested limit
+    oscs = oscs.slice(0, input.limit || 10);
+    return {
+        oscs,
+        editais
+    };
+});
+const copilotFlow = ai.defineFlow({
+    name: 'copilotFlow',
+    inputSchema: zod_1.z.object({
+        prompt: zod_1.z.string().describe("Natural language prompt from the user"),
+    }),
+    outputSchema: schemas_js_1.copilotResponseSchema,
+}, async (input) => {
+    const systemPrompt = `Você é um assistente de IA (Co-pilot) para a plataforma Tríade Assessoria.
+Sua tarefa é ajudar operadores a encontrar ONGs (OSCs) adequadas para Editais (Grants) com base no prompt natural do usuário.
+Você deve usar a ferramenta 'searchDatabaseTool' para buscar dados reais do banco de dados (ONGs e Editais disponíveis).
+Após obter os dados, analise-os e selecione as ONGs que melhor atendem ao pedido do usuário.
+Além disso, rascunhe uma mensagem de contato (email ou WhatsApp) engajadora para essas ONGs.
+Responda estritamente no formato do schema em português do Brasil (pt-BR).`;
+    const response = await ai.generate({
+        model: 'vertexai/gemini-2.5-flash',
+        tools: [searchDatabaseTool],
+        messages: [
+            { role: 'system', content: [{ text: systemPrompt }] },
+            { role: 'user', content: [{ text: input.prompt }] }
+        ],
+        output: { schema: schemas_js_1.copilotResponseSchema }
+    });
+    if (!response.output) {
+        throw new Error("Falha ao gerar resposta do Copilot");
+    }
+    return response.output;
+});
+exports.askCopilotFunction = (0, https_1.onCall)({
+    cors: true,
+    timeoutSeconds: 300,
+}, async (request) => {
+    // Require authentication
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'User must be authenticated.');
+    }
+    const { prompt } = request.data;
+    if (!prompt) {
+        throw new https_1.HttpsError('invalid-argument', 'O prompt é obrigatório.');
+    }
+    try {
+        return await copilotFlow({ prompt });
+    }
+    catch (error) {
+        console.error('Error in askCopilotFunction:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Internal error during Copilot execution.';
         throw new https_1.HttpsError('internal', errorMessage);
     }
 });

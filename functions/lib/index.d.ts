@@ -90,6 +90,17 @@ export declare const ingestManualEditalFunction: import("firebase-functions/v2/h
     editalId: string;
     message: string;
 }>, unknown>;
+export declare const askCopilotFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    matchedOscs: {
+        oscId: string;
+        name: string;
+        location: string;
+        coreActivities: string[];
+        reasoning: string;
+    }[];
+    outreachMessage: string;
+    explanation: string;
+}>, unknown>;
 export declare const manualTriggerRssSyncFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     processedCount: number;
     savedCount: number;

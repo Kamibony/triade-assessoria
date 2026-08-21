@@ -4,6 +4,7 @@ import { httpsCallable } from 'firebase/functions';
 import { functions } from '../lib/firebase';
 import { Button } from './ui/Button';
 import { Loader2, Plus, RefreshCw, Power, CheckCircle2, AlertCircle } from 'lucide-react';
+import { TriadeCopilot } from './TriadeCopilot';
 
 interface RssSource {
   id: string;
@@ -402,6 +403,7 @@ export function AdminDashboard() {
           )}
         </div>
       </div>
+      <TriadeCopilot />
     </div>
   );
 }
