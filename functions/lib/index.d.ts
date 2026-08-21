@@ -1,5 +1,6 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { matchSchema } from './shared/schemas.js';
+import Parser from 'rss-parser';
 export { matchSchema };
 export declare const parsePdfProfileFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     name: string;
@@ -72,11 +73,23 @@ export declare const triggerMatchOrchestrator: import("firebase-functions/v2/htt
 export declare const onOscUpdated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").Change<import("firebase-functions/v2/firestore").QueryDocumentSnapshot> | undefined, {
     oscId: string;
 }>>;
+export declare function discoverProsasEditais(region?: string): Promise<({
+    [key: string]: any;
+} & Parser.Item)[]>;
 export declare function processRssFeeds(): Promise<{
     processedCount: number;
     savedCount: number;
 }>;
 export declare const ingestGoogleAlertsRss: import("firebase-functions/v2/scheduler").ScheduleFunction;
+export declare const ingestManualEditalFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+    message: string;
+    editalId?: never;
+} | {
+    success: boolean;
+    editalId: string;
+    message: string;
+}>, unknown>;
 export declare const manualTriggerRssSyncFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     processedCount: number;
     savedCount: number;
