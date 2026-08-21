@@ -32,8 +32,11 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scheduledMatchSweeper = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = exports.matchSchema = void 0;
+exports.scheduledMatchSweeper = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = exports.matchSchema = void 0;
 exports.processMatchEvaluation = processMatchEvaluation;
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-admin/firestore");
@@ -46,6 +49,8 @@ const https_1 = require("firebase-functions/v2/https");
 const tasks_1 = require("firebase-functions/v2/tasks");
 const schemas_js_1 = require("./shared/schemas.js");
 Object.defineProperty(exports, "matchSchema", { enumerable: true, get: function () { return schemas_js_1.matchSchema; } });
+const cheerio = __importStar(require("cheerio"));
+const rss_parser_1 = __importDefault(require("rss-parser"));
 admin.initializeApp();
 const ai = (0, genkit_1.genkit)({
     plugins: [(0, google_genai_1.vertexAI)({ projectId: process.env.GCLOUD_PROJECT || 'triade-assessoria', location: 'us-central1' })],
@@ -174,6 +179,53 @@ Sempre retorne os dados no formato estruturado solicitado em português do Brasi
     }
     return response.output;
 });
+const triageEditalWebpage = ai.defineFlow({
+    name: 'triageEditalWebpage',
+    inputSchema: zod_1.z.object({
+        text: zod_1.z.string().describe("Texto bruto da página web"),
+    }),
+    outputSchema: schemas_js_1.triageSchema,
+}, async (input) => {
+    const prompt = `Você é um assistente que filtra notícias para encontrar editais reais de financiamento para ONGs no Brasil.
+Vou te passar o texto extraído de uma página web.
+Determine se o texto contém as REGRAS e CRITÉRIOS do edital em si (ou se é a página oficial do edital), ou se é apenas uma notícia (press release) comentando que um edital foi lançado, sem os detalhes completos.
+Responda com isValidEdital = true apenas se contiver os detalhes do edital.
+Justifique sua resposta.
+Sempre retorne os dados em português do Brasil (pt-BR).`;
+    const response = await ai.generate({
+        model: 'vertexai/gemini-2.5-flash',
+        messages: [
+            { role: 'user', content: [
+                    { text: prompt },
+                    { text: `Texto:\n\n${input.text.substring(0, 30000)}` }
+                ] }
+        ],
+        output: { schema: schemas_js_1.triageSchema }
+    });
+    if (!response.output) {
+        throw new Error("Falha ao processar a triagem do edital");
+    }
+    return response.output;
+});
+async function fetchAndExtractText(url) {
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch ${url}: ${response.status}`);
+        }
+        const html = await response.text();
+        const $ = cheerio.load(html);
+        // Remove script, style, nav, footer, etc to get main content
+        $('script, style, nav, footer, header, aside, noscript, iframe').remove();
+        const text = $('body').text();
+        // Clean up whitespace
+        return text.replace(/\s+/g, ' ').trim();
+    }
+    catch (e) {
+        console.error("Error fetching text from URL", url, e);
+        return "";
+    }
+}
 exports.extractEditalRulesFunction = (0, https_1.onCall)({
     cors: true
 }, async (request) => {
@@ -443,6 +495,70 @@ exports.onOscUpdated = (0, firestore_2.onDocumentUpdated)('oscs/{oscId}', async 
     });
     await Promise.all(enqueuePromises);
     console.log(`Enqueued ${editaisSnapshot.docs.length} match tasks for OSC update ${oscId}.`);
+});
+exports.ingestGoogleAlertsRss = (0, scheduler_1.onSchedule)('0 2 * * *', async () => {
+    const RSS_URLS = [
+        // Mock Google Alerts RSS URLs
+        "https://news.google.com/rss/search?q=edital+ONG+OR+OSC+brasil",
+        "https://news.google.com/rss/search?q=financiamento+projetos+culturais+edital"
+    ];
+    const parser = new rss_parser_1.default();
+    const db = (0, firestore_1.getFirestore)();
+    let processedCount = 0;
+    let savedCount = 0;
+    for (const feedUrl of RSS_URLS) {
+        try {
+            console.log(`Fetching RSS feed: ${feedUrl}`);
+            const feed = await parser.parseURL(feedUrl);
+            for (const item of feed.items) {
+                if (!item.link)
+                    continue;
+                // Check if already ingested
+                const existingEdital = await db.collection('editais').where('sourceUrl', '==', item.link).get();
+                if (!existingEdital.empty) {
+                    console.log(`Skipping already ingested link: ${item.link}`);
+                    continue;
+                }
+                processedCount++;
+                console.log(`Processing link: ${item.link}`);
+                const text = await fetchAndExtractText(item.link);
+                if (!text || text.length < 500) {
+                    console.log(`Skipping: Text too short or extraction failed for ${item.link}`);
+                    continue;
+                }
+                const triageResult = await triageEditalWebpage({ text });
+                console.log(`Triage for ${item.link}: isValidEdital=${triageResult.isValidEdital}, reason=${triageResult.reason}`);
+                if (triageResult.isValidEdital) {
+                    try {
+                        const editalResult = await extractEditalRules({ text });
+                        const parseResult = schemas_js_1.editalSchema.safeParse(editalResult);
+                        if (parseResult.success) {
+                            const editalDocData = {
+                                ...parseResult.data,
+                                rawText: text.substring(0, 5000), // Save a snippet
+                                sourceUrl: item.link,
+                                createdAt: firestore_1.FieldValue.serverTimestamp(),
+                            };
+                            const editalRef = db.collection('editais').doc();
+                            await editalRef.set(editalDocData);
+                            savedCount++;
+                            console.log(`Successfully saved Edital from ${item.link}`);
+                        }
+                        else {
+                            console.warn(`Validation failed for extracted Edital from ${item.link}:`, parseResult.error);
+                        }
+                    }
+                    catch (e) {
+                        console.error(`Error extracting rules for ${item.link}:`, e);
+                    }
+                }
+            }
+        }
+        catch (error) {
+            console.error(`Error fetching or parsing RSS feed ${feedUrl}:`, error);
+        }
+    }
+    console.log(`Ingestion complete. Processed ${processedCount} items, saved ${savedCount} valid editais.`);
 });
 exports.scheduledMatchSweeper = (0, scheduler_1.onSchedule)('0 0 * * 0', async () => {
     const db = (0, firestore_1.getFirestore)();

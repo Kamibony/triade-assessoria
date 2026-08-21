@@ -90,4 +90,14 @@ export declare const matchSchema: z.ZodObject<{
     reasoning: string;
     actionPlan?: string[] | undefined;
 }>;
+export declare const triageSchema: z.ZodObject<{
+    isValidEdital: z.ZodBoolean;
+    reason: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    isValidEdital: boolean;
+    reason: string;
+}, {
+    isValidEdital: boolean;
+    reason: string;
+}>;
 //# sourceMappingURL=schemas.d.ts.map
