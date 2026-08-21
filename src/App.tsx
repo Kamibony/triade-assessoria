@@ -12,6 +12,7 @@ import { MagicEligibility } from './components/MagicEligibility';
 import { EditaisList } from './components/EditaisList';
 import { NgoMatchView } from './components/NgoMatchView';
 import { MatchesDashboard } from './components/MatchesDashboard';
+import { AdminDashboard } from './components/AdminDashboard';
 
 function Header() {
   const location = useLocation();
@@ -57,6 +58,7 @@ function App() {
             <Route path="/editais" element={<EditaisList />} />
             <Route path="/match/:editalId" element={<NgoMatchView />} />
             <Route path="/dashboard" element={<MatchesDashboard />} />
+            <Route path="/admin" element={<AdminDashboard />} />
           </Routes>
         </div>
         <Footer />
