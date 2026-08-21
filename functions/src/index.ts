@@ -286,6 +286,7 @@ export async function processMatchEvaluation(oscId: string, editalId: string, fo
     }
 
     // Helper for safe timestamp extraction
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const getMillis = (field: any): number | null => {
         if (!field) return null;
         if (typeof field.toMillis === 'function') return field.toMillis();
