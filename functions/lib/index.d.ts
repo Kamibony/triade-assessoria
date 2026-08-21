@@ -56,5 +56,6 @@ export declare const triggerMatchOrchestrator: import("firebase-functions/v2/htt
 export declare const onOscUpdated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").Change<import("firebase-functions/v2/firestore").QueryDocumentSnapshot> | undefined, {
     oscId: string;
 }>>;
+export declare const ingestGoogleAlertsRss: import("firebase-functions/v2/scheduler").ScheduleFunction;
 export declare const scheduledMatchSweeper: import("firebase-functions/v2/scheduler").ScheduleFunction;
 //# sourceMappingURL=index.d.ts.map

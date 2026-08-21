@@ -31,3 +31,8 @@ export const matchSchema = z.object({
     reasoning: z.string().describe("Justificativa detalhada do AI para o score e elegibilidade"),
     actionPlan: z.array(z.string()).optional().describe("Plano de Ação sugerido caso a ONG não seja elegível ou tenha score baixo")
 });
+
+export const triageSchema = z.object({
+    isValidEdital: z.boolean().describe("True se a página contiver as regras de um edital ou for o documento oficial do edital. False se for apenas uma notícia SOBRE o edital."),
+    reason: z.string().describe("Justificativa para a decisão")
+});

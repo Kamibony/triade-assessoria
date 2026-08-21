@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.matchSchema = exports.editalSchema = exports.ngoProfileSchema = void 0;
+exports.triageSchema = exports.matchSchema = exports.editalSchema = exports.ngoProfileSchema = void 0;
 const zod_1 = require("zod");
 exports.ngoProfileSchema = zod_1.z.object({
     name: zod_1.z.string().describe("Nome da ONG"),
@@ -30,5 +30,9 @@ exports.matchSchema = zod_1.z.object({
     eligibility: zod_1.z.boolean().describe("Se a ONG é elegível (true) ou não (false)"),
     reasoning: zod_1.z.string().describe("Justificativa detalhada do AI para o score e elegibilidade"),
     actionPlan: zod_1.z.array(zod_1.z.string()).optional().describe("Plano de Ação sugerido caso a ONG não seja elegível ou tenha score baixo")
+});
+exports.triageSchema = zod_1.z.object({
+    isValidEdital: zod_1.z.boolean().describe("True se a página contiver as regras de um edital ou for o documento oficial do edital. False se for apenas uma notícia SOBRE o edital."),
+    reason: zod_1.z.string().describe("Justificativa para a decisão")
 });
 //# sourceMappingURL=schemas.js.map

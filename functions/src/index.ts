@@ -7,7 +7,9 @@ import { z } from 'zod';
 import { vertexAI } from '@genkit-ai/google-genai';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
-import { ngoProfileSchema, editalSchema, matchSchema } from './shared/schemas.js';
+import { ngoProfileSchema, editalSchema, matchSchema, triageSchema } from './shared/schemas.js';
+import * as cheerio from 'cheerio';
+import Parser from 'rss-parser';
 
 admin.initializeApp();
 
@@ -165,6 +167,63 @@ Sempre retorne os dados no formato estruturado solicitado em português do Brasi
         return response.output;
     }
 );
+
+
+const triageEditalWebpage = ai.defineFlow(
+    {
+        name: 'triageEditalWebpage',
+        inputSchema: z.object({
+            text: z.string().describe("Texto bruto da página web"),
+        }),
+        outputSchema: triageSchema,
+    },
+    async (input) => {
+        const prompt = `Você é um assistente que filtra notícias para encontrar editais reais de financiamento para ONGs no Brasil.
+Vou te passar o texto extraído de uma página web.
+Determine se o texto contém as REGRAS e CRITÉRIOS do edital em si (ou se é a página oficial do edital), ou se é apenas uma notícia (press release) comentando que um edital foi lançado, sem os detalhes completos.
+Responda com isValidEdital = true apenas se contiver os detalhes do edital.
+Justifique sua resposta.
+Sempre retorne os dados em português do Brasil (pt-BR).`;
+
+        const response = await ai.generate({
+            model: 'vertexai/gemini-2.5-flash',
+            messages: [
+                { role: 'user', content: [
+                    { text: prompt },
+                    { text: `Texto:\n\n${input.text.substring(0, 30000)}` }
+                ]}
+            ],
+            output: { schema: triageSchema }
+        });
+
+        if (!response.output) {
+            throw new Error("Falha ao processar a triagem do edital");
+        }
+        return response.output;
+    }
+);
+
+
+async function fetchAndExtractText(url: string): Promise<string> {
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+             throw new Error(`Failed to fetch ${url}: ${response.status}`);
+        }
+        const html = await response.text();
+        const $ = cheerio.load(html);
+
+        // Remove script, style, nav, footer, etc to get main content
+        $('script, style, nav, footer, header, aside, noscript, iframe').remove();
+
+        const text = $('body').text();
+        // Clean up whitespace
+        return text.replace(/\s+/g, ' ').trim();
+    } catch (e) {
+        console.error("Error fetching text from URL", url, e);
+        return "";
+    }
+}
 
 
 export const extractEditalRulesFunction = onCall({
@@ -488,6 +547,79 @@ export const onOscUpdated = onDocumentUpdated('oscs/{oscId}', async (event) => {
 
     await Promise.all(enqueuePromises);
     console.log(`Enqueued ${editaisSnapshot.docs.length} match tasks for OSC update ${oscId}.`);
+});
+
+
+export const ingestGoogleAlertsRss = onSchedule('0 2 * * *', async () => {
+    const RSS_URLS = [
+        // Mock Google Alerts RSS URLs
+        "https://news.google.com/rss/search?q=edital+ONG+OR+OSC+brasil",
+        "https://news.google.com/rss/search?q=financiamento+projetos+culturais+edital"
+    ];
+
+    const parser = new Parser();
+    const db = getFirestore();
+    let processedCount = 0;
+    let savedCount = 0;
+
+    for (const feedUrl of RSS_URLS) {
+        try {
+            console.log(`Fetching RSS feed: ${feedUrl}`);
+            const feed = await parser.parseURL(feedUrl);
+
+            for (const item of feed.items) {
+                if (!item.link) continue;
+
+                // Check if already ingested
+                const existingEdital = await db.collection('editais').where('sourceUrl', '==', item.link).get();
+                if (!existingEdital.empty) {
+                    console.log(`Skipping already ingested link: ${item.link}`);
+                    continue;
+                }
+
+                processedCount++;
+                console.log(`Processing link: ${item.link}`);
+
+                const text = await fetchAndExtractText(item.link);
+                if (!text || text.length < 500) {
+                     console.log(`Skipping: Text too short or extraction failed for ${item.link}`);
+                     continue;
+                }
+
+                const triageResult = await triageEditalWebpage({ text });
+                console.log(`Triage for ${item.link}: isValidEdital=${triageResult.isValidEdital}, reason=${triageResult.reason}`);
+
+                if (triageResult.isValidEdital) {
+                    try {
+                        const editalResult = await extractEditalRules({ text });
+                        const parseResult = editalSchema.safeParse(editalResult);
+
+                        if (parseResult.success) {
+                            const editalDocData = {
+                                ...parseResult.data,
+                                rawText: text.substring(0, 5000), // Save a snippet
+                                sourceUrl: item.link,
+                                createdAt: FieldValue.serverTimestamp(),
+                            };
+
+                            const editalRef = db.collection('editais').doc();
+                            await editalRef.set(editalDocData);
+                            savedCount++;
+                            console.log(`Successfully saved Edital from ${item.link}`);
+                        } else {
+                            console.warn(`Validation failed for extracted Edital from ${item.link}:`, parseResult.error);
+                        }
+                    } catch (e) {
+                         console.error(`Error extracting rules for ${item.link}:`, e);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error(`Error fetching or parsing RSS feed ${feedUrl}:`, error);
+        }
+    }
+
+    console.log(`Ingestion complete. Processed ${processedCount} items, saved ${savedCount} valid editais.`);
 });
 
 
