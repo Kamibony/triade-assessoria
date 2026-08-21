@@ -48,10 +48,14 @@ const zod_1 = require("zod");
 const google_genai_1 = require("@genkit-ai/google-genai");
 const https_1 = require("firebase-functions/v2/https");
 const tasks_1 = require("firebase-functions/v2/tasks");
+const logger = __importStar(require("firebase-functions/logger"));
 const schemas_js_1 = require("./shared/schemas.js");
 Object.defineProperty(exports, "matchSchema", { enumerable: true, get: function () { return schemas_js_1.matchSchema; } });
 const cheerio = __importStar(require("cheerio"));
 const rss_parser_1 = __importDefault(require("rss-parser"));
+function removeAccents(str) {
+    return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
 admin.initializeApp();
 const ai = (0, genkit_1.genkit)({
     plugins: [(0, google_genai_1.vertexAI)({ projectId: process.env.GCLOUD_PROJECT || 'triade-assessoria', location: 'us-central1' })],
@@ -378,13 +382,16 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
     let oscList = [];
     try {
         if (municipio) {
-            // Encode URI component to handle spaces and special characters
-            const searchRes = await fetch(`https://mapaosc.ipea.gov.br/api/api/busca/municipio/${encodeURIComponent(municipio)}`);
+            const normalizedMunicipio = removeAccents(municipio);
+            const searchUrl = `https://mapaosc.ipea.gov.br/api/api/busca/municipio/${encodeURIComponent(normalizedMunicipio)}`;
+            logger.info(`IPEA Municipio Search URL: ${searchUrl}`);
+            const searchRes = await fetch(searchUrl);
             if (!searchRes.ok)
                 throw new Error(`IPEA API returned ${searchRes.status} for municipio search`);
             const searchData = await searchRes.json();
+            logger.info(`IPEA Municipio Search Results: ${JSON.stringify(searchData)}`);
             if (!Array.isArray(searchData) || searchData.length === 0) {
-                return { results, message: 'No municipio found.' };
+                return { imported: 0, results, message: 'No municipio found or IPEA search failed.' };
             }
             const edmu_cd_municipio = searchData[0].edmu_cd_municipio;
             const oscsRes = await fetch(`https://mapaosc.ipea.gov.br/api/api/geo/oscs/municipio/${edmu_cd_municipio}`);
@@ -393,12 +400,16 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
             oscList = await oscsRes.json();
         }
         else if (uf) {
-            const searchRes = await fetch(`https://mapaosc.ipea.gov.br/api/api/busca/estado/${encodeURIComponent(uf)}`);
+            const normalizedUf = removeAccents(uf);
+            const searchUrl = `https://mapaosc.ipea.gov.br/api/api/busca/estado/${encodeURIComponent(normalizedUf)}`;
+            logger.info(`IPEA Estado Search URL: ${searchUrl}`);
+            const searchRes = await fetch(searchUrl);
             if (!searchRes.ok)
                 throw new Error(`IPEA API returned ${searchRes.status} for UF search`);
             const searchData = await searchRes.json();
+            logger.info(`IPEA Estado Search Results: ${JSON.stringify(searchData)}`);
             if (!Array.isArray(searchData) || searchData.length === 0) {
-                return { results, message: 'No UF found.' };
+                return { imported: 0, results, message: 'No UF found or IPEA search failed.' };
             }
             const eduf_cd_uf = searchData[0].eduf_cd_uf;
             const oscsRes = await fetch(`https://mapaosc.ipea.gov.br/api/api/geo/oscs/estado/${eduf_cd_uf}`);
@@ -417,6 +428,7 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
     }
     // 2. Apply Safety Limit
     const slicedOscList = oscList.slice(0, limit);
+    logger.info(`Total OSCs discovered: ${oscList.length}. Processing limited to: ${slicedOscList.length}`);
     // 3. Fetch CNPJs from IPEA & Enrich with BrasilAPI (Hybrid Pipeline)
     for (const osc of slicedOscList) {
         const id_osc = osc.id_osc;
@@ -487,7 +499,14 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
             console.error(`Error processing OSC ${id_osc}:`, error);
         }
     }
-    return { results, totalDiscovered: oscList.length, processed: slicedOscList.length };
+    const successCount = results.filter(r => r.status === 'success').length;
+    return {
+        imported: successCount,
+        message: successCount > 0 ? `Successfully imported ${successCount} OSCs.` : 'No OSCs were successfully imported. Check results array for errors.',
+        results,
+        totalDiscovered: oscList.length,
+        processed: slicedOscList.length
+    };
 });
 exports.onEditalCreated = (0, firestore_2.onDocumentCreated)('editais/{editalId}', async (event) => {
     const editalSnapshot = event.data;

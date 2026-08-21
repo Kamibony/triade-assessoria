@@ -34,6 +34,7 @@ export declare function processMatchEvaluation(oscId: string, editalId: string, 
 } | null>;
 export declare const matchEvaluatorWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
 export declare const ingestOscDataFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    imported: number;
     results: {
         oscId: number;
         cnpj?: string;
@@ -44,7 +45,8 @@ export declare const ingestOscDataFunction: import("firebase-functions/v2/https"
     totalDiscovered?: never;
     processed?: never;
 } | {
-    message?: never;
+    imported: number;
+    message: string;
     results: {
         oscId: number;
         cnpj?: string;
