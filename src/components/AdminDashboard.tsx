@@ -34,6 +34,9 @@ export function AdminDashboard() {
   const [isIngestingManual, setIsIngestingManual] = useState(false);
   const [manualIngestResult, setManualIngestResult] = useState<{type: 'success' | 'error', message: string} | null>(null);
 
+  // Tab State
+  const [activeTab, setActiveTab] = useState<'ingestion' | 'directory'>('ingestion');
+
   const db = getFirestore();
 
   useEffect(() => {
@@ -181,10 +184,35 @@ export function AdminDashboard() {
 
   return (
     <div className="container mx-auto py-8 px-4 max-w-6xl">
-      <h1 className="text-3xl font-bold mb-8">Admin Dashboard</h1>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+        <h1 className="text-3xl font-bold">Admin Dashboard</h1>
+        <div className="flex bg-muted/50 p-1 rounded-lg border">
+          <button
+            onClick={() => setActiveTab('ingestion')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'ingestion' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <LayoutDashboard className="w-4 h-4" />
+            Ingestão & Pipelines
+          </button>
+          <button
+            onClick={() => setActiveTab('directory')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'directory' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Database className="w-4 h-4" />
+            Diretório OSC
+          </button>
+        </div>
+      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* RSS Source Management Panel */}
+      {activeTab === 'directory' ? (
+        <OscDirectoryView />
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* RSS Source Management Panel */}
         <div className="bg-card text-card-foreground rounded-lg border shadow-sm p-6 flex flex-col h-[600px]">
           <h2 className="text-xl font-semibold mb-4">RSS Source Management</h2>
           <p className="text-muted-foreground text-sm mb-6">Manage RSS feeds used for edital discovery.</p>
