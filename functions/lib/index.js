@@ -57,6 +57,31 @@ const rss_parser_1 = __importDefault(require("rss-parser"));
 function removeAccents(str) {
     return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
+async function fetchWithRetry(url, options = {}, retries = 3) {
+    const defaultHeaders = {
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (compatible; TriadeAssessoria/1.0)'
+    };
+    const opts = { ...options, headers: { ...defaultHeaders, ...options.headers } };
+    for (let i = 0; i < retries; i++) {
+        try {
+            // Use AbortSignal.timeout if available (Node 17.3+), fallback to AbortController otherwise.
+            const signal = AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined;
+            const res = await fetch(url, { ...opts, signal });
+            if (!res.ok) {
+                throw new Error(`API returned ${res.status} for ${url}`);
+            }
+            return res;
+        }
+        catch (error) {
+            logger.warn(`Fetch attempt ${i + 1} failed for ${url}: ${error.message}`);
+            if (i === retries - 1)
+                throw error;
+            await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Simple backoff
+        }
+    }
+    throw new Error(`Failed to fetch ${url} after ${retries} retries`);
+}
 admin.initializeApp();
 const ai = (0, genkit_1.genkit)({
     plugins: [(0, google_genai_1.vertexAI)({ projectId: process.env.GCLOUD_PROJECT || 'triade-assessoria', location: 'us-central1' })],
@@ -395,9 +420,7 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
             const normalizedMunicipio = removeAccents(municipio);
             const searchUrl = `https://mapaosc.ipea.gov.br/api/api/busca/municipio/${encodeURIComponent(normalizedMunicipio)}`;
             logger.info(`IPEA Municipio Search URL: ${searchUrl}`);
-            const searchRes = await fetch(searchUrl);
-            if (!searchRes.ok)
-                throw new Error(`IPEA API returned ${searchRes.status} for municipio search`);
+            const searchRes = await fetchWithRetry(searchUrl);
             const searchData = await searchRes.json();
             logger.info(`IPEA Municipio Search Results: ${JSON.stringify(searchData)}`);
             if (!Array.isArray(searchData) || searchData.length === 0) {
@@ -405,9 +428,7 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
                 return { imported: 0, results, message: 'No municipio found or IPEA search failed.' };
             }
             const edmu_cd_municipio = searchData[0].edmu_cd_municipio;
-            const oscsRes = await fetch(`https://mapaosc.ipea.gov.br/api/api/geo/oscs/municipio/${edmu_cd_municipio}`);
-            if (!oscsRes.ok)
-                throw new Error(`IPEA API returned ${oscsRes.status} for OSCs by municipio`);
+            const oscsRes = await fetchWithRetry(`https://mapaosc.ipea.gov.br/api/api/geo/oscs/municipio/${edmu_cd_municipio}`);
             oscList = await oscsRes.json();
         }
         else if (uf) {
@@ -419,9 +440,7 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
             const normalizedUf = removeAccents(stateName);
             const searchUrl = `https://mapaosc.ipea.gov.br/api/api/busca/estado/${encodeURIComponent(normalizedUf)}`;
             logger.info(`IPEA Estado Search URL: ${searchUrl}`);
-            const searchRes = await fetch(searchUrl);
-            if (!searchRes.ok)
-                throw new Error(`IPEA API returned ${searchRes.status} for UF search`);
+            const searchRes = await fetchWithRetry(searchUrl);
             const searchData = await searchRes.json();
             logger.info(`IPEA Estado Search Results: ${JSON.stringify(searchData)}`);
             if (!Array.isArray(searchData) || searchData.length === 0) {
@@ -429,9 +448,7 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
                 return { imported: 0, results, message: 'No UF found or IPEA search failed.' };
             }
             const eduf_cd_uf = searchData[0].eduf_cd_uf;
-            const oscsRes = await fetch(`https://mapaosc.ipea.gov.br/api/api/geo/oscs/estado/${eduf_cd_uf}`);
-            if (!oscsRes.ok)
-                throw new Error(`IPEA API returned ${oscsRes.status} for OSCs by estado`);
+            const oscsRes = await fetchWithRetry(`https://mapaosc.ipea.gov.br/api/api/geo/oscs/estado/${eduf_cd_uf}`);
             oscList = await oscsRes.json();
         }
     }
@@ -451,11 +468,7 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
         const id_osc = osc.id_osc;
         try {
             // 3.a Get CNPJ from IPEA
-            const oscDetailsRes = await fetch(`https://mapaosc.ipea.gov.br/api/api/osc/${id_osc}`);
-            if (!oscDetailsRes.ok) {
-                results.push({ oscId: id_osc, status: 'error', error: `IPEA API returned ${oscDetailsRes.status} for OSC details` });
-                continue;
-            }
+            const oscDetailsRes = await fetchWithRetry(`https://mapaosc.ipea.gov.br/api/api/osc/${id_osc}`);
             const oscDetails = await oscDetailsRes.json();
             const rawCnpj = oscDetails.cd_identificador_osc;
             if (!rawCnpj) {
@@ -468,11 +481,7 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
                 continue;
             }
             // 3.b Enrich Profile Data using BrasilAPI
-            const brasilApiResponse = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cleanCnpj}`);
-            if (!brasilApiResponse.ok) {
-                results.push({ oscId: id_osc, cnpj: cleanCnpj, status: 'error', error: `BrasilAPI returned ${brasilApiResponse.status}` });
-                continue;
-            }
+            const brasilApiResponse = await fetchWithRetry(`https://brasilapi.com.br/api/cnpj/v1/${cleanCnpj}`);
             const rawData = await brasilApiResponse.json();
             // Transform data to match ngoProfileSchema using BrasilAPI rich data
             const name = rawData.razao_social || 'Nome Desconhecido';
