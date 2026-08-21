@@ -35,10 +35,24 @@ export declare function processMatchEvaluation(oscId: string, editalId: string, 
 export declare const matchEvaluatorWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
 export declare const ingestOscDataFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     results: {
-        cnpj: string;
+        oscId: number;
+        cnpj?: string;
         status: string;
         error?: string;
     }[];
+    message: string;
+    totalDiscovered?: never;
+    processed?: never;
+} | {
+    message?: never;
+    results: {
+        oscId: number;
+        cnpj?: string;
+        status: string;
+        error?: string;
+    }[];
+    totalDiscovered: number;
+    processed: number;
 }>, unknown>;
 export declare const onEditalCreated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").QueryDocumentSnapshot | undefined, {
     editalId: string;
