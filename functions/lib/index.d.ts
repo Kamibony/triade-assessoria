@@ -70,7 +70,15 @@ export declare const triggerMatchOrchestrator: import("firebase-functions/v2/htt
 export declare const onOscUpdated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").Change<import("firebase-functions/v2/firestore").QueryDocumentSnapshot> | undefined, {
     oscId: string;
 }>>;
+export declare function processRssFeeds(): Promise<{
+    processedCount: number;
+    savedCount: number;
+}>;
 export declare const ingestGoogleAlertsRss: import("firebase-functions/v2/scheduler").ScheduleFunction;
+export declare const manualTriggerRssSyncFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    processedCount: number;
+    savedCount: number;
+}>, unknown>;
 export declare const scheduledMatchSweeper: import("firebase-functions/v2/scheduler").ScheduleFunction;
 export declare const onMatchGenerated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").Change<import("firebase-functions/v2/firestore").DocumentSnapshot> | undefined, {
     matchId: string;

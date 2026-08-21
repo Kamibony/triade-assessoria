@@ -36,8 +36,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = exports.matchSchema = void 0;
+exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = exports.matchSchema = void 0;
 exports.processMatchEvaluation = processMatchEvaluation;
+exports.processRssFeeds = processRssFeeds;
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-admin/firestore");
 const functions_1 = require("firebase-admin/functions");
@@ -559,7 +560,7 @@ exports.onOscUpdated = (0, firestore_2.onDocumentUpdated)('oscs/{oscId}', async 
     await Promise.all(enqueuePromises);
     console.log(`Enqueued ${editaisSnapshot.docs.length} match tasks for OSC update ${oscId}.`);
 });
-exports.ingestGoogleAlertsRss = (0, scheduler_1.onSchedule)('0 2 * * *', async () => {
+async function processRssFeeds() {
     const RSS_URLS = [
         // Mock Google Alerts RSS URLs
         "https://news.google.com/rss/search?q=edital+ONG+OR+OSC+brasil",
@@ -622,6 +623,28 @@ exports.ingestGoogleAlertsRss = (0, scheduler_1.onSchedule)('0 2 * * *', async (
         }
     }
     console.log(`Ingestion complete. Processed ${processedCount} items, saved ${savedCount} valid editais.`);
+    return { processedCount, savedCount };
+}
+exports.ingestGoogleAlertsRss = (0, scheduler_1.onSchedule)('0 2 * * *', async () => {
+    await processRssFeeds();
+});
+exports.manualTriggerRssSyncFunction = (0, https_1.onCall)({
+    cors: true,
+    timeoutSeconds: 540,
+}, async () => {
+    // TODO: Re-enable auth checks once Auth is implemented.
+    // if (!request.auth) {
+    //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    // }
+    try {
+        const result = await processRssFeeds();
+        return result;
+    }
+    catch (error) {
+        console.error('Error in manualTriggerRssSyncFunction:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Internal error during manual RSS sync.';
+        throw new https_1.HttpsError('internal', errorMessage);
+    }
 });
 exports.scheduledMatchSweeper = (0, scheduler_1.onSchedule)('0 0 * * 0', async () => {
     const db = (0, firestore_1.getFirestore)();
