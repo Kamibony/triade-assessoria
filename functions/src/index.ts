@@ -118,9 +118,10 @@ Responda estritamente em português do Brasil (pt-BR).
 export const parsePdfProfileFunction = onCall({
     cors: true
 }, async (request) => {
-    if (!request.auth) {
-        throw new HttpsError('unauthenticated', 'User must be authenticated.');
-    }
+    // TODO: Re-enable auth checks once Auth is implemented.
+    // if (!request.auth) {
+    //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    // }
     return await parsePdfToProfile(request.data);
 });
 
@@ -229,9 +230,10 @@ async function fetchAndExtractText(url: string): Promise<string> {
 export const extractEditalRulesFunction = onCall({
     cors: true
 }, async (request) => {
-    if (!request.auth) {
-        throw new HttpsError('unauthenticated', 'User must be authenticated.');
-    }
+    // TODO: Re-enable auth checks once Auth is implemented.
+    // if (!request.auth) {
+    //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    // }
     return await extractEditalRules(request.data);
 });
 
@@ -379,9 +381,10 @@ export const ingestOscDataFunction = onCall({
     cors: true,
     timeoutSeconds: 540,
 }, async (request) => {
-    if (!request.auth) {
-        throw new HttpsError('unauthenticated', 'User must be authenticated.');
-    }
+    // TODO: Re-enable auth checks once Auth is implemented.
+    // if (!request.auth) {
+    //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    // }
 
     const { uf, municipio, limit = 50 } = request.data as { uf?: string; municipio?: string; limit?: number };
 
@@ -555,9 +558,10 @@ export const onEditalCreated = onDocumentCreated('editais/{editalId}', async (ev
 export const triggerMatchOrchestrator = onCall({
     cors: true
 }, async (request) => {
-    if (!request.auth) {
-        throw new HttpsError('unauthenticated', 'User must be authenticated.');
-    }
+    // TODO: Re-enable auth checks once Auth is implemented.
+    // if (!request.auth) {
+    //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    // }
 
     const { editalId, oscId, forceRecalculate } = request.data;
 

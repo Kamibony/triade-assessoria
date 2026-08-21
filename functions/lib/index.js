@@ -138,9 +138,10 @@ Responda estritamente em português do Brasil (pt-BR).
 exports.parsePdfProfileFunction = (0, https_1.onCall)({
     cors: true
 }, async (request) => {
-    if (!request.auth) {
-        throw new https_1.HttpsError('unauthenticated', 'User must be authenticated.');
-    }
+    // TODO: Re-enable auth checks once Auth is implemented.
+    // if (!request.auth) {
+    //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    // }
     return await parsePdfToProfile(request.data);
 });
 const extractEditalRules = ai.defineFlow({
@@ -229,9 +230,10 @@ async function fetchAndExtractText(url) {
 exports.extractEditalRulesFunction = (0, https_1.onCall)({
     cors: true
 }, async (request) => {
-    if (!request.auth) {
-        throw new https_1.HttpsError('unauthenticated', 'User must be authenticated.');
-    }
+    // TODO: Re-enable auth checks once Auth is implemented.
+    // if (!request.auth) {
+    //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    // }
     return await extractEditalRules(request.data);
 });
 const firestore_2 = require("firebase-functions/v2/firestore");
@@ -361,9 +363,10 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
     cors: true,
     timeoutSeconds: 540,
 }, async (request) => {
-    if (!request.auth) {
-        throw new https_1.HttpsError('unauthenticated', 'User must be authenticated.');
-    }
+    // TODO: Re-enable auth checks once Auth is implemented.
+    // if (!request.auth) {
+    //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    // }
     const { uf, municipio, limit = 50 } = request.data;
     if (!uf && !municipio) {
         throw new https_1.HttpsError('invalid-argument', 'Either uf or municipio filter is required.');
@@ -507,9 +510,10 @@ exports.onEditalCreated = (0, firestore_2.onDocumentCreated)('editais/{editalId}
 exports.triggerMatchOrchestrator = (0, https_1.onCall)({
     cors: true
 }, async (request) => {
-    if (!request.auth) {
-        throw new https_1.HttpsError('unauthenticated', 'User must be authenticated.');
-    }
+    // TODO: Re-enable auth checks once Auth is implemented.
+    // if (!request.auth) {
+    //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    // }
     const { editalId, oscId, forceRecalculate } = request.data;
     if (!editalId || !oscId) {
         throw new https_1.HttpsError('invalid-argument', 'Missing editalId or oscId.');
