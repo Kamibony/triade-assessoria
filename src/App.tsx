@@ -11,6 +11,7 @@ import { FloatingWhatsApp } from './components/ui/FloatingWhatsApp';
 import { MagicEligibility } from './components/MagicEligibility';
 import { EditaisList } from './components/EditaisList';
 import { NgoMatchView } from './components/NgoMatchView';
+import { MatchesDashboard } from './components/MatchesDashboard';
 
 function Header() {
   const location = useLocation();
@@ -22,6 +23,7 @@ function Header() {
         <Link to="/" className="text-xl font-bold tracking-tighter">TRÍADE<span className="text-primary">.</span></Link>
         <nav className="flex gap-4">
           {!isHome && <Link to="/" className="text-sm font-medium hover:text-primary transition-colors">Início</Link>}
+          <Link to="/dashboard" className="text-sm font-medium hover:text-primary transition-colors">Dashboard</Link>
           <Link to="/editais" className="text-sm font-medium hover:text-primary transition-colors">Ver Editais</Link>
         </nav>
       </div>
@@ -54,6 +56,7 @@ function App() {
             <Route path="/" element={<LandingPage />} />
             <Route path="/editais" element={<EditaisList />} />
             <Route path="/match/:editalId" element={<NgoMatchView />} />
+            <Route path="/dashboard" element={<MatchesDashboard />} />
           </Routes>
         </div>
         <Footer />
