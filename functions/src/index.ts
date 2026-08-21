@@ -382,6 +382,16 @@ export const matchEvaluatorWorker = onTaskDispatched({
 });
 
 
+const STATE_ABBREVIATIONS: Record<string, string> = {
+    'AC': 'Acre', 'AL': 'Alagoas', 'AP': 'Amapa', 'AM': 'Amazonas', 'BA': 'Bahia',
+    'CE': 'Ceara', 'DF': 'Distrito Federal', 'ES': 'Espirito Santo', 'GO': 'Goias',
+    'MA': 'Maranhao', 'MT': 'Mato Grosso', 'MS': 'Mato Grosso do Sul', 'MG': 'Minas Gerais',
+    'PA': 'Para', 'PB': 'Paraiba', 'PR': 'Parana', 'PE': 'Pernambuco', 'PI': 'Piaui',
+    'RJ': 'Rio de Janeiro', 'RN': 'Rio Grande do Norte', 'RS': 'Rio Grande do Sul',
+    'RO': 'Rondonia', 'RR': 'Roraima', 'SC': 'Santa Catarina', 'SP': 'Sao Paulo',
+    'SE': 'Sergipe', 'TO': 'Tocantins'
+};
+
 export const ingestOscDataFunction = onCall({
     cors: true,
     timeoutSeconds: 540,
@@ -414,6 +424,7 @@ export const ingestOscDataFunction = onCall({
             logger.info(`IPEA Municipio Search Results: ${JSON.stringify(searchData)}`);
 
             if (!Array.isArray(searchData) || searchData.length === 0) {
+                 logger.error(`IPEA Municipio Search returned empty for ${normalizedMunicipio}`);
                  return { imported: 0, results, message: 'No municipio found or IPEA search failed.' };
             }
 
@@ -424,7 +435,12 @@ export const ingestOscDataFunction = onCall({
             oscList = await oscsRes.json();
 
         } else if (uf) {
-            const normalizedUf = removeAccents(uf);
+            let stateName = uf.trim();
+            if (stateName.length === 2) {
+                const upperUf = stateName.toUpperCase();
+                stateName = STATE_ABBREVIATIONS[upperUf] || stateName;
+            }
+            const normalizedUf = removeAccents(stateName);
             const searchUrl = `https://mapaosc.ipea.gov.br/api/api/busca/estado/${encodeURIComponent(normalizedUf)}`;
             logger.info(`IPEA Estado Search URL: ${searchUrl}`);
             const searchRes = await fetch(searchUrl);
@@ -433,6 +449,7 @@ export const ingestOscDataFunction = onCall({
             logger.info(`IPEA Estado Search Results: ${JSON.stringify(searchData)}`);
 
             if (!Array.isArray(searchData) || searchData.length === 0) {
+                logger.error(`IPEA Estado Search returned empty for ${normalizedUf}`);
                 return { imported: 0, results, message: 'No UF found or IPEA search failed.' };
             }
 
