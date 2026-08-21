@@ -36,8 +36,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = exports.matchSchema = void 0;
+exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.ingestManualEditalFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = exports.matchSchema = void 0;
 exports.processMatchEvaluation = processMatchEvaluation;
+exports.discoverProsasEditais = discoverProsasEditais;
 exports.processRssFeeds = processRssFeeds;
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-admin/firestore");
@@ -595,11 +596,27 @@ exports.onOscUpdated = (0, firestore_2.onDocumentUpdated)('oscs/{oscId}', async 
     await Promise.all(enqueuePromises);
     console.log(`Enqueued ${editaisSnapshot.docs.length} match tasks for OSC update ${oscId}.`);
 });
+// Manual Prosas Discovery specific logic
+async function discoverProsasEditais(region = "nordeste") {
+    console.log(`Discovering Prosas Editais for region: ${region}`);
+    const parser = new rss_parser_1.default();
+    const feedUrl = `https://blog.prosas.com.br/categoria/editais/feed/?tag=${region},paraiba`;
+    try {
+        const feed = await parser.parseURL(feedUrl);
+        return feed.items;
+    }
+    catch (e) {
+        console.error("Error fetching Prosas RSS feed:", e);
+        return [];
+    }
+}
 async function processRssFeeds() {
     const RSS_URLS = [
         // Mock Google Alerts RSS URLs
         "https://news.google.com/rss/search?q=edital+ONG+OR+OSC+brasil",
-        "https://news.google.com/rss/search?q=financiamento+projetos+culturais+edital"
+        "https://news.google.com/rss/search?q=financiamento+projetos+culturais+edital",
+        // Prosas RSS with regional filters for Nordeste and Paraiba
+        "https://blog.prosas.com.br/categoria/editais/feed/?tag=nordeste,paraiba"
     ];
     const parser = new rss_parser_1.default();
     const db = (0, firestore_1.getFirestore)();
@@ -662,6 +679,47 @@ async function processRssFeeds() {
 }
 exports.ingestGoogleAlertsRss = (0, scheduler_1.onSchedule)('0 2 * * *', async () => {
     await processRssFeeds();
+});
+exports.ingestManualEditalFunction = (0, https_1.onCall)({
+    cors: true,
+    timeoutSeconds: 540,
+}, async (request) => {
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'User must be authenticated.');
+    }
+    const url = request.data.url;
+    if (!url || typeof url !== 'string') {
+        throw new https_1.HttpsError('invalid-argument', 'A valid URL is required.');
+    }
+    try {
+        const text = await fetchAndExtractText(url);
+        if (!text || text.length < 500) {
+            return { success: false, message: "A extração de texto falhou ou a página tem pouco conteúdo." };
+        }
+        const triageResult = await triageEditalWebpage({ text });
+        if (!triageResult.isValidEdital) {
+            return { success: false, message: `O conteúdo não parece ser um edital válido. Motivo: ${triageResult.reason}` };
+        }
+        const editalResult = await extractEditalRules({ text });
+        const parseResult = schemas_js_1.editalSchema.safeParse(editalResult);
+        if (!parseResult.success) {
+            return { success: false, message: "Falha na formatação dos dados estruturados do edital pelo modelo de IA." };
+        }
+        const db = (0, firestore_1.getFirestore)();
+        const editalDocData = {
+            ...parseResult.data,
+            rawText: text.substring(0, 5000), // Save a snippet
+            sourceUrl: url,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+        };
+        const docRef = await db.collection('editais').add(editalDocData);
+        return { success: true, editalId: docRef.id, message: "Edital adicionado com sucesso." };
+    }
+    catch (error) {
+        console.error('Error in ingestManualEditalFunction:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Internal error during manual edital ingestion.';
+        throw new https_1.HttpsError('internal', errorMessage);
+    }
 });
 exports.manualTriggerRssSyncFunction = (0, https_1.onCall)({
     cors: true,

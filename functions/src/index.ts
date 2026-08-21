@@ -660,11 +660,27 @@ export const onOscUpdated = onDocumentUpdated('oscs/{oscId}', async (event) => {
 });
 
 
+// Manual Prosas Discovery specific logic
+export async function discoverProsasEditais(region: string = "nordeste") {
+    console.log(`Discovering Prosas Editais for region: ${region}`);
+    const parser = new Parser();
+    const feedUrl = `https://blog.prosas.com.br/categoria/editais/feed/?tag=${region},paraiba`;
+    try {
+         const feed = await parser.parseURL(feedUrl);
+         return feed.items;
+    } catch (e) {
+         console.error("Error fetching Prosas RSS feed:", e);
+         return [];
+    }
+}
+
 export async function processRssFeeds() {
     const RSS_URLS = [
         // Mock Google Alerts RSS URLs
         "https://news.google.com/rss/search?q=edital+ONG+OR+OSC+brasil",
-        "https://news.google.com/rss/search?q=financiamento+projetos+culturais+edital"
+        "https://news.google.com/rss/search?q=financiamento+projetos+culturais+edital",
+        // Prosas RSS with regional filters for Nordeste and Paraiba
+        "https://blog.prosas.com.br/categoria/editais/feed/?tag=nordeste,paraiba"
     ];
 
     const parser = new Parser();
@@ -735,6 +751,55 @@ export async function processRssFeeds() {
 
 export const ingestGoogleAlertsRss = onSchedule('0 2 * * *', async () => {
     await processRssFeeds();
+});
+
+export const ingestManualEditalFunction = onCall({
+    cors: true,
+    timeoutSeconds: 540,
+}, async (request) => {
+    if (!request.auth) {
+        throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    }
+
+    const url = request.data.url;
+    if (!url || typeof url !== 'string') {
+        throw new HttpsError('invalid-argument', 'A valid URL is required.');
+    }
+
+    try {
+        const text = await fetchAndExtractText(url);
+        if (!text || text.length < 500) {
+             return { success: false, message: "A extração de texto falhou ou a página tem pouco conteúdo." };
+        }
+
+        const triageResult = await triageEditalWebpage({ text });
+        if (!triageResult.isValidEdital) {
+             return { success: false, message: `O conteúdo não parece ser um edital válido. Motivo: ${triageResult.reason}` };
+        }
+
+        const editalResult = await extractEditalRules({ text });
+        const parseResult = editalSchema.safeParse(editalResult);
+
+        if (!parseResult.success) {
+            return { success: false, message: "Falha na formatação dos dados estruturados do edital pelo modelo de IA." };
+        }
+
+        const db = getFirestore();
+        const editalDocData = {
+            ...parseResult.data,
+            rawText: text.substring(0, 5000), // Save a snippet
+            sourceUrl: url,
+            createdAt: FieldValue.serverTimestamp(),
+        };
+
+        const docRef = await db.collection('editais').add(editalDocData);
+        return { success: true, editalId: docRef.id, message: "Edital adicionado com sucesso." };
+
+    } catch (error: unknown) {
+        console.error('Error in ingestManualEditalFunction:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Internal error during manual edital ingestion.';
+        throw new HttpsError('internal', errorMessage);
+    }
 });
 
 export const manualTriggerRssSyncFunction = onCall({

@@ -28,6 +28,11 @@ export function AdminDashboard() {
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<{type: 'success' | 'error', message: string} | null>(null);
 
+  // Manual Edital Ingestion State
+  const [manualUrl, setManualUrl] = useState('');
+  const [isIngestingManual, setIsIngestingManual] = useState(false);
+  const [manualIngestResult, setManualIngestResult] = useState<{type: 'success' | 'error', message: string} | null>(null);
+
   const db = getFirestore();
 
   useEffect(() => {
@@ -97,6 +102,42 @@ export function AdminDashboard() {
       });
     } finally {
       setIsSyncingRss(false);
+    }
+  };
+
+  const handleManualIngest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualUrl.trim()) return;
+
+    setIsIngestingManual(true);
+    setManualIngestResult(null);
+
+    try {
+      const ingestManualEdital = httpsCallable(functions, 'ingestManualEditalFunction');
+      const result = await ingestManualEdital({ url: manualUrl });
+
+      const data = result.data as { success: boolean; editalId?: string; message?: string };
+
+      if (data.success) {
+        setManualIngestResult({
+          type: 'success',
+          message: `Edital ingested successfully! ID: ${data.editalId}`
+        });
+        setManualUrl('');
+      } else {
+        setManualIngestResult({
+          type: 'error',
+          message: data.message || 'Failed to ingest edital.'
+        });
+      }
+    } catch (error: unknown) {
+      console.error("Error ingesting manual edital:", error);
+      setManualIngestResult({
+        type: 'error',
+        message: error instanceof Error ? error.message : String(error) || 'Internal error during manual ingestion.'
+      });
+    } finally {
+      setIsIngestingManual(false);
     }
   };
 
@@ -236,6 +277,47 @@ export function AdminDashboard() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Manual Edital Ingestion Panel */}
+        <div className="bg-card text-card-foreground rounded-lg border shadow-sm p-6 flex flex-col h-[600px]">
+          <h2 className="text-xl font-semibold mb-4">Manual Edital Ingestion</h2>
+          <p className="text-muted-foreground text-sm mb-6">Directly ingest an edital from a URL (e.g. Prosas).</p>
+
+          <form onSubmit={handleManualIngest} className="space-y-4">
+            <div>
+              <label htmlFor="manualUrl" className="block text-sm font-medium mb-1">Edital URL</label>
+              <input
+                id="manualUrl"
+                type="url"
+                required
+                value={manualUrl}
+                onChange={(e) => setManualUrl(e.target.value)}
+                placeholder="https://prosas.com.br/editais/..."
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+
+            <Button type="submit" disabled={isIngestingManual} className="w-full">
+              {isIngestingManual ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+              Fetch & Ingest
+            </Button>
+          </form>
+
+          {manualIngestResult && (
+            <div className={`mt-6 p-4 rounded-md border flex items-start ${
+              manualIngestResult.type === 'success'
+                ? 'bg-green-500/10 border-green-500/50 text-green-600 dark:text-green-400'
+                : 'bg-destructive/10 border-destructive/50 text-destructive'
+            }`}>
+              {manualIngestResult.type === 'success' ? (
+                <CheckCircle2 className="w-5 h-5 mr-3 shrink-0 mt-0.5" />
+              ) : (
+                <AlertCircle className="w-5 h-5 mr-3 shrink-0 mt-0.5" />
+              )}
+              <p className="text-sm">{manualIngestResult.message}</p>
+            </div>
+          )}
         </div>
 
         {/* OSC Bulk Importer Panel */}
