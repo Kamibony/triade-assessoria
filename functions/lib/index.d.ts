@@ -72,4 +72,7 @@ export declare const onOscUpdated: import("firebase-functions/core").CloudFuncti
 }>>;
 export declare const ingestGoogleAlertsRss: import("firebase-functions/v2/scheduler").ScheduleFunction;
 export declare const scheduledMatchSweeper: import("firebase-functions/v2/scheduler").ScheduleFunction;
+export declare const onMatchGenerated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").Change<import("firebase-functions/v2/firestore").DocumentSnapshot> | undefined, {
+    matchId: string;
+}>>;
 //# sourceMappingURL=index.d.ts.map

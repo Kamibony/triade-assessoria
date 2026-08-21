@@ -237,7 +237,7 @@ export const extractEditalRulesFunction = onCall({
 
 
 
-import { onDocumentCreated, onDocumentUpdated } from 'firebase-functions/v2/firestore';
+import { onDocumentCreated, onDocumentUpdated, onDocumentWritten } from 'firebase-functions/v2/firestore';
 
 
 export async function processMatchEvaluation(oscId: string, editalId: string, forceRecalculate: boolean = false) {
@@ -728,4 +728,66 @@ export const scheduledMatchSweeper = onSchedule('0 0 * * 0', async () => {
     }
 
     console.log(`Weekly sweeper complete. Enqueued ${enqueuedCount} missing matches.`);
+});
+
+import { NotificationService, MockNotificationProvider } from './services/notifications.js';
+
+export const onMatchGenerated = onDocumentWritten('matches/{matchId}', async (event) => {
+    const MATCH_THRESHOLD = 85;
+
+    const beforeData = event.data?.before.data();
+    const afterData = event.data?.after.data();
+
+    // If it's a deletion, afterData is undefined. Ignore.
+    if (!afterData) {
+        return;
+    }
+
+    const currentScore = afterData.matchScore || 0;
+    const previousScore = beforeData?.matchScore || 0;
+
+    // We only care if the score is now >= THRESHOLD, AND it wasn't previously >= THRESHOLD.
+    // This prevents redundant alerts for updates that keep the score high.
+    if (currentScore >= MATCH_THRESHOLD && previousScore < MATCH_THRESHOLD) {
+        const db = getFirestore();
+        const oscId = afterData.oscId;
+        const editalId = afterData.editalId;
+
+        if (!oscId || !editalId) {
+            console.error("Match document is missing oscId or editalId:", event.params.matchId);
+            return;
+        }
+
+        try {
+            const [oscSnap, editalSnap] = await Promise.all([
+                db.collection('oscs').doc(oscId).get(),
+                db.collection('editais').doc(editalId).get()
+            ]);
+
+            const ngoName = oscSnap.data()?.name || "ONG Desconhecida";
+            const editalTitle = editalSnap.data()?.title || "Edital Desconhecido";
+
+            // Format action plan snippet if it exists
+            let actionPlanSnippet = undefined;
+            if (Array.isArray(afterData.actionPlan) && afterData.actionPlan.length > 0) {
+                actionPlanSnippet = afterData.actionPlan[0];
+                if (afterData.actionPlan.length > 1) {
+                    actionPlanSnippet += " (e mais...)";
+                }
+            }
+
+            const notificationService = new NotificationService(new MockNotificationProvider());
+
+            await notificationService.notifyHighMatch({
+                ngoName,
+                editalTitle,
+                score: currentScore,
+                actionPlanSnippet
+            });
+
+            console.log(`Notification sent for match ${event.params.matchId} (Score: ${currentScore})`);
+        } catch (error) {
+            console.error("Error sending notification for match:", event.params.matchId, error);
+        }
+    }
 });

@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scheduledMatchSweeper = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = exports.matchSchema = void 0;
+exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = exports.matchSchema = void 0;
 exports.processMatchEvaluation = processMatchEvaluation;
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-admin/firestore");
@@ -646,5 +646,55 @@ exports.scheduledMatchSweeper = (0, scheduler_1.onSchedule)('0 0 * * 0', async (
         enqueuedCount += missingOscIds.length;
     }
     console.log(`Weekly sweeper complete. Enqueued ${enqueuedCount} missing matches.`);
+});
+const notifications_js_1 = require("./services/notifications.js");
+exports.onMatchGenerated = (0, firestore_2.onDocumentWritten)('matches/{matchId}', async (event) => {
+    const MATCH_THRESHOLD = 85;
+    const beforeData = event.data?.before.data();
+    const afterData = event.data?.after.data();
+    // If it's a deletion, afterData is undefined. Ignore.
+    if (!afterData) {
+        return;
+    }
+    const currentScore = afterData.matchScore || 0;
+    const previousScore = beforeData?.matchScore || 0;
+    // We only care if the score is now >= THRESHOLD, AND it wasn't previously >= THRESHOLD.
+    // This prevents redundant alerts for updates that keep the score high.
+    if (currentScore >= MATCH_THRESHOLD && previousScore < MATCH_THRESHOLD) {
+        const db = (0, firestore_1.getFirestore)();
+        const oscId = afterData.oscId;
+        const editalId = afterData.editalId;
+        if (!oscId || !editalId) {
+            console.error("Match document is missing oscId or editalId:", event.params.matchId);
+            return;
+        }
+        try {
+            const [oscSnap, editalSnap] = await Promise.all([
+                db.collection('oscs').doc(oscId).get(),
+                db.collection('editais').doc(editalId).get()
+            ]);
+            const ngoName = oscSnap.data()?.name || "ONG Desconhecida";
+            const editalTitle = editalSnap.data()?.title || "Edital Desconhecido";
+            // Format action plan snippet if it exists
+            let actionPlanSnippet = undefined;
+            if (Array.isArray(afterData.actionPlan) && afterData.actionPlan.length > 0) {
+                actionPlanSnippet = afterData.actionPlan[0];
+                if (afterData.actionPlan.length > 1) {
+                    actionPlanSnippet += " (e mais...)";
+                }
+            }
+            const notificationService = new notifications_js_1.NotificationService(new notifications_js_1.MockNotificationProvider());
+            await notificationService.notifyHighMatch({
+                ngoName,
+                editalTitle,
+                score: currentScore,
+                actionPlanSnippet
+            });
+            console.log(`Notification sent for match ${event.params.matchId} (Score: ${currentScore})`);
+        }
+        catch (error) {
+            console.error("Error sending notification for match:", event.params.matchId, error);
+        }
+    }
 });
 //# sourceMappingURL=index.js.map
