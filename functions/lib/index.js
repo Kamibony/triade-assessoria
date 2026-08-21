@@ -271,6 +271,7 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
         existingMatchData = matchesQuery.docs[0]?.data() || null;
     }
     // Helper for safe timestamp extraction
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const getMillis = (field) => {
         if (!field)
             return null;
@@ -363,27 +364,84 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
     if (!request.auth) {
         throw new https_1.HttpsError('unauthenticated', 'User must be authenticated.');
     }
-    const { cnpjs } = request.data;
-    if (!cnpjs || !Array.isArray(cnpjs) || cnpjs.length === 0) {
-        throw new https_1.HttpsError('invalid-argument', 'A list of CNPJs is required.');
+    const { uf, municipio, limit = 50 } = request.data;
+    if (!uf && !municipio) {
+        throw new https_1.HttpsError('invalid-argument', 'Either uf or municipio filter is required.');
     }
     const db = (0, firestore_1.getFirestore)();
     const results = [];
-    for (const cnpj of cnpjs) {
+    // 1. IPEA Discovery (Geographical Search)
+    let oscList = [];
+    try {
+        if (municipio) {
+            // Encode URI component to handle spaces and special characters
+            const searchRes = await fetch(`https://mapaosc.ipea.gov.br/api/api/busca/municipio/${encodeURIComponent(municipio)}`);
+            if (!searchRes.ok)
+                throw new Error(`IPEA API returned ${searchRes.status} for municipio search`);
+            const searchData = await searchRes.json();
+            if (!Array.isArray(searchData) || searchData.length === 0) {
+                return { results, message: 'No municipio found.' };
+            }
+            const edmu_cd_municipio = searchData[0].edmu_cd_municipio;
+            const oscsRes = await fetch(`https://mapaosc.ipea.gov.br/api/api/geo/oscs/municipio/${edmu_cd_municipio}`);
+            if (!oscsRes.ok)
+                throw new Error(`IPEA API returned ${oscsRes.status} for OSCs by municipio`);
+            oscList = await oscsRes.json();
+        }
+        else if (uf) {
+            const searchRes = await fetch(`https://mapaosc.ipea.gov.br/api/api/busca/estado/${encodeURIComponent(uf)}`);
+            if (!searchRes.ok)
+                throw new Error(`IPEA API returned ${searchRes.status} for UF search`);
+            const searchData = await searchRes.json();
+            if (!Array.isArray(searchData) || searchData.length === 0) {
+                return { results, message: 'No UF found.' };
+            }
+            const eduf_cd_uf = searchData[0].eduf_cd_uf;
+            const oscsRes = await fetch(`https://mapaosc.ipea.gov.br/api/api/geo/oscs/estado/${eduf_cd_uf}`);
+            if (!oscsRes.ok)
+                throw new Error(`IPEA API returned ${oscsRes.status} for OSCs by estado`);
+            oscList = await oscsRes.json();
+        }
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error during IPEA discovery';
+        console.error('IPEA Discovery Error:', errorMessage);
+        throw new https_1.HttpsError('internal', errorMessage);
+    }
+    if (!Array.isArray(oscList)) {
+        oscList = [];
+    }
+    // 2. Apply Safety Limit
+    const slicedOscList = oscList.slice(0, limit);
+    // 3. Fetch CNPJs from IPEA & Enrich with BrasilAPI (Hybrid Pipeline)
+    for (const osc of slicedOscList) {
+        const id_osc = osc.id_osc;
         try {
-            // Clean CNPJ (remove non-digits)
-            const cleanCnpj = cnpj.replace(/\D/g, '');
+            // 3.a Get CNPJ from IPEA
+            const oscDetailsRes = await fetch(`https://mapaosc.ipea.gov.br/api/api/osc/${id_osc}`);
+            if (!oscDetailsRes.ok) {
+                results.push({ oscId: id_osc, status: 'error', error: `IPEA API returned ${oscDetailsRes.status} for OSC details` });
+                continue;
+            }
+            const oscDetails = await oscDetailsRes.json();
+            const rawCnpj = oscDetails.cd_identificador_osc;
+            if (!rawCnpj) {
+                results.push({ oscId: id_osc, status: 'error', error: 'No CNPJ returned from IPEA' });
+                continue;
+            }
+            const cleanCnpj = String(rawCnpj).replace(/\D/g, '');
             if (cleanCnpj.length !== 14) {
-                results.push({ cnpj, status: 'error', error: 'Invalid CNPJ length' });
+                results.push({ oscId: id_osc, cnpj: rawCnpj, status: 'error', error: 'Invalid CNPJ length from IPEA' });
                 continue;
             }
-            const response = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cleanCnpj}`);
-            if (!response.ok) {
-                results.push({ cnpj, status: 'error', error: `BrasilAPI returned ${response.status}` });
+            // 3.b Enrich Profile Data using BrasilAPI
+            const brasilApiResponse = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cleanCnpj}`);
+            if (!brasilApiResponse.ok) {
+                results.push({ oscId: id_osc, cnpj: cleanCnpj, status: 'error', error: `BrasilAPI returned ${brasilApiResponse.status}` });
                 continue;
             }
-            const rawData = await response.json();
-            // Transform data to match ngoProfileSchema
+            const rawData = await brasilApiResponse.json();
+            // Transform data to match ngoProfileSchema using BrasilAPI rich data
             const name = rawData.razao_social || 'Nome Desconhecido';
             const foundationDate = rawData.data_inicio_atividade || new Date().toISOString().split('T')[0];
             const city = rawData.municipio || 'Cidade Desconhecida';
@@ -400,10 +458,11 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
             };
             const parseResult = schemas_js_1.ngoProfileSchema.safeParse(transformedData);
             if (!parseResult.success) {
-                results.push({ cnpj, status: 'error', error: 'Failed schema validation', });
-                console.warn(`Validation failed for CNPJ ${cnpj}:`, parseResult.error);
+                results.push({ oscId: id_osc, cnpj: cleanCnpj, status: 'error', error: 'Failed schema validation', });
+                console.warn(`Validation failed for CNPJ ${cleanCnpj}:`, parseResult.error);
                 continue;
             }
+            // 3.c Upsert to Firestore
             const oscRef = db.collection('oscs').doc(cleanCnpj);
             const oscDoc = await oscRef.get();
             const now = firestore_1.FieldValue.serverTimestamp();
@@ -416,15 +475,15 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
                 Object.assign(upsertData, { createdAt: now });
             }
             await oscRef.set(upsertData, { merge: true });
-            results.push({ cnpj, status: 'success' });
+            results.push({ oscId: id_osc, cnpj: cleanCnpj, status: 'success' });
         }
         catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            results.push({ cnpj, status: 'error', error: errorMessage });
-            console.error(`Error processing CNPJ ${cnpj}:`, error);
+            results.push({ oscId: id_osc, status: 'error', error: errorMessage });
+            console.error(`Error processing OSC ${id_osc}:`, error);
         }
     }
-    return { results };
+    return { results, totalDiscovered: oscList.length, processed: slicedOscList.length };
 });
 exports.onEditalCreated = (0, firestore_2.onDocumentCreated)('editais/{editalId}', async (event) => {
     const editalSnapshot = event.data;
