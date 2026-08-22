@@ -48,3 +48,10 @@ export const copilotResponseSchema = z.object({
     outreachMessage: z.string().describe("Mensagem de contato (email ou WhatsApp) rascunhada, personalizada para engajar essas ONGs e informá-las sobre a oportunidade"),
     explanation: z.string().describe("Explicação geral sobre os resultados encontrados para o operador")
 });
+
+export const scrapingTargetSchema = z.object({
+    name: z.string().describe("Nome da fonte do edital (ex: Prosas)"),
+    url: z.string().describe("URL do endpoint, feed RSS, ou página HTML"),
+    strategy: z.enum(['RSS', 'API', 'HTML']).describe("Estratégia de extração"),
+    cssSelector: z.string().optional().describe("Seletor CSS para extrair os links (apenas para a estratégia HTML)")
+});

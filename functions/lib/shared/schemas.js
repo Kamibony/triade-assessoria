@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.copilotResponseSchema = exports.triageSchema = exports.matchSchema = exports.editalSchema = exports.ngoProfileSchema = void 0;
+exports.scrapingTargetSchema = exports.copilotResponseSchema = exports.triageSchema = exports.matchSchema = exports.editalSchema = exports.ngoProfileSchema = void 0;
 const zod_1 = require("zod");
 exports.ngoProfileSchema = zod_1.z.object({
     name: zod_1.z.string().describe("Nome da ONG"),
@@ -45,5 +45,11 @@ exports.copilotResponseSchema = zod_1.z.object({
     })).describe("Lista de ONGs que melhor correspondem à pesquisa"),
     outreachMessage: zod_1.z.string().describe("Mensagem de contato (email ou WhatsApp) rascunhada, personalizada para engajar essas ONGs e informá-las sobre a oportunidade"),
     explanation: zod_1.z.string().describe("Explicação geral sobre os resultados encontrados para o operador")
+});
+exports.scrapingTargetSchema = zod_1.z.object({
+    name: zod_1.z.string().describe("Nome da fonte do edital (ex: Prosas)"),
+    url: zod_1.z.string().describe("URL do endpoint, feed RSS, ou página HTML"),
+    strategy: zod_1.z.enum(['RSS', 'API', 'HTML']).describe("Estratégia de extração"),
+    cssSelector: zod_1.z.string().optional().describe("Seletor CSS para extrair os links (apenas para a estratégia HTML)")
 });
 //# sourceMappingURL=schemas.js.map

@@ -94,6 +94,10 @@ export declare const autonomousSearchWorker: import("firebase-functions/v2/https
     searchId: string;
     message: string;
 }>, unknown>;
+export declare const seedScrapingTargets: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+    message: string;
+}>, unknown>;
 export declare const onSearchCreated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").QueryDocumentSnapshot | undefined, {
     searchId: string;
 }>>;
