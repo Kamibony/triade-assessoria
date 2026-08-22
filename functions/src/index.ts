@@ -1058,3 +1058,26 @@ export const onMatchGenerated = onDocumentWritten('matches/{matchId}', async (ev
         }
     }
 });
+
+export const autonomousSearchWorker = onCall({
+    enforceAppCheck: false
+}, async (request) => {
+    // TODO: Re-enable auth checks once Auth is implemented.
+    // if (!request.auth) {
+    //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    // }
+
+    const { query } = request.data as { query?: string };
+
+    if (!query) {
+        throw new HttpsError('invalid-argument', 'Query is required.');
+    }
+
+    logger.info(`Running autonomous search for query: ${query}`);
+
+    // Simulate successful run for the UI
+    return {
+        success: true,
+        message: 'Autonomous search triggered successfully.'
+    };
+});

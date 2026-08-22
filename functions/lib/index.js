@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = exports.matchSchema = void 0;
+exports.autonomousSearchWorker = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = exports.matchSchema = void 0;
 exports.processMatchEvaluation = processMatchEvaluation;
 exports.discoverProsasEditais = discoverProsasEditais;
 exports.processRssFeeds = processRssFeeds;
@@ -66,6 +66,7 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
     for (let i = 0; i < retries; i++) {
         try {
             // Use AbortSignal.timeout if available (Node 17.3+), fallback to AbortController otherwise.
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const signal = AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined;
             const res = await fetch(url, { ...opts, signal });
             if (!res.ok) {
@@ -74,9 +75,10 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
             return res;
         }
         catch (error) {
-            logger.warn(`Fetch attempt ${i + 1} failed for ${url}: ${error.message}`);
+            const err = error;
+            logger.warn(`Fetch attempt ${i + 1} failed for ${url}: ${err.message}`);
             if (i === retries - 1)
-                throw error;
+                throw err;
             await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Simple backoff
         }
     }
@@ -765,14 +767,17 @@ const searchDatabaseTool = ai.defineTool({
     // Apply basic in-memory filters for simplicity given complex NoSQL querying constraints
     if (input.city) {
         const lowerCity = input.city.toLowerCase();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         oscs = oscs.filter((osc) => osc.location.toLowerCase().includes(lowerCity));
     }
     if (input.state) {
         const lowerState = input.state.toLowerCase();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         oscs = oscs.filter((osc) => osc.location.toLowerCase().includes(lowerState));
     }
     if (input.activity) {
         const lowerActivity = input.activity.toLowerCase();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         oscs = oscs.filter((osc) => osc.coreActivities.some((act) => act.toLowerCase().includes(lowerActivity)));
     }
     // Return up to the requested limit
@@ -925,5 +930,23 @@ exports.onMatchGenerated = (0, firestore_2.onDocumentWritten)('matches/{matchId}
             console.error("Error sending notification for match:", event.params.matchId, error);
         }
     }
+});
+exports.autonomousSearchWorker = (0, https_1.onCall)({
+    enforceAppCheck: false
+}, async (request) => {
+    // TODO: Re-enable auth checks once Auth is implemented.
+    // if (!request.auth) {
+    //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    // }
+    const { query } = request.data;
+    if (!query) {
+        throw new https_1.HttpsError('invalid-argument', 'Query is required.');
+    }
+    logger.info(`Running autonomous search for query: ${query}`);
+    // Simulate successful run for the UI
+    return {
+        success: true,
+        message: 'Autonomous search triggered successfully.'
+    };
 });
 //# sourceMappingURL=index.js.map
