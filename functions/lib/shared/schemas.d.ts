@@ -143,4 +143,20 @@ export declare const copilotResponseSchema: z.ZodObject<{
     outreachMessage: string;
     explanation: string;
 }>;
+export declare const scrapingTargetSchema: z.ZodObject<{
+    name: z.ZodString;
+    url: z.ZodString;
+    strategy: z.ZodEnum<["RSS", "API", "HTML"]>;
+    cssSelector: z.ZodOptional<z.ZodString>;
+}, "strip", z.ZodTypeAny, {
+    name: string;
+    url: string;
+    strategy: "API" | "HTML" | "RSS";
+    cssSelector?: string | undefined;
+}, {
+    name: string;
+    url: string;
+    strategy: "API" | "HTML" | "RSS";
+    cssSelector?: string | undefined;
+}>;
 //# sourceMappingURL=schemas.d.ts.map
