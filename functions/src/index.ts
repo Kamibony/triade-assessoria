@@ -1073,11 +1073,117 @@ export const autonomousSearchWorker = onCall({
         throw new HttpsError('invalid-argument', 'Query is required.');
     }
 
-    logger.info(`Running autonomous search for query: ${query}`);
+    logger.info(`Triggering background autonomous search for query: ${query}`);
 
-    // Simulate successful run for the UI
+    const db = getFirestore();
+    const searchRef = db.collection('searches').doc();
+
+    await searchRef.set({
+        query,
+        status: 'running',
+        message: 'Iniciando busca...',
+        createdAt: FieldValue.serverTimestamp(),
+    });
+
     return {
         success: true,
-        message: 'Autonomous search triggered successfully.'
+        searchId: searchRef.id,
+        message: 'Busca autônoma iniciada em segundo plano.'
     };
+});
+
+export const onSearchCreated = onDocumentCreated({ document: 'searches/{searchId}', timeoutSeconds: 540 }, async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) return;
+
+    const data = snapshot.data();
+    const searchId = event.params.searchId;
+    const query = data.query as string;
+
+    const db = getFirestore();
+    const searchRef = db.collection('searches').doc(searchId);
+
+    try {
+        await searchRef.update({ message: 'Buscando links no Google News...' });
+
+        // Fetch from Google News RSS
+        const parser = new Parser();
+        // Append localization parameters to improve Google News results for Brazil
+        const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=pt-BR&gl=BR&ceid=BR:pt-419`;
+        const feed = await parser.parseURL(rssUrl);
+
+        let processed = 0;
+        let saved = 0;
+
+        if (!feed.items || feed.items.length === 0) {
+            await searchRef.update({
+                status: 'completed',
+                message: 'Nenhum resultado encontrado para a busca.',
+                processedCount: 0,
+                savedCount: 0
+            });
+            return;
+        }
+
+        const itemsToProcess = feed.items.slice(0, 20); // Limit to 20 to provide a larger pool for triage
+
+        for (let i = 0; i < itemsToProcess.length; i++) {
+            const item = itemsToProcess[i];
+            if (!item || !item.link) continue;
+
+            await searchRef.update({ message: `Analisando link ${i + 1} de ${itemsToProcess.length}...` });
+
+            // Deduplication
+            const existingRef = await db.collection('editais').where('sourceUrl', '==', item.link).limit(1).get();
+            if (!existingRef.empty) {
+                processed++;
+                continue;
+            }
+
+            try {
+                const text = await fetchAndExtractText(item.link);
+                if (!text || text.length < 500) {
+                    processed++;
+                    continue;
+                }
+
+                const triageResult = await triageEditalWebpage({ text });
+
+                if (triageResult.isValidEdital) {
+                    const editalResult = await extractEditalRules({ text });
+                    const parseResult = editalSchema.safeParse(editalResult);
+
+                    if (parseResult.success) {
+                        const editalDocData = {
+                            ...parseResult.data,
+                            rawText: text.substring(0, 5000), // Save a snippet
+                            sourceUrl: item.link,
+                            createdAt: FieldValue.serverTimestamp(),
+                        };
+
+                        await db.collection('editais').add(editalDocData);
+                        saved++;
+                    }
+                }
+            } catch (error) {
+                console.error(`Error processing link ${item.link} during autonomous search:`, error);
+            }
+
+            processed++;
+        }
+
+        await searchRef.update({
+            status: 'completed',
+            message: `Busca finalizada. ${processed} links analisados, ${saved} editais válidos importados.`,
+            processedCount: processed,
+            savedCount: saved
+        });
+
+    } catch (error) {
+        console.error('Error during autonomous search:', error);
+        await searchRef.update({
+            status: 'error',
+            message: error instanceof Error ? error.message : 'Erro interno durante a busca.',
+        });
+    }
 });

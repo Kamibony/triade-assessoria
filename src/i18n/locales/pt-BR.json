@@ -5,7 +5,57 @@
       "description": "Execute um agente autônomo de IA para buscar e importar editais baseado em uma consulta em linguagem natural.",
       "queryLabel": "Consulta de Busca",
       "queryPlaceholder": "edital OSC cultura 2026",
-      "button": "Executar Busca Autônoma"
+      "button": "Executar Busca Autônoma",
+      "processing": "Processando...",
+      "completed": "Busca concluída.",
+      "error": "Erro na busca.",
+      "triggerSuccess": "Busca autônoma acionada em segundo plano.",
+      "triggerError": "Falha ao acionar busca autônoma.",
+      "internalError": "Erro interno durante a busca autônoma."
+    },
+    "rss": {
+      "noSources": "Nenhuma fonte RSS adicionada ainda.",
+      "title": "Gerenciamento de Fontes RSS",
+      "description": "Gerencie feeds RSS usados para descoberta de editais.",
+      "urlLabel": "URL do RSS",
+      "keywordsLabel": "Palavras-chave (opcional)",
+      "addButton": "Adicionar Fonte RSS",
+      "active": "Ativo",
+      "inactive": "Inativo",
+      "forceSync": "Forçar Sincronização RSS",
+      "addSuccess": "Fonte RSS adicionada com sucesso.",
+      "addError": "Falha ao adicionar fonte RSS.",
+      "statusUpdateError": "Falha ao atualizar o status.",
+      "syncSuccess": "Sincronização concluída com sucesso. Processou {{processed}} links, salvou {{saved}} editais.",
+      "syncError": "Falha ao forçar sincronização do RSS.",
+      "syncInternalError": "Erro interno durante a sincronização do RSS."
+    },
+    "bulkImporter": {
+      "triggerError": "Falha ao acionar importação. Verifique o console para mais detalhes.",
+      "title": "Importador em Massa de OSCs",
+      "description": "Acione o pipeline híbrido de ingestão para descobrir e enriquecer dados de ONGs pelo IPEA e BrasilAPI.",
+      "stateLabel": "Estado (UF)",
+      "allStates": "Todos os Estados",
+      "cityLabel": "Cidade",
+      "cityPlaceholder": "ex: São Paulo",
+      "note": "Nota: Você deve fornecer pelo menos um filtro (Estado ou Cidade). O limite é fixado em 50 por segurança.",
+      "button": "Acionar Importação",
+      "success": "Importação concluída: {{count}} ONGs salvas.",
+      "error": "Falha ao acionar importação."
+    },
+    "title": "Painel de Administração",
+    "tabs": {
+      "ingestion": "Ingestão & Pipelines",
+      "directory": "Diretório OSC"
+    },
+    "manualIngest": {
+      "title": "Ingestão Manual de Edital",
+      "description": "Injete diretamente um edital a partir de uma URL (ex: Prosas).",
+      "urlLabel": "URL do Edital",
+      "button": "Buscar & Ingerir",
+      "success": "Edital importado com sucesso! ID: {{id}}",
+      "error": "Falha ao importar edital.",
+      "internalError": "Erro interno durante importação do edital."
     }
   }
 }
