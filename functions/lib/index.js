@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onSearchCreated = exports.autonomousSearchWorker = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = void 0;
+exports.onSearchCreated = exports.seedScrapingTargets = exports.autonomousSearchWorker = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = void 0;
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-admin/firestore");
 const functions_1 = require("firebase-admin/functions");
@@ -605,20 +605,6 @@ exports.onOscUpdated = (0, firestore_2.onDocumentUpdated)('oscs/{oscId}', async 
     await Promise.all(enqueuePromises);
     console.log(`Enqueued ${editaisSnapshot.docs.length} match tasks for OSC update ${oscId}.`);
 });
-// Manual Prosas Discovery specific logic
-async function discoverProsasEditais(region = "nordeste") {
-    console.log(`Discovering Prosas Editais for region: ${region}`);
-    const parser = new rss_parser_1.default();
-    const feedUrl = `https://blog.prosas.com.br/categoria/editais/feed/?tag=${region},paraiba`;
-    try {
-        const feed = await parser.parseURL(feedUrl);
-        return feed.items;
-    }
-    catch (e) {
-        console.error("Error fetching Prosas RSS feed:", e);
-        return [];
-    }
-}
 async function processRssFeeds() {
     const RSS_URLS = [
         // Mock Google Alerts RSS URLs
@@ -934,17 +920,30 @@ exports.autonomousSearchWorker = (0, https_1.onCall)({
     // if (!request.auth) {
     //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
     // }
-    const { query } = request.data;
-    if (!query) {
-        throw new https_1.HttpsError('invalid-argument', 'Query is required.');
-    }
-    logger.info(`Triggering background autonomous search for query: ${query}`);
+    const { targetId } = request.data;
+    logger.info(`Triggering background autonomous search. TargetId: ${targetId || 'All'}`);
     const db = (0, firestore_1.getFirestore)();
+    // Fetch targets
+    let targetsSnapshot;
+    if (targetId) {
+        const targetDoc = await db.collection('scraping_targets').doc(targetId).get();
+        if (!targetDoc.exists) {
+            throw new https_1.HttpsError('not-found', 'Scraping target not found.');
+        }
+        targetsSnapshot = { docs: [targetDoc] };
+    }
+    else {
+        targetsSnapshot = await db.collection('scraping_targets').get();
+    }
+    if (!targetsSnapshot || targetsSnapshot.docs.length === 0) {
+        throw new https_1.HttpsError('failed-precondition', 'No scraping targets configured.');
+    }
+    const targets = targetsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     const searchRef = db.collection('searches').doc();
     await searchRef.set({
-        query,
+        targets,
         status: 'running',
-        message: 'Iniciando busca...',
+        message: `Iniciando busca em ${targets.length} fontes...`,
         createdAt: firestore_1.FieldValue.serverTimestamp(),
     });
     return {
@@ -953,77 +952,178 @@ exports.autonomousSearchWorker = (0, https_1.onCall)({
         message: 'Busca autônoma iniciada em segundo plano.'
     };
 });
+exports.seedScrapingTargets = (0, https_1.onCall)({
+    enforceAppCheck: false
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+}, async (request) => {
+    // TODO: Re-enable auth checks
+    const db = (0, firestore_1.getFirestore)();
+    const batch = db.batch();
+    const targets = [
+        {
+            name: "Prosas (Editais Gerais)",
+            url: "https://blog.prosas.com.br/categoria/editais/feed/",
+            strategy: "RSS",
+        },
+        {
+            name: "Prosas (Editais Nordeste)",
+            url: "https://blog.prosas.com.br/categoria/editais/feed/?tag=nordeste",
+            strategy: "RSS",
+        }
+    ];
+    for (const target of targets) {
+        const ref = db.collection('scraping_targets').doc();
+        batch.set(ref, {
+            ...target,
+            createdAt: firestore_1.FieldValue.serverTimestamp()
+        });
+    }
+    await batch.commit();
+    return {
+        success: true,
+        message: `${targets.length} alvos de scraping de teste inseridos com sucesso.`
+    };
+});
 exports.onSearchCreated = (0, firestore_2.onDocumentCreated)({ document: 'searches/{searchId}', timeoutSeconds: 540 }, async (event) => {
     const snapshot = event.data;
     if (!snapshot)
         return;
     const data = snapshot.data();
     const searchId = event.params.searchId;
-    const query = data.query;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const targets = data.targets || [];
     const db = (0, firestore_1.getFirestore)();
     const searchRef = db.collection('searches').doc(searchId);
     try {
-        await searchRef.update({ message: 'Buscando links no Google News...' });
-        // Fetch from Google News RSS
-        const parser = new rss_parser_1.default();
-        // Append localization parameters to improve Google News results for Brazil
-        const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=pt-BR&gl=BR&ceid=BR:pt-419`;
-        const feed = await parser.parseURL(rssUrl);
-        let processed = 0;
-        let saved = 0;
-        if (!feed.items || feed.items.length === 0) {
-            await searchRef.update({
-                status: 'completed',
-                message: 'Nenhum resultado encontrado para a busca.',
-                processedCount: 0,
-                savedCount: 0
-            });
-            return;
-        }
-        const itemsToProcess = feed.items.slice(0, 20); // Limit to 20 to provide a larger pool for triage
-        for (let i = 0; i < itemsToProcess.length; i++) {
-            const item = itemsToProcess[i];
-            if (!item || !item.link)
-                continue;
-            await searchRef.update({ message: `Analisando link ${i + 1} de ${itemsToProcess.length}...` });
-            // Deduplication
-            const existingRef = await db.collection('editais').where('sourceUrl', '==', item.link).limit(1).get();
-            if (!existingRef.empty) {
-                processed++;
-                continue;
-            }
+        let totalProcessed = 0;
+        let totalSaved = 0;
+        for (let t = 0; t < targets.length; t++) {
+            const target = targets[t];
+            await searchRef.update({ message: `Acessando fonte ${t + 1} de ${targets.length}: ${target.name}...` });
+            let candidateLinks = [];
             try {
-                const text = await fetchAndExtractText(item.link);
-                if (!text || text.length < 500) {
-                    processed++;
-                    continue;
+                if (target.strategy === 'RSS') {
+                    const parser = new rss_parser_1.default();
+                    const feed = await parser.parseURL(target.url);
+                    candidateLinks = feed.items.map(item => item.link).filter(link => !!link);
                 }
-                const triageResult = await triageEditalWebpage({ text });
-                if (triageResult.isValidEdital) {
-                    const editalResult = await extractEditalRules({ text });
-                    const parseResult = schemas_js_1.editalSchema.safeParse(editalResult);
-                    if (parseResult.success) {
-                        const editalDocData = {
-                            ...parseResult.data,
-                            rawText: text.substring(0, 5000), // Save a snippet
-                            sourceUrl: item.link,
-                            createdAt: firestore_1.FieldValue.serverTimestamp(),
-                        };
-                        await db.collection('editais').add(editalDocData);
-                        saved++;
+                else if (target.strategy === 'API') {
+                    // API implementation (basic placeholder to extract links from JSON response)
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 15000);
+                    const response = await fetch(target.url, {
+                        signal: controller.signal,
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                            'Accept': 'application/json',
+                        }
+                    });
+                    clearTimeout(timeoutId);
+                    if (response.ok) {
+                        const data = await response.json();
+                        // Extremely naive extraction: look for any string that looks like a URL in the JSON payload
+                        // In reality, this would need custom logic per API (e.g., TransfereGov vs IPEA)
+                        const jsonString = JSON.stringify(data);
+                        const urlRegex = /(https?:\/\/[^\s"',]+)/g;
+                        const matches = jsonString.match(urlRegex) || [];
+                        candidateLinks = [...new Set(matches)];
+                    }
+                    else {
+                        logger.warn(`API fetch failed for ${target.name}: ${response.statusText}`);
+                    }
+                }
+                else if (target.strategy === 'HTML') {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 15000);
+                    const response = await fetch(target.url, {
+                        signal: controller.signal,
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+                        }
+                    });
+                    clearTimeout(timeoutId);
+                    if (response.ok) {
+                        const html = await response.text();
+                        const $ = cheerio.load(html);
+                        const selector = target.cssSelector || 'a';
+                        $(selector).each((_, el) => {
+                            let href = $(el).attr('href');
+                            if (href) {
+                                // Resolve relative URLs properly (handles both root and path-relative)
+                                try {
+                                    href = new URL(href, target.url).href;
+                                    candidateLinks.push(href);
+                                    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                                }
+                                catch (e) {
+                                    // Ignore invalid URLs
+                                }
+                            }
+                        });
+                        // Deduplicate in memory
+                        candidateLinks = [...new Set(candidateLinks)];
+                    }
+                    else {
+                        logger.warn(`HTML fetch failed for ${target.name}: ${response.statusText}`);
                     }
                 }
             }
             catch (error) {
-                console.error(`Error processing link ${item.link} during autonomous search:`, error);
+                logger.error(`Error extracting links for target ${target.name}:`, error);
+                continue; // Skip to next target
             }
-            processed++;
+            if (candidateLinks.length === 0) {
+                continue;
+            }
+            const linksToProcess = candidateLinks.slice(0, 10); // Limit to 10 per source to manage timeouts
+            for (let i = 0; i < linksToProcess.length; i++) {
+                const link = linksToProcess[i];
+                if (!link)
+                    continue;
+                await searchRef.update({
+                    message: `Analisando link ${i + 1} de ${linksToProcess.length} da fonte ${target.name}...`
+                });
+                // Deduplication
+                const existingRef = await db.collection('editais').where('sourceUrl', '==', link).limit(1).get();
+                if (!existingRef.empty) {
+                    totalProcessed++;
+                    continue;
+                }
+                try {
+                    const text = await fetchAndExtractText(link);
+                    if (!text || text.length < 500) {
+                        totalProcessed++;
+                        continue;
+                    }
+                    const triageResult = await triageEditalWebpage({ text });
+                    if (triageResult.isValidEdital) {
+                        const editalResult = await extractEditalRules({ text });
+                        const parseResult = schemas_js_1.editalSchema.safeParse(editalResult);
+                        if (parseResult.success) {
+                            const editalDocData = {
+                                ...parseResult.data,
+                                rawText: text.substring(0, 5000), // Save a snippet
+                                sourceUrl: link,
+                                createdAt: firestore_1.FieldValue.serverTimestamp(),
+                            };
+                            await db.collection('editais').add(editalDocData);
+                            totalSaved++;
+                        }
+                    }
+                }
+                catch (error) {
+                    console.error(`Error processing link ${link} from ${target.name}:`, error);
+                }
+                totalProcessed++;
+            }
         }
         await searchRef.update({
             status: 'completed',
-            message: `Busca finalizada. ${processed} links analisados, ${saved} editais válidos importados.`,
-            processedCount: processed,
-            savedCount: saved
+            message: `Busca finalizada. ${totalProcessed} links analisados, ${totalSaved} editais válidos importados.`,
+            processedCount: totalProcessed,
+            savedCount: totalSaved
         });
     }
     catch (error) {
