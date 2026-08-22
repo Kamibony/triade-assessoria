@@ -214,7 +214,7 @@ export function AdminDashboard() {
     });
 
     return () => unsubscribe();
-  }, [activeSearchId, db]);
+  }, [activeSearchId, db, t]);
 
   const handleRunAutonomousSearch = async (e: React.FormEvent) => {
     e.preventDefault();

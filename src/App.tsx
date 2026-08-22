@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation, Outlet } from 'react-router-dom';
 import { Hero } from './components/sections/Hero';
 import { Problem } from './components/sections/Problem';
 import { Solution } from './components/sections/Solution';
@@ -13,6 +13,9 @@ import { EditaisList } from './components/EditaisList';
 import { NgoMatchView } from './components/NgoMatchView';
 import { MatchesDashboard } from './components/MatchesDashboard';
 import { AdminDashboard } from './components/AdminDashboard';
+import { AdminLayout } from './components/AdminLayout';
+import { OscDirectoryView } from './components/OscDirectoryView';
+import { AutonomousSearchView } from './components/AutonomousSearchView';
 
 function Header() {
   const location = useLocation();
@@ -47,23 +50,36 @@ function LandingPage() {
   );
 }
 
+
+function PublicLayout() {
+  return (
+    <div className="min-h-screen bg-background text-foreground selection:bg-primary/30 selection:text-primary-foreground font-sans flex flex-col">
+      <Header />
+      <div className="flex-grow">
+        <Outlet />
+      </div>
+      <Footer />
+      <FloatingWhatsApp />
+    </div>
+  );
+}
+
 function App() {
   return (
     <Router>
-      <div className="min-h-screen bg-background text-foreground selection:bg-primary/30 selection:text-primary-foreground font-sans flex flex-col">
-        <Header />
-        <div className="flex-grow">
-          <Routes>
-            <Route path="/" element={<LandingPage />} />
-            <Route path="/editais" element={<EditaisList />} />
-            <Route path="/match/:editalId" element={<NgoMatchView />} />
-            <Route path="/dashboard" element={<MatchesDashboard />} />
-            <Route path="/admin" element={<AdminDashboard />} />
-          </Routes>
-        </div>
-        <Footer />
-        <FloatingWhatsApp />
-      </div>
+      <Routes>
+        <Route path="/admin" element={<AdminLayout />}>
+          <Route index element={<AdminDashboard />} />
+          <Route path="directory" element={<OscDirectoryView />} />
+          <Route path="search" element={<AutonomousSearchView />} />
+        </Route>
+        <Route path="/" element={<PublicLayout />}>
+          <Route index element={<LandingPage />} />
+          <Route path="editais" element={<EditaisList />} />
+          <Route path="match/:editalId" element={<NgoMatchView />} />
+          <Route path="dashboard" element={<MatchesDashboard />} />
+        </Route>
+      </Routes>
     </Router>
   );
 }
