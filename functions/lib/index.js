@@ -36,10 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onSearchCreated = exports.autonomousSearchWorker = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = exports.matchSchema = void 0;
-exports.processMatchEvaluation = processMatchEvaluation;
-exports.discoverProsasEditais = discoverProsasEditais;
-exports.processRssFeeds = processRssFeeds;
+exports.onSearchCreated = exports.autonomousSearchWorker = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = void 0;
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-admin/firestore");
 const functions_1 = require("firebase-admin/functions");
@@ -51,7 +48,6 @@ const https_1 = require("firebase-functions/v2/https");
 const tasks_1 = require("firebase-functions/v2/tasks");
 const logger = __importStar(require("firebase-functions/logger"));
 const schemas_js_1 = require("./shared/schemas.js");
-Object.defineProperty(exports, "matchSchema", { enumerable: true, get: function () { return schemas_js_1.matchSchema; } });
 const cheerio = __importStar(require("cheerio"));
 const rss_parser_1 = __importDefault(require("rss-parser"));
 function removeAccents(str) {

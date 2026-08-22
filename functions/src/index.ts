@@ -50,8 +50,6 @@ const ai = genkit({
     plugins: [vertexAI({ projectId: process.env.GCLOUD_PROJECT || 'triade-assessoria', location: 'us-central1' })],
 });
 
-export { matchSchema };
-
 const parsePdfToProfile = ai.defineFlow(
     {
         name: 'parsePdfToProfile',
@@ -277,7 +275,7 @@ export const extractEditalRulesFunction = onCall({
 import { onDocumentCreated, onDocumentUpdated, onDocumentWritten } from 'firebase-functions/v2/firestore';
 
 
-export async function processMatchEvaluation(oscId: string, editalId: string, forceRecalculate: boolean = false) {
+async function processMatchEvaluation(oscId: string, editalId: string, forceRecalculate: boolean = false) {
     const db = getFirestore();
 
     // Fetch OSC and Edital
@@ -677,7 +675,7 @@ export const onOscUpdated = onDocumentUpdated('oscs/{oscId}', async (event) => {
 
 
 // Manual Prosas Discovery specific logic
-export async function discoverProsasEditais(region: string = "nordeste") {
+async function discoverProsasEditais(region: string = "nordeste") {
     console.log(`Discovering Prosas Editais for region: ${region}`);
     const parser = new Parser();
     const feedUrl = `https://blog.prosas.com.br/categoria/editais/feed/?tag=${region},paraiba`;
@@ -690,7 +688,7 @@ export async function discoverProsasEditais(region: string = "nordeste") {
     }
 }
 
-export async function processRssFeeds() {
+async function processRssFeeds() {
     const RSS_URLS = [
         // Mock Google Alerts RSS URLs
         "https://news.google.com/rss/search?q=edital+ONG+OR+OSC+brasil",
