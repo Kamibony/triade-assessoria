@@ -970,7 +970,8 @@ exports.onSearchCreated = (0, firestore_2.onDocumentCreated)({ document: 'search
         await searchRef.update({ message: 'Buscando links no Google News...' });
         // Fetch from Google News RSS
         const parser = new rss_parser_1.default();
-        const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}`;
+        // Append localization parameters to improve Google News results for Brazil
+        const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=pt-BR&gl=BR&ceid=BR:pt-419`;
         const feed = await parser.parseURL(rssUrl);
         let processed = 0;
         let saved = 0;
@@ -983,7 +984,7 @@ exports.onSearchCreated = (0, firestore_2.onDocumentCreated)({ document: 'search
             });
             return;
         }
-        const itemsToProcess = feed.items.slice(0, 10); // Limit to 10 for performance
+        const itemsToProcess = feed.items.slice(0, 20); // Limit to 20 to provide a larger pool for triage
         for (let i = 0; i < itemsToProcess.length; i++) {
             const item = itemsToProcess[i];
             if (!item || !item.link)

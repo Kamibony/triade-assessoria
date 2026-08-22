@@ -1108,7 +1108,8 @@ export const onSearchCreated = onDocumentCreated({ document: 'searches/{searchId
 
         // Fetch from Google News RSS
         const parser = new Parser();
-        const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}`;
+        // Append localization parameters to improve Google News results for Brazil
+        const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=pt-BR&gl=BR&ceid=BR:pt-419`;
         const feed = await parser.parseURL(rssUrl);
 
         let processed = 0;
@@ -1124,7 +1125,7 @@ export const onSearchCreated = onDocumentCreated({ document: 'searches/{searchId
             return;
         }
 
-        const itemsToProcess = feed.items.slice(0, 10); // Limit to 10 for performance
+        const itemsToProcess = feed.items.slice(0, 20); // Limit to 20 to provide a larger pool for triage
 
         for (let i = 0; i < itemsToProcess.length; i++) {
             const item = itemsToProcess[i];
