@@ -7,6 +7,7 @@ export function AdminLayout() {
   const navItems = [
     { name: 'Dashboard', path: '/admin', icon: LayoutDashboard },
     { name: 'Diretório de OSCs', path: '/admin/directory', icon: Database },
+    { name: 'Fontes de Dados', path: '/admin/sources', icon: Database },
     { name: 'Busca Autônoma', path: '/admin/search', icon: Search },
     { name: 'Dashboard de Matches', path: '/admin/matches', icon: CheckSquare },
     { name: 'Editais', path: '/admin/editais', icon: FileText },

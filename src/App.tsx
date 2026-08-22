@@ -16,6 +16,7 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { AdminLayout } from './components/AdminLayout';
 import { OscDirectoryView } from './components/OscDirectoryView';
 import { AutonomousSearchView } from './components/AutonomousSearchView';
+import { ScrapingTargetsManager } from './components/ScrapingTargetsManager';
 
 function Header() {
   const location = useLocation();
@@ -72,6 +73,7 @@ function App() {
           <Route path="search" element={<AutonomousSearchView />} />
           <Route path="matches" element={<MatchesDashboard />} />
           <Route path="editais" element={<EditaisList />} />
+          <Route path="sources" element={<ScrapingTargetsManager />} />
         </Route>
         <Route path="/" element={<PublicLayout />}>
           <Route index element={<LandingPage />} />

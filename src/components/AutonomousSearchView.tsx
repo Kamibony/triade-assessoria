@@ -18,6 +18,7 @@ export function AutonomousSearchView() {
   const [searchProgressMessage, setSearchProgressMessage] = useState<string>('');
   const [isSeeding, setIsSeeding] = useState(false);
   const [seedResult, setSeedResult] = useState<{type: 'success' | 'error', message: string} | null>(null);
+  const [searchLogs, setSearchLogs] = useState<Array<{link: string, status: string, reason: string}>>([]);
 
   useEffect(() => {
     if (!activeSearchId) return;
@@ -25,6 +26,8 @@ export function AutonomousSearchView() {
     const unsubscribe = onSnapshot(doc(db, 'searches', activeSearchId), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
+        if (data.logs) setSearchLogs(data.logs);
+
         if (data.status === 'running') {
           setSearchProgressMessage(data.message || t('admin.autonomousSearch.processing'));
         } else if (data.status === 'completed' || data.status === 'error') {
@@ -73,6 +76,7 @@ export function AutonomousSearchView() {
     setAutonomousResult(null);
 
     try {
+      setSearchLogs([]);
       const runAutonomousSearch = httpsCallable(functions, 'autonomousSearchWorker');
       const result = await runAutonomousSearch({ query: autonomousQuery });
       const data = result.data as { success: boolean; searchId?: string; message?: string };
@@ -173,6 +177,50 @@ export function AutonomousSearchView() {
               <AlertCircle className="w-5 h-5 mr-3 shrink-0 mt-0.5" />
             )}
             <p className="text-sm font-medium">{autonomousResult.message}</p>
+          </div>
+        )}
+
+        {searchLogs.length > 0 && (
+          <div className="mt-6 border rounded-lg overflow-hidden">
+            <div className="bg-muted px-4 py-3 border-b">
+              <h3 className="font-semibold text-sm">Transparência da Triagem ({searchLogs.length} links processados)</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                <thead className="text-xs text-muted-foreground bg-muted/30 uppercase border-b">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">Link</th>
+                    <th className="px-4 py-3 font-medium">Status</th>
+                    <th className="px-4 py-3 font-medium">Motivo (IA)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {searchLogs.map((log, index) => (
+                    <tr key={index} className="hover:bg-muted/10">
+                      <td className="px-4 py-3">
+                        <div className="max-w-[200px] truncate" title={log.link}>
+                          <a href={log.link} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                            {log.link}
+                          </a>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium
+                          ${log.status === 'Importado' ? 'bg-green-100 text-green-800' :
+                            log.status === 'Rejeitado' ? 'bg-orange-100 text-orange-800' :
+                            log.status === 'Erro' ? 'bg-red-100 text-red-800' :
+                            'bg-gray-100 text-gray-800'}`}>
+                          {log.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground text-xs leading-relaxed max-w-md">
+                        {log.reason}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>
