@@ -27,8 +27,6 @@ function Header() {
         <Link to="/" className="text-xl font-bold tracking-tighter">TRÍADE<span className="text-primary">.</span></Link>
         <nav className="flex gap-4">
           {!isHome && <Link to="/" className="text-sm font-medium hover:text-primary transition-colors">Início</Link>}
-          <Link to="/dashboard" className="text-sm font-medium hover:text-primary transition-colors">Dashboard</Link>
-          <Link to="/editais" className="text-sm font-medium hover:text-primary transition-colors">Ver Editais</Link>
         </nav>
       </div>
     </header>
@@ -72,12 +70,12 @@ function App() {
           <Route index element={<AdminDashboard />} />
           <Route path="directory" element={<OscDirectoryView />} />
           <Route path="search" element={<AutonomousSearchView />} />
+          <Route path="matches" element={<MatchesDashboard />} />
+          <Route path="editais" element={<EditaisList />} />
         </Route>
         <Route path="/" element={<PublicLayout />}>
           <Route index element={<LandingPage />} />
-          <Route path="editais" element={<EditaisList />} />
           <Route path="match/:editalId" element={<NgoMatchView />} />
-          <Route path="dashboard" element={<MatchesDashboard />} />
         </Route>
       </Routes>
     </Router>
