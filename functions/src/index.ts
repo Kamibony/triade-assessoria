@@ -675,6 +675,7 @@ export const onOscUpdated = onDocumentUpdated('oscs/{oscId}', async (event) => {
 
 
 // Manual Prosas Discovery specific logic
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function discoverProsasEditais(region: string = "nordeste") {
     console.log(`Discovering Prosas Editais for region: ${region}`);
     const parser = new Parser();
