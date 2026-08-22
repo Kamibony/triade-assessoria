@@ -42,6 +42,8 @@ export function AdminDashboard() {
   const [autonomousQuery, setAutonomousQuery] = useState('');
   const [isRunningAutonomous, setIsRunningAutonomous] = useState(false);
   const [autonomousResult, setAutonomousResult] = useState<{type: 'success' | 'error', message: string} | null>(null);
+  const [activeSearchId, setActiveSearchId] = useState<string | null>(null);
+  const [searchProgressMessage, setSearchProgressMessage] = useState<string>('');
 
   // Tab State
   const [activeTab, setActiveTab] = useState<'ingestion' | 'directory'>('ingestion');
@@ -77,7 +79,7 @@ export function AdminDashboard() {
       setRssKeywords('');
     } catch (error) {
       console.error("Error adding RSS source:", error);
-      alert("Failed to add RSS source.");
+      alert(t('admin.rss.addError'));
     } finally {
       setIsAddingRss(false);
     }
@@ -90,7 +92,7 @@ export function AdminDashboard() {
       });
     } catch (error) {
       console.error("Error toggling RSS status:", error);
-      alert("Failed to update status.");
+      alert(t('admin.rss.statusUpdateError'));
     }
   };
 
@@ -105,7 +107,7 @@ export function AdminDashboard() {
       const data = result.data as { processedCount?: number; savedCount?: number };
       setSyncResult({
         type: 'success',
-        message: `Sync completed successfully. Processed ${data.processedCount || 0} links, saved ${data.savedCount || 0} editais.`
+        message: t('admin.rss.syncSuccess', { processed: data.processedCount || 0, saved: data.savedCount || 0 })
       });
     } catch (error: unknown) {
       console.error("Error forcing RSS sync:", error);
@@ -134,13 +136,13 @@ export function AdminDashboard() {
       if (data.success) {
         setManualIngestResult({
           type: 'success',
-          message: `Edital ingested successfully! ID: ${data.editalId}`
+          message: t('admin.manualIngest.success', { id: data.editalId })
         });
         setManualUrl('');
       } else {
         setManualIngestResult({
           type: 'error',
-          message: data.message || 'Failed to ingest edital.'
+          message: data.message || t('admin.manualIngest.error')
         });
       }
     } catch (error: unknown) {
@@ -184,12 +186,35 @@ export function AdminDashboard() {
       console.error("Error triggering OSC import:", error);
       setImportResult({
         type: 'error',
-        message: error instanceof Error ? error.message : String(error) || 'Failed to trigger import. Check console for details.'
+        message: error instanceof Error ? error.message : String(error) || t('admin.bulkImporter.triggerError')
       });
     } finally {
       setIsImporting(false);
     }
   };
+
+  useEffect(() => {
+    if (!activeSearchId) return;
+
+    const unsubscribe = onSnapshot(doc(db, 'searches', activeSearchId), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.status === 'running') {
+          setSearchProgressMessage(data.message || t('admin.autonomousSearch.processing'));
+        } else if (data.status === 'completed' || data.status === 'error') {
+          setAutonomousResult({
+            type: data.status === 'success' || data.status === 'completed' ? 'success' : 'error',
+            message: data.message || (data.status === 'completed' ? t('admin.autonomousSearch.completed') : t('admin.autonomousSearch.error'))
+          });
+          setIsRunningAutonomous(false);
+          setActiveSearchId(null);
+          setSearchProgressMessage('');
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [activeSearchId, db]);
 
   const handleRunAutonomousSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -201,27 +226,33 @@ export function AdminDashboard() {
     try {
       const runAutonomousSearch = httpsCallable(functions, 'autonomousSearchWorker');
       const result = await runAutonomousSearch({ query: autonomousQuery });
-      const data = result.data as { success: boolean; message?: string };
+      const data = result.data as { success: boolean; searchId?: string; message?: string };
 
       if (data.success) {
-         setAutonomousResult({
-            type: 'success',
-            message: data.message || 'Autonomous search triggered successfully.'
-         });
+         if (data.searchId) {
+            setActiveSearchId(data.searchId);
+            setSearchProgressMessage(t('admin.autonomousSearch.triggerSuccess'));
+         } else {
+            setAutonomousResult({
+              type: 'success',
+              message: data.message || t('admin.autonomousSearch.triggerSuccess')
+            });
+            setIsRunningAutonomous(false);
+         }
          setAutonomousQuery('');
       } else {
          setAutonomousResult({
              type: 'error',
-             message: data.message || 'Failed to trigger autonomous search.'
+             message: data.message || t('admin.autonomousSearch.triggerError')
          });
+         setIsRunningAutonomous(false);
       }
     } catch (error: unknown) {
       console.error("Error triggering autonomous search:", error);
       setAutonomousResult({
         type: 'error',
-        message: error instanceof Error ? error.message : String(error) || 'Internal error during autonomous search.'
+        message: error instanceof Error ? error.message : String(error) || t('admin.autonomousSearch.internalError')
       });
-    } finally {
       setIsRunningAutonomous(false);
     }
   };
@@ -229,7 +260,7 @@ export function AdminDashboard() {
   return (
     <div className="container mx-auto py-8 px-4 max-w-6xl">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-        <h1 className="text-3xl font-bold">Admin Dashboard</h1>
+        <h1 className="text-3xl font-bold">{t('admin.title')}</h1>
         <div className="flex bg-muted/50 p-1 rounded-lg border">
           <button
             onClick={() => setActiveTab('ingestion')}
@@ -238,7 +269,7 @@ export function AdminDashboard() {
             }`}
           >
             <LayoutDashboard className="w-4 h-4" />
-            Ingestão & Pipelines
+            {t('admin.tabs.ingestion')}
           </button>
           <button
             onClick={() => setActiveTab('directory')}
@@ -247,7 +278,7 @@ export function AdminDashboard() {
             }`}
           >
             <Database className="w-4 h-4" />
-            Diretório OSC
+            {t('admin.tabs.directory')}
           </button>
         </div>
       </div>
@@ -258,12 +289,12 @@ export function AdminDashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* RSS Source Management Panel */}
         <div className="bg-card text-card-foreground rounded-lg border shadow-sm p-6 flex flex-col h-[600px]">
-          <h2 className="text-xl font-semibold mb-4">RSS Source Management</h2>
-          <p className="text-muted-foreground text-sm mb-6">Manage RSS feeds used for edital discovery.</p>
+          <h2 className="text-xl font-semibold mb-4">{t('admin.rss.title')}</h2>
+          <p className="text-muted-foreground text-sm mb-6">{t('admin.rss.description')}</p>
 
           <form onSubmit={handleAddRss} className="space-y-4 mb-6">
             <div>
-              <label htmlFor="rssUrl" className="block text-sm font-medium mb-1">RSS URL</label>
+              <label htmlFor="rssUrl" className="block text-sm font-medium mb-1">{t('admin.rss.urlLabel')}</label>
               <input
                 id="rssUrl"
                 type="url"
@@ -275,7 +306,7 @@ export function AdminDashboard() {
               />
             </div>
             <div>
-              <label htmlFor="rssKeywords" className="block text-sm font-medium mb-1">Keywords (optional)</label>
+              <label htmlFor="rssKeywords" className="block text-sm font-medium mb-1">{t('admin.rss.keywordsLabel')}</label>
               <input
                 id="rssKeywords"
                 type="text"
@@ -287,7 +318,7 @@ export function AdminDashboard() {
             </div>
             <Button type="submit" disabled={isAddingRss} className="w-full">
               {isAddingRss ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
-              Add RSS Source
+              {t('admin.rss.addButton')}
             </Button>
           </form>
 
@@ -298,7 +329,7 @@ export function AdminDashboard() {
               </div>
             ) : rssSources.length === 0 ? (
               <div className="flex justify-center items-center h-full text-muted-foreground text-sm">
-                No RSS sources added yet.
+                {t('admin.rss.noSources')}
               </div>
             ) : (
               <ul className="divide-y">
@@ -307,7 +338,7 @@ export function AdminDashboard() {
                     <div className="flex-1 min-w-0 pr-4">
                       <p className="text-sm font-medium truncate" title={source.url}>{source.url}</p>
                       {source.keywords && (
-                        <p className="text-xs text-muted-foreground mt-1 truncate">Keywords: {source.keywords}</p>
+                        <p className="text-xs text-muted-foreground mt-1 truncate">{t('admin.rss.keywordsLabel')}: {source.keywords}</p>
                       )}
                     </div>
                     <Button
@@ -317,7 +348,7 @@ export function AdminDashboard() {
                       className="shrink-0"
                     >
                       <Power className="w-4 h-4 mr-2" />
-                      {source.isActive ? 'Active' : 'Inactive'}
+                      {source.isActive ? t('admin.rss.active') : t('admin.rss.inactive')}
                     </Button>
                   </li>
                 ))}
@@ -333,7 +364,7 @@ export function AdminDashboard() {
               className="w-full"
             >
               {isSyncingRss ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
-              Force Sync RSS
+              {t('admin.rss.forceSync')}
             </Button>
             {syncResult && (
               <div className={`mt-4 p-3 rounded-md border flex items-start ${
@@ -354,12 +385,12 @@ export function AdminDashboard() {
 
         {/* Manual Edital Ingestion Panel */}
         <div className="bg-card text-card-foreground rounded-lg border shadow-sm p-6 flex flex-col h-[600px]">
-          <h2 className="text-xl font-semibold mb-4">Manual Edital Ingestion</h2>
-          <p className="text-muted-foreground text-sm mb-6">Directly ingest an edital from a URL (e.g. Prosas).</p>
+          <h2 className="text-xl font-semibold mb-4">{t('admin.manualIngest.title')}</h2>
+          <p className="text-muted-foreground text-sm mb-6">{t('admin.manualIngest.description')}</p>
 
           <form onSubmit={handleManualIngest} className="space-y-4">
             <div>
-              <label htmlFor="manualUrl" className="block text-sm font-medium mb-1">Edital URL</label>
+              <label htmlFor="manualUrl" className="block text-sm font-medium mb-1">{t('admin.manualIngest.urlLabel')}</label>
               <input
                 id="manualUrl"
                 type="url"
@@ -373,7 +404,7 @@ export function AdminDashboard() {
 
             <Button type="submit" disabled={isIngestingManual} className="w-full">
               {isIngestingManual ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
-              Fetch & Ingest
+              {t('admin.manualIngest.button')}
             </Button>
           </form>
 
@@ -395,20 +426,20 @@ export function AdminDashboard() {
 
         {/* OSC Bulk Importer Panel */}
         <div className="bg-card text-card-foreground rounded-lg border shadow-sm p-6 flex flex-col">
-          <h2 className="text-xl font-semibold mb-4">OSC Bulk Importer</h2>
-          <p className="text-muted-foreground text-sm mb-6">Trigger the hybrid ingestion pipeline to discover and enrich NGO data from IPEA and BrasilAPI.</p>
+          <h2 className="text-xl font-semibold mb-4">{t('admin.bulkImporter.title')}</h2>
+          <p className="text-muted-foreground text-sm mb-6">{t('admin.bulkImporter.description')}</p>
 
           <form onSubmit={handleImportOsc} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label htmlFor="uf" className="block text-sm font-medium mb-1">State (UF)</label>
+                <label htmlFor="uf" className="block text-sm font-medium mb-1">{t('admin.bulkImporter.stateLabel')}</label>
                 <select
                   id="uf"
                   value={uf}
                   onChange={(e) => setUf(e.target.value)}
                   className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <option value="">All States</option>
+                  <option value="">{t('admin.bulkImporter.allStates')}</option>
                   <option value="AC">Acre</option>
                   <option value="AL">Alagoas</option>
                   <option value="AP">Amapá</option>
@@ -439,23 +470,23 @@ export function AdminDashboard() {
                 </select>
               </div>
               <div>
-                <label htmlFor="municipio" className="block text-sm font-medium mb-1">City</label>
+                <label htmlFor="municipio" className="block text-sm font-medium mb-1">{t('admin.bulkImporter.cityLabel')}</label>
                 <input
                   id="municipio"
                   type="text"
                   value={municipio}
                   onChange={(e) => setMunicipio(e.target.value)}
-                  placeholder="e.g. São Paulo"
+                  placeholder={t('admin.bulkImporter.cityPlaceholder')}
                   className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
               </div>
             </div>
 
-            <p className="text-xs text-muted-foreground">Note: You must provide at least one filter (State or City). Limit is fixed to 50 for safety.</p>
+            <p className="text-xs text-muted-foreground">{t('admin.bulkImporter.note')}</p>
 
             <Button type="submit" disabled={isImporting} className="w-full">
               {isImporting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
-              Trigger Import
+              {t('admin.bulkImporter.button')}
             </Button>
           </form>
 
@@ -500,7 +531,13 @@ export function AdminDashboard() {
             </Button>
           </form>
 
-          {autonomousResult && (
+          {activeSearchId && (
+            <div className="mt-6 p-4 rounded-md border flex items-center bg-muted/50 text-muted-foreground">
+              <Loader2 className="w-5 h-5 animate-spin mr-3 shrink-0" />
+              <p className="text-sm">{searchProgressMessage}</p>
+            </div>
+          )}
+          {!activeSearchId && autonomousResult && (
             <div className={`mt-6 p-4 rounded-md border flex items-start ${
               autonomousResult.type === 'success'
                 ? 'bg-green-500/10 border-green-500/50 text-green-600 dark:text-green-400'

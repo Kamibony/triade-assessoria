@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.autonomousSearchWorker = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = exports.matchSchema = void 0;
+exports.onSearchCreated = exports.autonomousSearchWorker = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = exports.matchSchema = void 0;
 exports.processMatchEvaluation = processMatchEvaluation;
 exports.discoverProsasEditais = discoverProsasEditais;
 exports.processRssFeeds = processRssFeeds;
@@ -942,11 +942,99 @@ exports.autonomousSearchWorker = (0, https_1.onCall)({
     if (!query) {
         throw new https_1.HttpsError('invalid-argument', 'Query is required.');
     }
-    logger.info(`Running autonomous search for query: ${query}`);
-    // Simulate successful run for the UI
+    logger.info(`Triggering background autonomous search for query: ${query}`);
+    const db = (0, firestore_1.getFirestore)();
+    const searchRef = db.collection('searches').doc();
+    await searchRef.set({
+        query,
+        status: 'running',
+        message: 'Iniciando busca...',
+        createdAt: firestore_1.FieldValue.serverTimestamp(),
+    });
     return {
         success: true,
-        message: 'Autonomous search triggered successfully.'
+        searchId: searchRef.id,
+        message: 'Busca autônoma iniciada em segundo plano.'
     };
+});
+exports.onSearchCreated = (0, firestore_2.onDocumentCreated)({ document: 'searches/{searchId}', timeoutSeconds: 540 }, async (event) => {
+    const snapshot = event.data;
+    if (!snapshot)
+        return;
+    const data = snapshot.data();
+    const searchId = event.params.searchId;
+    const query = data.query;
+    const db = (0, firestore_1.getFirestore)();
+    const searchRef = db.collection('searches').doc(searchId);
+    try {
+        await searchRef.update({ message: 'Buscando links no Google News...' });
+        // Fetch from Google News RSS
+        const parser = new rss_parser_1.default();
+        const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}`;
+        const feed = await parser.parseURL(rssUrl);
+        let processed = 0;
+        let saved = 0;
+        if (!feed.items || feed.items.length === 0) {
+            await searchRef.update({
+                status: 'completed',
+                message: 'Nenhum resultado encontrado para a busca.',
+                processedCount: 0,
+                savedCount: 0
+            });
+            return;
+        }
+        const itemsToProcess = feed.items.slice(0, 10); // Limit to 10 for performance
+        for (let i = 0; i < itemsToProcess.length; i++) {
+            const item = itemsToProcess[i];
+            if (!item || !item.link)
+                continue;
+            await searchRef.update({ message: `Analisando link ${i + 1} de ${itemsToProcess.length}...` });
+            // Deduplication
+            const existingRef = await db.collection('editais').where('sourceUrl', '==', item.link).limit(1).get();
+            if (!existingRef.empty) {
+                processed++;
+                continue;
+            }
+            try {
+                const text = await fetchAndExtractText(item.link);
+                if (!text || text.length < 500) {
+                    processed++;
+                    continue;
+                }
+                const triageResult = await triageEditalWebpage({ text });
+                if (triageResult.isValidEdital) {
+                    const editalResult = await extractEditalRules({ text });
+                    const parseResult = schemas_js_1.editalSchema.safeParse(editalResult);
+                    if (parseResult.success) {
+                        const editalDocData = {
+                            ...parseResult.data,
+                            rawText: text.substring(0, 5000), // Save a snippet
+                            sourceUrl: item.link,
+                            createdAt: firestore_1.FieldValue.serverTimestamp(),
+                        };
+                        await db.collection('editais').add(editalDocData);
+                        saved++;
+                    }
+                }
+            }
+            catch (error) {
+                console.error(`Error processing link ${item.link} during autonomous search:`, error);
+            }
+            processed++;
+        }
+        await searchRef.update({
+            status: 'completed',
+            message: `Busca finalizada. ${processed} links analisados, ${saved} editais válidos importados.`,
+            processedCount: processed,
+            savedCount: saved
+        });
+    }
+    catch (error) {
+        console.error('Error during autonomous search:', error);
+        await searchRef.update({
+            status: 'error',
+            message: error instanceof Error ? error.message : 'Erro interno durante a busca.',
+        });
+    }
 });
 //# sourceMappingURL=index.js.map
