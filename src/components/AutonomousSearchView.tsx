@@ -3,7 +3,7 @@ import { getFirestore, doc, onSnapshot } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../lib/firebase';
 import { Button } from './ui/Button';
-import { Loader2, Search, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Loader2, Search, CheckCircle2, AlertCircle, Database } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 export function AutonomousSearchView() {
@@ -16,6 +16,8 @@ export function AutonomousSearchView() {
   const [autonomousResult, setAutonomousResult] = useState<{type: 'success' | 'error', message: string} | null>(null);
   const [activeSearchId, setActiveSearchId] = useState<string | null>(null);
   const [searchProgressMessage, setSearchProgressMessage] = useState<string>('');
+  const [isSeeding, setIsSeeding] = useState(false);
+  const [seedResult, setSeedResult] = useState<{type: 'success' | 'error', message: string} | null>(null);
 
   useEffect(() => {
     if (!activeSearchId) return;
@@ -39,6 +41,29 @@ export function AutonomousSearchView() {
 
     return () => unsubscribe();
   }, [activeSearchId, db, t]);
+
+  const handleSeedTargets = async () => {
+    setIsSeeding(true);
+    setSeedResult(null);
+    try {
+      const seedScrapingTargets = httpsCallable(functions, 'seedScrapingTargets');
+      const result = await seedScrapingTargets();
+      const data = result.data as { success: boolean; message: string };
+      if (data.success) {
+        setSeedResult({ type: 'success', message: data.message });
+      } else {
+        setSeedResult({ type: 'error', message: data.message });
+      }
+    } catch (error: unknown) {
+      console.error("Error seeding targets:", error);
+      setSeedResult({
+        type: 'error',
+        message: error instanceof Error ? error.message : String(error)
+      });
+    } finally {
+      setIsSeeding(false);
+    }
+  };
 
   const handleRunAutonomousSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,10 +108,31 @@ export function AutonomousSearchView() {
 
   return (
     <div className="container mx-auto py-8 px-4 max-w-4xl">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">{t('admin.autonomousSearch.title')}</h1>
-        <p className="text-muted-foreground">{t('admin.autonomousSearch.description')}</p>
+      <div className="mb-8 flex justify-between items-start">
+        <div>
+          <h1 className="text-3xl font-bold mb-2">{t('admin.autonomousSearch.title')}</h1>
+          <p className="text-muted-foreground">{t('admin.autonomousSearch.description')}</p>
+        </div>
+        <Button variant="outline" onClick={handleSeedTargets} disabled={isSeeding}>
+          {isSeeding ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Database className="w-4 h-4 mr-2" />}
+          Seed Target Sources
+        </Button>
       </div>
+
+      {seedResult && (
+        <div className={`mb-6 p-4 rounded-md border flex items-start ${
+          seedResult.type === 'success'
+            ? 'bg-green-500/10 border-green-500/50 text-green-600 dark:text-green-400'
+            : 'bg-destructive/10 border-destructive/50 text-destructive'
+        }`}>
+          {seedResult.type === 'success' ? (
+            <CheckCircle2 className="w-5 h-5 mr-3 shrink-0 mt-0.5" />
+          ) : (
+            <AlertCircle className="w-5 h-5 mr-3 shrink-0 mt-0.5" />
+          )}
+          <p className="text-sm font-medium">{seedResult.message}</p>
+        </div>
+      )}
 
       <div className="bg-card text-card-foreground rounded-lg border shadow-sm p-6 flex flex-col">
         <form onSubmit={handleRunAutonomousSearch} className="space-y-4">

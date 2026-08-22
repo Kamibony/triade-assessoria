@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Database, Search, ArrowLeft } from 'lucide-react';
+import { LayoutDashboard, Database, Search, ArrowLeft, FileText, CheckSquare } from 'lucide-react';
 
 export function AdminLayout() {
   const location = useLocation();
@@ -8,6 +8,8 @@ export function AdminLayout() {
     { name: 'Dashboard', path: '/admin', icon: LayoutDashboard },
     { name: 'Diretório de OSCs', path: '/admin/directory', icon: Database },
     { name: 'Busca Autônoma', path: '/admin/search', icon: Search },
+    { name: 'Dashboard de Matches', path: '/admin/matches', icon: CheckSquare },
+    { name: 'Editais', path: '/admin/editais', icon: FileText },
   ];
 
   return (
