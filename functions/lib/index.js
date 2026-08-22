@@ -215,14 +215,18 @@ const triageEditalWebpage = ai.defineFlow({
     name: 'triageEditalWebpage',
     inputSchema: zod_1.z.object({
         text: zod_1.z.string().describe("Texto bruto da página web"),
+        searchQuery: zod_1.z.string().optional().describe("Consulta de busca opcional do operador (filtro estrito)"),
     }),
     outputSchema: schemas_js_1.triageSchema,
 }, async (input) => {
-    const prompt = `Você é um assistente que filtra notícias para encontrar editais reais de financiamento para ONGs no Brasil.
+    let prompt = `Você é um assistente que filtra notícias para encontrar editais reais de financiamento para ONGs no Brasil.
 Vou te passar o texto extraído de uma página web.
-Determine se o texto contém as REGRAS e CRITÉRIOS do edital em si (ou se é a página oficial do edital), ou se é apenas uma notícia (press release) comentando que um edital foi lançado, sem os detalhes completos.
-Responda com isValidEdital = true apenas se contiver os detalhes do edital.
-Justifique sua resposta.
+Determine se o texto contém as REGRAS e CRITÉRIOS do edital em si (ou se é a página oficial do edital), ou se é apenas uma notícia (press release) comentando que um edital foi lançado, sem os detalhes completos.`;
+    if (input.searchQuery) {
+        prompt += `\nIMPORTANTE (FILTRO ESTRITO): O operador especificou uma consulta de busca: "${input.searchQuery}". O edital DEVE ser estritamente relacionado a este tema. Se não for, marque isValidEdital = false e justifique.`;
+    }
+    prompt += `\nResponda com isValidEdital = true apenas se contiver os detalhes completos de um edital E (se houver consulta) se alinhar perfeitamente com a consulta.
+Justifique sua resposta na 'reason'.
 Sempre retorne os dados em português do Brasil (pt-BR).`;
     const response = await ai.generate({
         model: 'vertexai/gemini-2.5-flash',
@@ -920,8 +924,8 @@ exports.autonomousSearchWorker = (0, https_1.onCall)({
     // if (!request.auth) {
     //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
     // }
-    const { targetId } = request.data;
-    logger.info(`Triggering background autonomous search. TargetId: ${targetId || 'All'}`);
+    const { targetId, query } = request.data;
+    logger.info(`Triggering background autonomous search. TargetId: ${targetId || 'All'}, Query: ${query}`);
     const db = (0, firestore_1.getFirestore)();
     // Fetch targets
     let targetsSnapshot;
@@ -942,6 +946,8 @@ exports.autonomousSearchWorker = (0, https_1.onCall)({
     const searchRef = db.collection('searches').doc();
     await searchRef.set({
         targets,
+        query: query || null,
+        logs: [],
         status: 'running',
         message: `Iniciando busca em ${targets.length} fontes...`,
         createdAt: firestore_1.FieldValue.serverTimestamp(),
@@ -1094,10 +1100,13 @@ exports.onSearchCreated = (0, firestore_2.onDocumentCreated)({ document: 'search
                 try {
                     const text = await fetchAndExtractText(link);
                     if (!text || text.length < 500) {
+                        await searchRef.update({
+                            logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Ignorado', reason: 'Texto ausente ou muito curto.' })
+                        });
                         totalProcessed++;
                         continue;
                     }
-                    const triageResult = await triageEditalWebpage({ text });
+                    const triageResult = await triageEditalWebpage({ text, searchQuery: data.query });
                     if (triageResult.isValidEdital) {
                         const editalResult = await extractEditalRules({ text });
                         const parseResult = schemas_js_1.editalSchema.safeParse(editalResult);
@@ -1109,12 +1118,28 @@ exports.onSearchCreated = (0, firestore_2.onDocumentCreated)({ document: 'search
                                 createdAt: firestore_1.FieldValue.serverTimestamp(),
                             };
                             await db.collection('editais').add(editalDocData);
+                            await searchRef.update({
+                                logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Importado', reason: triageResult.reason })
+                            });
                             totalSaved++;
                         }
+                        else {
+                            await searchRef.update({
+                                logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Erro', reason: 'Falha na validação do schema do edital.' })
+                            });
+                        }
+                    }
+                    else {
+                        await searchRef.update({
+                            logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Rejeitado', reason: triageResult.reason })
+                        });
                     }
                 }
                 catch (error) {
                     console.error(`Error processing link ${link} from ${target.name}:`, error);
+                    await searchRef.update({
+                        logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Erro', reason: error instanceof Error ? error.message : 'Erro desconhecido' })
+                    });
                 }
                 totalProcessed++;
             }
