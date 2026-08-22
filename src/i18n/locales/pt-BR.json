@@ -1,0 +1,11 @@
+{
+  "admin": {
+    "autonomousSearch": {
+      "title": "Busca Autônoma de Editais",
+      "description": "Execute um agente autônomo de IA para buscar e importar editais baseado em uma consulta em linguagem natural.",
+      "queryLabel": "Consulta de Busca",
+      "queryPlaceholder": "edital OSC cultura 2026",
+      "button": "Executar Busca Autônoma"
+    }
+  }
+}

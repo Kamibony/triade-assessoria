@@ -7,6 +7,7 @@ import { Loader2, Plus, RefreshCw, Power, CheckCircle2, AlertCircle, Search } fr
 import { LayoutDashboard, Database } from "lucide-react";
 import { OscDirectoryView } from "./OscDirectoryView";
 import { TriadeCopilot } from './TriadeCopilot';
+import { useTranslation } from 'react-i18next';
 
 interface RssSource {
   id: string;
@@ -16,6 +17,7 @@ interface RssSource {
 }
 
 export function AdminDashboard() {
+  const { t } = useTranslation();
   // RSS State
   const [rssSources, setRssSources] = useState<RssSource[]>([]);
   const [rssUrl, setRssUrl] = useState('');
@@ -475,26 +477,26 @@ export function AdminDashboard() {
 
         {/* Autonomous Edital Search Panel */}
         <div className="bg-card text-card-foreground rounded-lg border shadow-sm p-6 flex flex-col">
-          <h2 className="text-xl font-semibold mb-4">Autonomous Edital Search</h2>
-          <p className="text-muted-foreground text-sm mb-6">Run an autonomous AI agent to search and ingest editais based on a natural language query.</p>
+          <h2 className="text-xl font-semibold mb-4">{t('admin.autonomousSearch.title')}</h2>
+          <p className="text-muted-foreground text-sm mb-6">{t('admin.autonomousSearch.description')}</p>
 
           <form onSubmit={handleRunAutonomousSearch} className="space-y-4">
             <div>
-              <label htmlFor="autonomousQuery" className="block text-sm font-medium mb-1">Search Query</label>
+              <label htmlFor="autonomousQuery" className="block text-sm font-medium mb-1">{t('admin.autonomousSearch.queryLabel')}</label>
               <input
                 id="autonomousQuery"
                 type="text"
                 required
                 value={autonomousQuery}
                 onChange={(e) => setAutonomousQuery(e.target.value)}
-                placeholder="edital OSC cultura 2026"
+                placeholder={t('admin.autonomousSearch.queryPlaceholder')}
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
 
             <Button type="submit" disabled={isRunningAutonomous} className="w-full">
               {isRunningAutonomous ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Search className="w-4 h-4 mr-2" />}
-              Run Autonomous Search
+              {t('admin.autonomousSearch.button')}
             </Button>
           </form>
 
