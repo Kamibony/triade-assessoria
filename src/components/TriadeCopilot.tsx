@@ -35,9 +35,9 @@ export function TriadeCopilot() {
       const askCopilot = httpsCallable<{ prompt: string }, CopilotResponse>(functions, 'askCopilotFunction');
       const response = await askCopilot({ prompt });
       setResult(response.data);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Copilot error:', err);
-      setError(err.message || 'An error occurred while generating the response.');
+      setError(err instanceof Error ? err.message : 'An error occurred while generating the response.');
     } finally {
       setIsLoading(false);
     }
