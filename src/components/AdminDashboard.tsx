@@ -3,7 +3,7 @@ import { getFirestore, collection, addDoc, onSnapshot, query, updateDoc, doc } f
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../lib/firebase';
 import { Button } from './ui/Button';
-import { Loader2, Plus, RefreshCw, Power, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Loader2, Plus, RefreshCw, Power, CheckCircle2, AlertCircle, Search } from 'lucide-react';
 import { LayoutDashboard, Database } from "lucide-react";
 import { OscDirectoryView } from "./OscDirectoryView";
 import { TriadeCopilot } from './TriadeCopilot';
@@ -35,6 +35,11 @@ export function AdminDashboard() {
   const [manualUrl, setManualUrl] = useState('');
   const [isIngestingManual, setIsIngestingManual] = useState(false);
   const [manualIngestResult, setManualIngestResult] = useState<{type: 'success' | 'error', message: string} | null>(null);
+
+  // Autonomous Edital Search State
+  const [autonomousQuery, setAutonomousQuery] = useState('');
+  const [isRunningAutonomous, setIsRunningAutonomous] = useState(false);
+  const [autonomousResult, setAutonomousResult] = useState<{type: 'success' | 'error', message: string} | null>(null);
 
   // Tab State
   const [activeTab, setActiveTab] = useState<'ingestion' | 'directory'>('ingestion');
@@ -181,6 +186,41 @@ export function AdminDashboard() {
       });
     } finally {
       setIsImporting(false);
+    }
+  };
+
+  const handleRunAutonomousSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!autonomousQuery.trim()) return;
+
+    setIsRunningAutonomous(true);
+    setAutonomousResult(null);
+
+    try {
+      const runAutonomousSearch = httpsCallable(functions, 'autonomousSearchWorker');
+      const result = await runAutonomousSearch({ query: autonomousQuery });
+      const data = result.data as { success: boolean; message?: string };
+
+      if (data.success) {
+         setAutonomousResult({
+            type: 'success',
+            message: data.message || 'Autonomous search triggered successfully.'
+         });
+         setAutonomousQuery('');
+      } else {
+         setAutonomousResult({
+             type: 'error',
+             message: data.message || 'Failed to trigger autonomous search.'
+         });
+      }
+    } catch (error: unknown) {
+      console.error("Error triggering autonomous search:", error);
+      setAutonomousResult({
+        type: 'error',
+        message: error instanceof Error ? error.message : String(error) || 'Internal error during autonomous search.'
+      });
+    } finally {
+      setIsRunningAutonomous(false);
     }
   };
 
@@ -429,6 +469,47 @@ export function AdminDashboard() {
                 <AlertCircle className="w-5 h-5 mr-3 shrink-0 mt-0.5" />
               )}
               <p className="text-sm">{importResult.message}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Autonomous Edital Search Panel */}
+        <div className="bg-card text-card-foreground rounded-lg border shadow-sm p-6 flex flex-col">
+          <h2 className="text-xl font-semibold mb-4">Autonomous Edital Search</h2>
+          <p className="text-muted-foreground text-sm mb-6">Run an autonomous AI agent to search and ingest editais based on a natural language query.</p>
+
+          <form onSubmit={handleRunAutonomousSearch} className="space-y-4">
+            <div>
+              <label htmlFor="autonomousQuery" className="block text-sm font-medium mb-1">Search Query</label>
+              <input
+                id="autonomousQuery"
+                type="text"
+                required
+                value={autonomousQuery}
+                onChange={(e) => setAutonomousQuery(e.target.value)}
+                placeholder="edital OSC cultura 2026"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+
+            <Button type="submit" disabled={isRunningAutonomous} className="w-full">
+              {isRunningAutonomous ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Search className="w-4 h-4 mr-2" />}
+              Run Autonomous Search
+            </Button>
+          </form>
+
+          {autonomousResult && (
+            <div className={`mt-6 p-4 rounded-md border flex items-start ${
+              autonomousResult.type === 'success'
+                ? 'bg-green-500/10 border-green-500/50 text-green-600 dark:text-green-400'
+                : 'bg-destructive/10 border-destructive/50 text-destructive'
+            }`}>
+              {autonomousResult.type === 'success' ? (
+                <CheckCircle2 className="w-5 h-5 mr-3 shrink-0 mt-0.5" />
+              ) : (
+                <AlertCircle className="w-5 h-5 mr-3 shrink-0 mt-0.5" />
+              )}
+              <p className="text-sm">{autonomousResult.message}</p>
             </div>
           )}
         </div>

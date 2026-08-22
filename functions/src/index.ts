@@ -26,6 +26,7 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 
     for (let i = 0; i < retries; i++) {
         try {
             // Use AbortSignal.timeout if available (Node 17.3+), fallback to AbortController otherwise.
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const signal = (AbortSignal as any).timeout ? (AbortSignal as any).timeout(15000) : undefined;
             const res = await fetch(url, { ...opts, signal });
 
@@ -33,9 +34,10 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 
                 throw new Error(`API returned ${res.status} for ${url}`);
             }
             return res;
-        } catch (error: any) {
-            logger.warn(`Fetch attempt ${i + 1} failed for ${url}: ${error.message}`);
-            if (i === retries - 1) throw error;
+        } catch (error: unknown) {
+            const err = error as Error;
+            logger.warn(`Fetch attempt ${i + 1} failed for ${url}: ${err.message}`);
+            if (i === retries - 1) throw err;
             await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Simple backoff
         }
     }
@@ -855,14 +857,17 @@ const searchDatabaseTool = ai.defineTool(
         // Apply basic in-memory filters for simplicity given complex NoSQL querying constraints
         if (input.city) {
             const lowerCity = input.city.toLowerCase();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             oscs = oscs.filter((osc: any) => osc.location.toLowerCase().includes(lowerCity));
         }
         if (input.state) {
             const lowerState = input.state.toLowerCase();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             oscs = oscs.filter((osc: any) => osc.location.toLowerCase().includes(lowerState));
         }
         if (input.activity) {
             const lowerActivity = input.activity.toLowerCase();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             oscs = oscs.filter((osc: any) =>
                 osc.coreActivities.some((act: string) => act.toLowerCase().includes(lowerActivity))
             );
