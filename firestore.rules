@@ -14,5 +14,8 @@ service cloud.firestore {
     match /rss_sources/{source} {
       allow read, write: if true;
     }
+    match /searches/{search} {
+      allow read, write: if true;
+    }
   }
 }
