@@ -968,7 +968,12 @@ exports.autonomousSearchWorker = (0, https_1.onCall)({
     if (!targetsSnapshot || targetsSnapshot.docs.length === 0) {
         throw new https_1.HttpsError('failed-precondition', 'No scraping targets configured.');
     }
-    const targets = targetsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const allTargets = targetsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const targets = allTargets.filter((t) => t.active !== false);
+    if (targets.length === 0) {
+        throw new https_1.HttpsError('failed-precondition', 'No active scraping targets available.');
+    }
     const searchRef = db.collection('searches').doc();
     await searchRef.set({
         targets,
@@ -976,6 +981,10 @@ exports.autonomousSearchWorker = (0, https_1.onCall)({
         logs: [],
         status: 'running',
         message: `Iniciando busca em ${targets.length} fontes...`,
+        totalTargets: targets.length,
+        completedTargets: 0,
+        processedCount: 0,
+        savedCount: 0,
         createdAt: firestore_1.FieldValue.serverTimestamp(),
     });
     return {
@@ -1277,7 +1286,8 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
         }
         await searchRef.update({
             processedCount: firestore_1.FieldValue.increment(totalProcessed),
-            savedCount: firestore_1.FieldValue.increment(totalSaved)
+            savedCount: firestore_1.FieldValue.increment(totalSaved),
+            completedTargets: firestore_1.FieldValue.increment(1)
         });
     }
     catch (error) {

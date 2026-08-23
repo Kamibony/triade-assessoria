@@ -19,6 +19,7 @@ export function AutonomousSearchView() {
   const [isSeeding, setIsSeeding] = useState(false);
   const [seedResult, setSeedResult] = useState<{type: 'success' | 'error', message: string} | null>(null);
   const [searchLogs, setSearchLogs] = useState<Array<{link: string, status: string, reason: string}>>([]);
+  const [searchProgress, setSearchProgress] = useState<{totalTargets: number, completedTargets: number, processedCount: number, savedCount: number} | null>(null);
 
   useEffect(() => {
     if (!activeSearchId) return;
@@ -27,6 +28,14 @@ export function AutonomousSearchView() {
       if (docSnap.exists()) {
         const data = docSnap.data();
         if (data.logs) setSearchLogs(data.logs);
+        if (data.totalTargets !== undefined) {
+          setSearchProgress({
+            totalTargets: data.totalTargets,
+            completedTargets: data.completedTargets || 0,
+            processedCount: data.processedCount || 0,
+            savedCount: data.savedCount || 0
+          });
+        }
       }
     });
 
@@ -65,6 +74,7 @@ export function AutonomousSearchView() {
 
     try {
       setSearchLogs([]);
+      setSearchProgress(null);
       const runAutonomousSearch = httpsCallable(functions, 'autonomousSearchWorker');
       const result = await runAutonomousSearch({ query: autonomousQuery });
       const data = result.data as { success: boolean; searchId?: string; message?: string };
@@ -156,6 +166,30 @@ export function AutonomousSearchView() {
               <AlertCircle className="w-5 h-5 mr-3 shrink-0 mt-0.5" />
             )}
             <p className="text-sm font-medium">{autonomousResult.message}</p>
+          </div>
+        )}
+
+        {searchProgress && (
+          <div className="mt-6 border rounded-lg overflow-hidden p-4">
+            <div className="flex justify-between text-sm mb-2 font-medium">
+              <span>Progresso (Fontes processadas)</span>
+              <span>{searchProgress.completedTargets} / {searchProgress.totalTargets}</span>
+            </div>
+            <div className="w-full bg-muted rounded-full h-2.5 mb-4">
+              <div
+                className="bg-primary h-2.5 rounded-full transition-all duration-500"
+                style={{ width: `${Math.min(100, Math.max(0, searchProgress.totalTargets ? (searchProgress.completedTargets / searchProgress.totalTargets) * 100 : 0))}%` }}
+              ></div>
+            </div>
+
+            {searchProgress.completedTargets >= searchProgress.totalTargets && searchProgress.totalTargets > 0 && (
+              <div className="mt-4 p-4 rounded-md border bg-green-500/10 border-green-500/50 text-green-700 dark:text-green-400 flex flex-col items-center justify-center">
+                <CheckCircle2 className="w-8 h-8 mb-2" />
+                <p className="font-bold text-lg">Busca Finalizada!</p>
+                <p className="text-sm">Processados {searchProgress.processedCount} links.</p>
+                <p className="text-sm">Importados {searchProgress.savedCount} editais.</p>
+              </div>
+            )}
           </div>
         )}
 

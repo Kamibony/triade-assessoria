@@ -1109,7 +1109,13 @@ export const autonomousSearchWorker = onCall({
         throw new HttpsError('failed-precondition', 'No scraping targets configured.');
     }
 
-    const targets = targetsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const allTargets = targetsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const targets = allTargets.filter((t: any) => t.active !== false);
+
+    if (targets.length === 0) {
+        throw new HttpsError('failed-precondition', 'No active scraping targets available.');
+    }
 
     const searchRef = db.collection('searches').doc();
 
@@ -1119,6 +1125,10 @@ export const autonomousSearchWorker = onCall({
         logs: [],
         status: 'running',
         message: `Iniciando busca em ${targets.length} fontes...`,
+        totalTargets: targets.length,
+        completedTargets: 0,
+        processedCount: 0,
+        savedCount: 0,
         createdAt: FieldValue.serverTimestamp(),
     });
 
@@ -1435,7 +1445,8 @@ export const processScrapingTargetWorker = onTaskDispatched({
 
         await searchRef.update({
             processedCount: FieldValue.increment(totalProcessed),
-            savedCount: FieldValue.increment(totalSaved)
+            savedCount: FieldValue.increment(totalSaved),
+            completedTargets: FieldValue.increment(1)
         });
 
     } catch (error) {
