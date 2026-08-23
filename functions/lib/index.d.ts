@@ -98,6 +98,7 @@ export declare const seedScrapingTargets: import("firebase-functions/v2/https").
     success: boolean;
     message: string;
 }>, unknown>;
+export declare const processScrapingTargetWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
 export declare const onSearchCreated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").QueryDocumentSnapshot | undefined, {
     searchId: string;
 }>>;

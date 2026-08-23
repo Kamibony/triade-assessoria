@@ -15,7 +15,7 @@ export function AutonomousSearchView() {
   const [isRunningAutonomous, setIsRunningAutonomous] = useState(false);
   const [autonomousResult, setAutonomousResult] = useState<{type: 'success' | 'error', message: string} | null>(null);
   const [activeSearchId, setActiveSearchId] = useState<string | null>(null);
-  const [searchProgressMessage, setSearchProgressMessage] = useState<string>('');
+
   const [isSeeding, setIsSeeding] = useState(false);
   const [seedResult, setSeedResult] = useState<{type: 'success' | 'error', message: string} | null>(null);
   const [searchLogs, setSearchLogs] = useState<Array<{link: string, status: string, reason: string}>>([]);
@@ -27,23 +27,11 @@ export function AutonomousSearchView() {
       if (docSnap.exists()) {
         const data = docSnap.data();
         if (data.logs) setSearchLogs(data.logs);
-
-        if (data.status === 'running') {
-          setSearchProgressMessage(data.message || t('admin.autonomousSearch.processing'));
-        } else if (data.status === 'completed' || data.status === 'error') {
-          setAutonomousResult({
-            type: data.status === 'success' || data.status === 'completed' ? 'success' : 'error',
-            message: data.message || (data.status === 'completed' ? t('admin.autonomousSearch.completed') : t('admin.autonomousSearch.error'))
-          });
-          setIsRunningAutonomous(false);
-          setActiveSearchId(null);
-          setSearchProgressMessage('');
-        }
       }
     });
 
     return () => unsubscribe();
-  }, [activeSearchId, db, t]);
+  }, [activeSearchId, db]);
 
   const handleSeedTargets = async () => {
     setIsSeeding(true);
@@ -84,21 +72,17 @@ export function AutonomousSearchView() {
       if (data.success) {
          if (data.searchId) {
             setActiveSearchId(data.searchId);
-            setSearchProgressMessage(t('admin.autonomousSearch.triggerSuccess'));
-         } else {
-            setAutonomousResult({
-              type: 'success',
-              message: data.message || t('admin.autonomousSearch.triggerSuccess')
-            });
-            setIsRunningAutonomous(false);
          }
+         setAutonomousResult({
+           type: 'success',
+           message: "Agente Autônomo enviado para execução em segundo plano."
+         });
          setAutonomousQuery('');
       } else {
          setAutonomousResult({
              type: 'error',
              message: data.message || t('admin.autonomousSearch.triggerError')
          });
-         setIsRunningAutonomous(false);
       }
     } catch (error: unknown) {
       console.error("Error triggering autonomous search:", error);
@@ -106,6 +90,7 @@ export function AutonomousSearchView() {
         type: 'error',
         message: error instanceof Error ? error.message : String(error) || t('admin.autonomousSearch.internalError')
       });
+    } finally {
       setIsRunningAutonomous(false);
     }
   };
@@ -159,13 +144,7 @@ export function AutonomousSearchView() {
           </Button>
         </form>
 
-        {activeSearchId && (
-          <div className="mt-6 p-4 rounded-md border flex items-center bg-muted/50 text-muted-foreground">
-            <Loader2 className="w-5 h-5 animate-spin mr-3 shrink-0" />
-            <p className="text-sm font-medium">{searchProgressMessage}</p>
-          </div>
-        )}
-        {!activeSearchId && autonomousResult && (
+        {autonomousResult && (
           <div className={`mt-6 p-4 rounded-md border flex items-start ${
             autonomousResult.type === 'success'
               ? 'bg-green-500/10 border-green-500/50 text-green-600 dark:text-green-400'
