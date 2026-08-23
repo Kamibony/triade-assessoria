@@ -240,15 +240,18 @@ const triageEditalWebpage = ai.defineFlow(
         outputSchema: triageSchema,
     },
     async (input) => {
-        let prompt = `Você é um assistente que filtra notícias para encontrar editais reais de financiamento para ONGs no Brasil.
+        let prompt = `Você é um assistente que filtra páginas web para encontrar editais reais de financiamento, grants ou chamadas públicas para ONGs no Brasil.
 Vou te passar o texto extraído de uma página web.
-Determine se o texto contém as REGRAS e CRITÉRIOS do edital em si (ou se é a página oficial do edital), ou se é apenas uma notícia (press release) comentando que um edital foi lançado, sem os detalhes completos.`;
+Determine se o texto representa uma oportunidade real e ativa de financiamento.
+VOCÊ DEVE ACEITAR: "Landing Pages de Editais", "Anúncios Oficiais de Editais Abertos" e páginas de resumo que funcionem como ponto de entrada para a inscrição (ex: contendo links/botões como "Inscreva-se", "Baixar Edital", "Acessar Plataforma", ou que direcionem para formulários ou PDFs).
+NÃO EXIJA que o texto contenha todas as regras ou o regulamento jurídico completo na própria página; se for a página oficial de divulgação de uma oportunidade ativa e legítima, ela deve ser aprovada.
+Rejeite apenas artigos genéricos de opinião, notícias exclusivas sobre resultados de editais passados ou páginas que não tenham relação com oportunidades de captação de recursos.`;
 
         if (input.searchQuery) {
             prompt += `\nIMPORTANTE (FILTRO ESTRITO): O operador especificou uma consulta de busca: "${input.searchQuery}". O edital DEVE ser estritamente relacionado a este tema. Se não for, marque isValidEdital = false e justifique.`;
         }
 
-        prompt += `\nResponda com isValidEdital = true apenas se contiver os detalhes completos de um edital E (se houver consulta) se alinhar perfeitamente com a consulta.
+        prompt += `\nResponda com isValidEdital = true se for um edital, landing page ou anúncio oficial de grant E (se houver consulta) se alinhar perfeitamente com a consulta.
 Justifique sua resposta na 'reason'.
 Sempre retorne os dados em português do Brasil (pt-BR).`;
 
