@@ -4,42 +4,73 @@ import { LayoutDashboard, Database, Search, ArrowLeft, FileText, CheckSquare } f
 export function AdminLayout() {
   const location = useLocation();
 
-  const navItems = [
-    { name: 'Dashboard', path: '/admin', icon: LayoutDashboard },
-    { name: 'Diretório de OSCs', path: '/admin/directory', icon: Database },
-    { name: 'Fontes de Dados', path: '/admin/sources', icon: Database },
-    { name: 'Busca Autônoma', path: '/admin/search', icon: Search },
-    { name: 'Dashboard de Matches', path: '/admin/matches', icon: CheckSquare },
-    { name: 'Editais', path: '/admin/editais', icon: FileText },
+  const navGroups = [
+    {
+      title: 'VISÃO GERAL',
+      items: [
+        { name: 'Dashboard', path: '/admin', icon: LayoutDashboard },
+      ],
+    },
+    {
+      title: 'REDE DE OSCS',
+      items: [
+        { name: 'Diretório de OSCs', path: '/admin/directory', icon: Database },
+        { name: 'Importar OSCs', path: '/admin/import-oscs', icon: Database },
+      ],
+    },
+    {
+      title: 'ECOSSISTEMA DE EDITAIS',
+      items: [
+        { name: 'Diretório de Editais', path: '/admin/editais', icon: FileText },
+        { name: 'Busca Autônoma', path: '/admin/search', icon: Search },
+        { name: 'Ingestão Manual', path: '/admin/manual-ingest', icon: Database },
+        { name: 'Fontes de Dados', path: '/admin/sources', icon: Database },
+      ],
+    },
+    {
+      title: 'INTELIGÊNCIA',
+      items: [
+        { name: 'Master Matches', path: '/admin/matches', icon: CheckSquare },
+      ],
+    },
   ];
 
   return (
     <div className="flex h-screen bg-muted/20">
       {/* Sidebar */}
-      <aside className="w-64 bg-card border-r border-border flex flex-col h-full sticky top-0">
-        <div className="p-6 border-b border-border">
+      <aside className="w-64 bg-card border-r border-border flex flex-col h-full sticky top-0 overflow-hidden">
+        <div className="p-6 border-b border-border shrink-0">
           <h2 className="text-xl font-bold tracking-tighter">TRÍADE<span className="text-primary">.</span> <span className="text-muted-foreground font-normal text-sm ml-1">Admin</span></h2>
         </div>
 
-        <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-          {navItems.map((item) => {
-            const isActive = location.pathname === item.path;
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
-                  isActive
-                    ? 'bg-primary/10 text-primary'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                }`}
-              >
-                <Icon className="w-5 h-5" />
-                {item.name}
-              </Link>
-            );
-          })}
+        <nav className="flex-1 p-4 overflow-y-auto space-y-6">
+          {navGroups.map((group) => (
+            <div key={group.title}>
+              <h3 className="px-3 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                {group.title}
+              </h3>
+              <div className="space-y-1">
+                {group.items.map((item) => {
+                  const isActive = location.pathname === item.path;
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                        isActive
+                          ? 'bg-primary/10 text-primary'
+                          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                      }`}
+                    >
+                      <Icon className="w-4 h-4" />
+                      {item.name}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
         <div className="p-4 border-t border-border">
