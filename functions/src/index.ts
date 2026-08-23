@@ -1211,14 +1211,19 @@ export const seedScrapingTargets = onCall({
     };
 });
 
-export const onSearchCreated = onDocumentCreated({ document: 'searches/{searchId}', timeoutSeconds: 540 }, async (event) => {
-    const snapshot = event.data;
-    if (!snapshot) return;
 
-    const data = snapshot.data();
-    const searchId = event.params.searchId;
+export const processScrapingTargetWorker = onTaskDispatched({
+    retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
+    rateLimits: { maxConcurrentDispatches: 5 },
+    timeoutSeconds: 540
+}, async (request) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const targets = data.targets as any[] || [];
+    const { searchId, target, query } = request.data as { searchId: string, target: any, query?: string };
+
+    if (!searchId || !target) {
+        console.error("Invalid task payload: missing searchId or target.");
+        return;
+    }
 
     const db = getFirestore();
     const searchRef = db.collection('searches').doc(searchId);
@@ -1226,100 +1231,83 @@ export const onSearchCreated = onDocumentCreated({ document: 'searches/{searchId
     try {
         let totalProcessed = 0;
         let totalSaved = 0;
+        let candidateLinks: string[] = [];
 
-        for (let t = 0; t < targets.length; t++) {
-            const target = targets[t];
-            await searchRef.update({ message: `Acessando fonte ${t + 1} de ${targets.length}: ${target.name}...` });
+        try {
+            if (target.strategy === 'RSS') {
+                const parser = new Parser();
+                const feed = await parser.parseURL(target.url);
+                candidateLinks = feed.items.map(item => item.link).filter(link => !!link) as string[];
+            } else if (target.strategy === 'API') {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 15000);
+                const response = await fetch(target.url, {
+                    signal: controller.signal,
+                    headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' }
+                });
+                clearTimeout(timeoutId);
 
-            let candidateLinks: string[] = [];
-
-            try {
-                if (target.strategy === 'RSS') {
-                    const parser = new Parser();
-                    const feed = await parser.parseURL(target.url);
-                    candidateLinks = feed.items.map(item => item.link).filter(link => !!link) as string[];
-                } else if (target.strategy === 'API') {
-                    // API implementation (basic placeholder to extract links from JSON response)
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 15000);
-                    const response = await fetch(target.url, {
-                        signal: controller.signal,
-                        headers: {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                            'Accept': 'application/json',
-                        }
-                    });
-                    clearTimeout(timeoutId);
-
-                    if (response.ok) {
-                        const data = await response.json();
-                        // Extremely naive extraction: look for any string that looks like a URL in the JSON payload
-                        // In reality, this would need custom logic per API (e.g., TransfereGov vs IPEA)
-                        const jsonString = JSON.stringify(data);
-                        const urlRegex = /(https?:\/\/[^\s"',]+)/g;
-                        const matches = jsonString.match(urlRegex) || [];
-                        candidateLinks = [...new Set(matches)];
-                    } else {
-                        logger.warn(`API fetch failed for ${target.name}: ${response.statusText}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    const jsonString = JSON.stringify(data);
+                    const urlRegex = /(https?:\/\/[^\s"',]+)/g;
+                    const matches = jsonString.match(urlRegex) || [];
+                    candidateLinks = [...new Set(matches)];
+                } else {
+                    logger.warn(`API fetch failed for ${target.name}: ${response.statusText}`);
+                }
+            } else if (target.strategy === 'HTML') {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 15000);
+                const response = await fetch(target.url, {
+                    signal: controller.signal,
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
                     }
-                } else if (target.strategy === 'HTML') {
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 15000);
-                    const response = await fetch(target.url, {
-                        signal: controller.signal,
-                        headers: {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-                        }
-                    });
-                    clearTimeout(timeoutId);
+                });
+                clearTimeout(timeoutId);
 
-                    if (response.ok) {
-                        const html = await response.text();
-                        const $ = cheerio.load(html);
-                        const selector = target.cssSelector || 'a';
+                if (response.ok) {
+                    const html = await response.text();
+                    const $ = cheerio.load(html);
+                    const selector = target.cssSelector || 'a';
 
-                        $(selector).each((_, el) => {
-                            let href = $(el).attr('href');
-                            if (href) {
-                                // Resolve relative URLs properly (handles both root and path-relative)
-                                try {
-                                    href = new URL(href, target.url).href;
-                                    candidateLinks.push(href);
-                                // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                                } catch (e) {
-                                    // Ignore invalid URLs
-                                }
+                    $(selector).each((_, el) => {
+                        let href = $(el).attr('href');
+                        if (href) {
+                            try {
+                                href = new URL(href, target.url).href;
+                                candidateLinks.push(href);
+                            } catch {
+                                // Ignore
                             }
-                        });
-
-                        // Deduplicate in memory
-                        candidateLinks = [...new Set(candidateLinks)];
-                    } else {
-                        logger.warn(`HTML fetch failed for ${target.name}: ${response.statusText}`);
-                    }
-                } else if (target.strategy === 'AUTO') {
-                    // Try RSS first directly if URL suggests it
-                    const isRss = target.url.toLowerCase().endsWith('.xml') || target.url.toLowerCase().includes('feed');
-                    if (isRss) {
-                        try {
-                            const parser = new Parser();
-                            const feed = await parser.parseURL(target.url);
-                            candidateLinks = feed.items.map(item => item.link).filter(link => !!link) as string[];
-                            if (candidateLinks.length > 0) continue;
-                        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                        } catch (e) {
-                            logger.warn(`Direct RSS parsing failed for ${target.url}, falling back to HTML`);
                         }
+                    });
+                    candidateLinks = [...new Set(candidateLinks)];
+                } else {
+                    logger.warn(`HTML fetch failed for ${target.name}: ${response.statusText}`);
+                }
+            } else if (target.strategy === 'AUTO') {
+                const isRss = target.url.toLowerCase().endsWith('.xml') || target.url.toLowerCase().includes('feed');
+                if (isRss) {
+                    try {
+                        const parser = new Parser();
+                        const feed = await parser.parseURL(target.url);
+                        candidateLinks = feed.items.map(item => item.link).filter(link => !!link) as string[];
+                    } catch {
+                        logger.warn(`Direct RSS parsing failed for ${target.url}`);
                     }
+                }
 
+                if (candidateLinks.length === 0) {
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 15000);
                     const response = await fetch(target.url, {
                         signal: controller.signal,
                         headers: {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                            'User-Agent': 'Mozilla/5.0',
                             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
                             'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
                         }
@@ -1330,20 +1318,16 @@ export const onSearchCreated = onDocumentCreated({ document: 'searches/{searchId
                         const contentType = response.headers.get('content-type') || '';
                         const html = await response.text();
 
-                        // Fallback if the content is actually XML/RSS even if URL didn't have .xml
                         if (contentType.includes('xml') || contentType.includes('rss')) {
-                             try {
+                            try {
                                 const parser = new Parser();
                                 const feed = await parser.parseString(html);
                                 candidateLinks = feed.items.map(item => item.link).filter(link => !!link) as string[];
-                            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                            } catch (e) {
+                            } catch {
                                 logger.warn(`Failed to parse XML response as RSS for ${target.url}`);
                             }
                         } else {
                             const $ = cheerio.load(html);
-
-                            // Check for RSS alternate link in head (Hybrid Discovery)
                             const rssLink = $('link[type="application/rss+xml"]').attr('href');
                             if (rssLink) {
                                 try {
@@ -1351,13 +1335,11 @@ export const onSearchCreated = onDocumentCreated({ document: 'searches/{searchId
                                     const parser = new Parser();
                                     const feed = await parser.parseURL(absoluteRssUrl);
                                     candidateLinks = feed.items.map(item => item.link).filter(link => !!link) as string[];
-                                // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                                } catch (e) {
-                                    logger.warn(`Failed to parse discovered RSS feed at ${rssLink}`);
+                                } catch {
+                                    logger.warn(`Failed to parse discovered RSS feed`);
                                 }
                             }
 
-                            // If no RSS was found or it failed, proceed with HTML scraping
                             if (candidateLinks.length === 0) {
                                 let rawLinks: string[] = [];
                                 $('a').each((_, el) => {
@@ -1366,14 +1348,12 @@ export const onSearchCreated = onDocumentCreated({ document: 'searches/{searchId
                                         try {
                                             href = new URL(href, target.url).href;
                                             rawLinks.push(href);
-                                        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                                        } catch (e) {
-                                            // Ignore invalid URLs
+                                        } catch {
+                                            // Ignore
                                         }
                                     }
                                 });
                                 rawLinks = [...new Set(rawLinks)];
-                                // Heuristic Pre-Filtering
                                 const excludePatterns = [/sobre/i, /contato/i, /\.jpg$/i, /\.png$/i, /facebook\.com/i, /instagram\.com/i, /twitter\.com/i, /mailto:/i, /login/i, /entrar/i];
                                 const preFiltered = rawLinks.filter(link => !excludePatterns.some(pattern => pattern.test(link)));
                                 const selectionResult = await selectEditalLinksFlow({ links: preFiltered });
@@ -1384,94 +1364,116 @@ export const onSearchCreated = onDocumentCreated({ document: 'searches/{searchId
                         logger.warn(`AUTO fetch failed for ${target.name}: ${response.statusText}`);
                     }
                 }
-            } catch (error) {
-                logger.error(`Error extracting links for target ${target.name}:`, error);
-                continue; // Skip to next target
             }
+        } catch (error) {
+            logger.error(`Error extracting links for target ${target.name}:`, error);
+        }
 
-            if (candidateLinks.length === 0) {
+        const linksToProcess = candidateLinks.slice(0, 10);
+
+        for (let i = 0; i < linksToProcess.length; i++) {
+            const link = linksToProcess[i];
+            if (!link) continue;
+
+            const existingRef = await db.collection('editais').where('sourceUrl', '==', link).limit(1).get();
+            if (!existingRef.empty) {
+                totalProcessed++;
                 continue;
             }
 
-            const linksToProcess = candidateLinks.slice(0, 10); // Limit to 10 per source to manage timeouts
-
-            for (let i = 0; i < linksToProcess.length; i++) {
-                const link = linksToProcess[i];
-                if (!link) continue;
-
-                await searchRef.update({
-                    message: `Analisando link ${i + 1} de ${linksToProcess.length} da fonte ${target.name}...`
-                });
-
-                // Deduplication
-                const existingRef = await db.collection('editais').where('sourceUrl', '==', link).limit(1).get();
-                if (!existingRef.empty) {
+            try {
+                const text = await fetchAndExtractText(link);
+                if (!text || text.length < 500) {
+                    await searchRef.update({
+                        logs: FieldValue.arrayUnion({ link, status: 'Ignorado', reason: 'Texto ausente ou muito curto.' })
+                    });
                     totalProcessed++;
                     continue;
                 }
 
-                try {
-                    const text = await fetchAndExtractText(link);
-                    if (!text || text.length < 500) {
+                const triageResult = await triageEditalWebpage({ text, searchQuery: query });
+
+                if (triageResult.isValidEdital) {
+                    const editalResult = await extractEditalRules({ text });
+                    const parseResult = editalSchema.safeParse(editalResult);
+
+                    if (parseResult.success) {
+                        const editalDocData = {
+                            ...parseResult.data,
+                            rawText: text.substring(0, 5000),
+                            sourceUrl: link,
+                            createdAt: FieldValue.serverTimestamp(),
+                        };
+
+                        await db.collection('editais').add(editalDocData);
                         await searchRef.update({
-                            logs: FieldValue.arrayUnion({ link, status: 'Ignorado', reason: 'Texto ausente ou muito curto.' })
+                            logs: FieldValue.arrayUnion({ link, status: 'Importado', reason: triageResult.reason })
                         });
-                        totalProcessed++;
-                        continue;
-                    }
-
-                    const triageResult = await triageEditalWebpage({ text, searchQuery: data.query });
-
-                    if (triageResult.isValidEdital) {
-                        const editalResult = await extractEditalRules({ text });
-                        const parseResult = editalSchema.safeParse(editalResult);
-
-                        if (parseResult.success) {
-                            const editalDocData = {
-                                ...parseResult.data,
-                                rawText: text.substring(0, 5000), // Save a snippet
-                                sourceUrl: link,
-                                createdAt: FieldValue.serverTimestamp(),
-                            };
-
-                            await db.collection('editais').add(editalDocData);
-                            await searchRef.update({
-                                logs: FieldValue.arrayUnion({ link, status: 'Importado', reason: triageResult.reason })
-                            });
-                            totalSaved++;
-                        } else {
-                             await searchRef.update({
-                                 logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: 'Falha na validação do schema do edital.' })
-                             });
-                        }
+                        totalSaved++;
                     } else {
-                        await searchRef.update({
-                            logs: FieldValue.arrayUnion({ link, status: 'Rejeitado', reason: triageResult.reason })
-                        });
+                         await searchRef.update({
+                             logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: 'Falha na validação do schema do edital.' })
+                         });
                     }
-                } catch (error) {
-                    console.error(`Error processing link ${link} from ${target.name}:`, error);
+                } else {
                     await searchRef.update({
-                        logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: error instanceof Error ? error.message : 'Erro desconhecido' })
+                        logs: FieldValue.arrayUnion({ link, status: 'Rejeitado', reason: triageResult.reason })
                     });
                 }
-
-                totalProcessed++;
+            } catch (error) {
+                console.error(`Error processing link ${link} from ${target.name}:`, error);
+                await searchRef.update({
+                    logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: error instanceof Error ? error.message : 'Erro desconhecido' })
+                });
             }
+
+            totalProcessed++;
         }
 
         await searchRef.update({
-            status: 'completed',
-            message: `Busca finalizada. ${totalProcessed} links analisados, ${totalSaved} editais válidos importados.`,
-            processedCount: totalProcessed,
-            savedCount: totalSaved
+            processedCount: FieldValue.increment(totalProcessed),
+            savedCount: FieldValue.increment(totalSaved)
         });
 
     } catch (error) {
-        console.error('Error during autonomous search:', error);
+        console.error('Error during autonomous search target worker:', error);
+    }
+});
+
+export const onSearchCreated = onDocumentCreated({ document: 'searches/{searchId}' }, async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) return;
+
+    const data = snapshot.data();
+    const searchId = event.params.searchId;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const targets = data.targets as any[] || [];
+
+    const db = getFirestore();
+    const searchRef = db.collection('searches').doc(searchId);
+    const queue = getFunctions().taskQueue('processScrapingTargetWorker');
+
+    try {
+        const enqueuePromises = targets.map(target => {
+            return queue.enqueue({
+                searchId,
+                target,
+                query: data.query
+            });
+        });
+
+        await Promise.all(enqueuePromises);
+
+        await searchRef.update({
+            status: 'running',
+            message: 'Agente Autônomo enviado para execução em segundo plano.',
+        });
+
+    } catch (error) {
+        console.error('Error enqueuing search tasks:', error);
         await searchRef.update({
             status: 'error',
-            message: error instanceof Error ? error.message : 'Erro interno durante a busca.',
+            message: error instanceof Error ? error.message : 'Erro interno ao enfileirar tarefas de busca.',
         });
     }
 });
