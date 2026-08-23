@@ -9,6 +9,7 @@ interface ScrapingTarget {
   url: string;
   strategy: 'RSS' | 'API' | 'HTML' | 'AUTO';
   cssSelector?: string;
+  active?: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   createdAt?: any;
 }
@@ -50,6 +51,19 @@ export function ScrapingTargetsManager() {
     setIsFormOpen(false);
   };
 
+  const handleToggleActive = async (target: ScrapingTarget) => {
+    try {
+      const newStatus = target.active === false ? true : false;
+      await updateDoc(doc(db, 'scraping_targets', target.id), {
+        active: newStatus,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      console.error("Error toggling status:", error);
+      alert("Erro ao alterar status da fonte.");
+    }
+  };
+
   const handleEdit = (target: ScrapingTarget) => {
     setName(target.name);
     setUrl(target.url);
@@ -85,6 +99,7 @@ export function ScrapingTargetsManager() {
         await updateDoc(doc(db, 'scraping_targets', editingId), targetData);
       } else {
         targetData.createdAt = serverTimestamp();
+        targetData.active = true;
         await addDoc(collection(db, 'scraping_targets'), targetData);
       }
       resetForm();
@@ -173,6 +188,7 @@ export function ScrapingTargetsManager() {
               <thead className="text-xs text-muted-foreground bg-muted/50 uppercase border-b">
                 <tr>
                   <th className="px-6 py-3 font-medium">Nome</th>
+                  <th className="px-6 py-3 font-medium">Status</th>
                   <th className="px-6 py-3 font-medium">Estratégia</th>
                   <th className="px-6 py-3 font-medium">Detalhes</th>
                   <th className="px-6 py-3 font-medium text-right">Ações</th>
@@ -182,6 +198,17 @@ export function ScrapingTargetsManager() {
                 {targets.map((target) => (
                   <tr key={target.id} className="border-b last:border-0 hover:bg-muted/20">
                     <td className="px-6 py-4 font-medium">{target.name}</td>
+                    <td className="px-6 py-4">
+                      <button
+                        onClick={() => handleToggleActive(target)}
+                        className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium cursor-pointer transition-colors
+                          ${target.active !== false
+                            ? 'bg-green-100 text-green-800 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300'
+                            : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}
+                      >
+                        {target.active !== false ? 'Ativo' : 'Inativo'}
+                      </button>
+                    </td>
                     <td className="px-6 py-4">
                       <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium
                         ${target.strategy === 'RSS' ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300' :
