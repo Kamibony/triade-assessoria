@@ -9,6 +9,7 @@ interface ScrapingTarget {
   url: string;
   strategy: 'RSS' | 'API' | 'HTML' | 'AUTO';
   cssSelector?: string;
+  keywords?: string;
   active?: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   createdAt?: any;
@@ -26,6 +27,7 @@ export function ScrapingTargetsManager() {
   const [url, setUrl] = useState('');
   const [strategy, setStrategy] = useState<'RSS' | 'API' | 'HTML' | 'AUTO'>('AUTO');
   const [cssSelector, setCssSelector] = useState('');
+  const [keywords, setKeywords] = useState('');
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'scraping_targets'), (snapshot) => {
@@ -47,6 +49,7 @@ export function ScrapingTargetsManager() {
     setUrl('');
     setStrategy('AUTO');
     setCssSelector('');
+    setKeywords('');
     setEditingId(null);
     setIsFormOpen(false);
   };
@@ -69,6 +72,7 @@ export function ScrapingTargetsManager() {
     setUrl(target.url);
     setStrategy(target.strategy);
     setCssSelector(target.cssSelector || '');
+    setKeywords(target.keywords || '');
     setEditingId(target.id);
     setIsFormOpen(true);
   };
@@ -92,6 +96,9 @@ export function ScrapingTargetsManager() {
 
     if (strategy === 'HTML' && cssSelector.trim()) {
       targetData.cssSelector = cssSelector;
+    }
+    if (strategy === 'RSS' && keywords.trim()) {
+      targetData.keywords = keywords;
     }
 
     try {
@@ -139,6 +146,19 @@ export function ScrapingTargetsManager() {
           </div>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Estratégia</label>
+                <select
+                  value={strategy}
+                  onChange={(e) => setStrategy(e.target.value as "RSS" | "API" | "HTML" | "AUTO")}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="AUTO">AUTO (Inteligência Artificial)</option>
+                  <option value="RSS">RSS Feed</option>
+                  <option value="HTML">HTML Seletor</option>
+                  <option value="API">API</option>
+                </select>
+              </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Nome da Fonte</label>
                 <input
