@@ -1132,19 +1132,67 @@ export const seedScrapingTargets = onCall({
 }, async (request) => {
     // TODO: Re-enable auth checks
     const db = getFirestore();
+
+    // Fetch existing documents
+    const existingDocs = await db.collection('scraping_targets').get();
+
+    // Batch for deletions
+    const deleteBatch = db.batch();
+    existingDocs.forEach((doc) => {
+        deleteBatch.delete(doc.ref);
+    });
+    if (!existingDocs.empty) {
+        await deleteBatch.commit();
+    }
+
     const batch = db.batch();
 
     const targets = [
-        {
-            name: "Prosas (Editais Gerais)",
-            url: "https://blog.prosas.com.br/categoria/editais/feed/",
-            strategy: "RSS",
-        },
-        {
-            name: "Prosas (Editais Nordeste)",
-            url: "https://blog.prosas.com.br/categoria/editais/feed/?tag=nordeste",
-            strategy: "RSS",
-        }
+        { name: "Prosas", url: "https://prosas.com.br", strategy: "AUTO" },
+        { name: "ABCR (Associação Brasileira de Captadores de Recursos)", url: "https://captadores.org.br", strategy: "AUTO" },
+        { name: "GIFE", url: "https://gife.org.br", strategy: "AUTO" },
+        { name: "Rede Filantropia", url: "https://www.filantropia.ong", strategy: "AUTO" },
+        { name: "Nossa Causa", url: "https://nossacausa.com", strategy: "AUTO" },
+        { name: "Idealist", url: "https://www.idealist.org", strategy: "AUTO" },
+        { name: "Mapa das OSCs (IPEA)", url: "https://mapaosc.ipea.gov.br", strategy: "AUTO" },
+        { name: "Captamos", url: "https://captamos.org.br", strategy: "AUTO" },
+        { name: "Fundo Brasil de Direitos Humanos", url: "https://www.fundobrasil.org.br", strategy: "AUTO" },
+        { name: "Fundo Casa Socioambiental", url: "https://casa.org.br", strategy: "AUTO" },
+        { name: "Fundo Elas+ (Fundo de Investimento Social Elas)", url: "https://fundosocialelas.org", strategy: "AUTO" },
+        { name: "Fundo Baobá para Equidade Racial", url: "https://baoba.org.br", strategy: "AUTO" },
+        { name: "BrazilFoundation", url: "https://brazilfoundation.org", strategy: "AUTO" },
+        { name: "Instituto Phi", url: "https://institutophi.org.br", strategy: "AUTO" },
+        { name: "Fundação Banco do Brasil", url: "https://fbb.org.br", strategy: "AUTO" },
+        { name: "Itaú Social", url: "https://itausocial.org.br", strategy: "AUTO" },
+        { name: "Fundação Lemann", url: "https://fundacaolemann.org.br", strategy: "AUTO" },
+        { name: "Instituto Votorantim", url: "https://www.institutovotorantim.org.br", strategy: "AUTO" },
+        { name: "Instituto EDP", url: "https://institutoedp.org.br", strategy: "AUTO" },
+        { name: "Fundação Telefônica Vivo", url: "https://fundacaotelefonica.org.br", strategy: "AUTO" },
+        { name: "Fundação Grupo Boticário", url: "https://www.fundacaogrupoboticario.org.br", strategy: "AUTO" },
+        { name: "Instituto Alana", url: "https://alana.org.br", strategy: "AUTO" },
+        { name: "Instituto C&A", url: "https://www.institutocea.org.br", strategy: "AUTO" },
+        { name: "Instituto Sabin", url: "https://institutosabin.org.br", strategy: "AUTO" },
+        { name: "Fundação Cargill", url: "https://fundacaocargill.org.br", strategy: "AUTO" },
+        { name: "Fundação ArcelorMittal", url: "https://www.fundacaoarcelormittal.org.br", strategy: "AUTO" },
+        { name: "Instituto BRF", url: "https://institutobrf.com", strategy: "AUTO" },
+        { name: "Instituto Lojas Renner", url: "https://institutolojasrenner.org.br", strategy: "AUTO" },
+        { name: "Instituto MRV", url: "https://www.institutomrv.com.br", strategy: "AUTO" },
+        { name: "Lei de Incentivo à Cultura (Rouanet - Ministério da Cultura)", url: "https://www.gov.br/cultura/pt-br", strategy: "AUTO" },
+        { name: "Lei de Incentivo ao Esporte (Ministério do Esporte)", url: "https://www.gov.br/esporte/pt-br", strategy: "AUTO" },
+        { name: "BNDES (Fundo Socioambiental e Fundo Amazônia)", url: "https://www.bndes.gov.br", strategy: "AUTO" },
+        { name: "Funcultura / ProAC / FAC", url: "https://www.cultura.sp.gov.br", strategy: "AUTO" },
+        { name: "Fundo Nacional do Meio Ambiente (FNMA)", url: "https://www.gov.br/mma/pt-br/assuntos/fundo-nacional-do-meio-ambiente", strategy: "AUTO" },
+        { name: "Funarte (Fundação Nacional de Artes)", url: "https://www.gov.br/funarte/pt-br", strategy: "AUTO" },
+        { name: "FIA (Fundo da Infância e Adolescência) e Fundo do Idoso", url: "https://www.gov.br/mdh/pt-br", strategy: "AUTO" },
+        { name: "Capes e CNPq", url: "https://www.gov.br/capes/pt-br", strategy: "AUTO" },
+        { name: "ONU Brasil", url: "https://brasil.un.org/pt-br", strategy: "AUTO" },
+        { name: "Banco Interamericano de Desenvolvimento (BID)", url: "https://www.iadb.org/pt", strategy: "AUTO" },
+        { name: "USAID", url: "https://www.usaid.gov/pt-br/brazil", strategy: "AUTO" },
+        { name: "Fundação Ford", url: "https://www.fordfoundation.org", strategy: "AUTO" },
+        { name: "Open Society Foundations", url: "https://www.opensocietyfoundations.org", strategy: "AUTO" },
+        { name: "Fundação OAK", url: "https://oakfnd.org", strategy: "AUTO" },
+        { name: "WWF-Brasil", url: "https://www.wwf.org.br", strategy: "AUTO" },
+        { name: "Embaixadas e Consulados no Brasil (Programa de Pequenos Projetos)", url: "https://br.emb-japan.go.jp/itpr_pt/apc.html", strategy: "AUTO" }
     ];
 
     for (const target of targets) {
@@ -1159,7 +1207,7 @@ export const seedScrapingTargets = onCall({
 
     return {
         success: true,
-        message: `${targets.length} alvos de scraping de teste inseridos com sucesso.`
+        message: `${targets.length} alvos de scraping oficiais inseridos com sucesso (dados anteriores removidos).`
     };
 });
 
