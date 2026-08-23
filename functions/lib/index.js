@@ -173,6 +173,29 @@ exports.parsePdfProfileFunction = (0, https_1.onCall)({
     // }
     return await parsePdfToProfile(request.data);
 });
+const selectEditalLinksFlow = ai.defineFlow({
+    name: 'selectEditalLinksFlow',
+    inputSchema: zod_1.z.object({
+        links: zod_1.z.array(zod_1.z.string()).describe("Lista de URLs pré-filtradas"),
+    }),
+    outputSchema: zod_1.z.object({
+        selectedLinks: zod_1.z.array(zod_1.z.string()).describe("Apenas os links que parecem apontar para detalhes de editais ou chamadas.")
+    }),
+}, async (input) => {
+    const prompt = `Analise a seguinte lista de URLs.
+Identifique e retorne APENAS os links que são altamente prováveis de apontar para a página de detalhes de um edital (grant, chamada pública, financiamento, edital).
+Ignore links genéricos de navegação.
+Retorne um array com as URLs selecionadas.`;
+    const response = await ai.generate({
+        model: 'vertexai/gemini-2.5-flash',
+        messages: [{ role: 'user', content: [{ text: prompt }, { text: JSON.stringify(input.links) }] }],
+        output: { schema: zod_1.z.object({ selectedLinks: zod_1.z.array(zod_1.z.string()) }) }
+    });
+    if (!response.output) {
+        throw new Error("Falha na seleção de links via Genkit");
+    }
+    return response.output;
+});
 const extractEditalRules = ai.defineFlow({
     name: 'extractEditalRules',
     inputSchema: zod_1.z.object({
@@ -1073,6 +1096,93 @@ exports.onSearchCreated = (0, firestore_2.onDocumentCreated)({ document: 'search
                     }
                     else {
                         logger.warn(`HTML fetch failed for ${target.name}: ${response.statusText}`);
+                    }
+                }
+                else if (target.strategy === 'AUTO') {
+                    // Try RSS first directly if URL suggests it
+                    const isRss = target.url.toLowerCase().endsWith('.xml') || target.url.toLowerCase().includes('feed');
+                    if (isRss) {
+                        try {
+                            const parser = new rss_parser_1.default();
+                            const feed = await parser.parseURL(target.url);
+                            candidateLinks = feed.items.map(item => item.link).filter(link => !!link);
+                            if (candidateLinks.length > 0)
+                                continue;
+                            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                        }
+                        catch (e) {
+                            logger.warn(`Direct RSS parsing failed for ${target.url}, falling back to HTML`);
+                        }
+                    }
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 15000);
+                    const response = await fetch(target.url, {
+                        signal: controller.signal,
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+                        }
+                    });
+                    clearTimeout(timeoutId);
+                    if (response.ok) {
+                        const contentType = response.headers.get('content-type') || '';
+                        const html = await response.text();
+                        // Fallback if the content is actually XML/RSS even if URL didn't have .xml
+                        if (contentType.includes('xml') || contentType.includes('rss')) {
+                            try {
+                                const parser = new rss_parser_1.default();
+                                const feed = await parser.parseString(html);
+                                candidateLinks = feed.items.map(item => item.link).filter(link => !!link);
+                                // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                            }
+                            catch (e) {
+                                logger.warn(`Failed to parse XML response as RSS for ${target.url}`);
+                            }
+                        }
+                        else {
+                            const $ = cheerio.load(html);
+                            // Check for RSS alternate link in head (Hybrid Discovery)
+                            const rssLink = $('link[type="application/rss+xml"]').attr('href');
+                            if (rssLink) {
+                                try {
+                                    const absoluteRssUrl = new URL(rssLink, target.url).href;
+                                    const parser = new rss_parser_1.default();
+                                    const feed = await parser.parseURL(absoluteRssUrl);
+                                    candidateLinks = feed.items.map(item => item.link).filter(link => !!link);
+                                    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                                }
+                                catch (e) {
+                                    logger.warn(`Failed to parse discovered RSS feed at ${rssLink}`);
+                                }
+                            }
+                            // If no RSS was found or it failed, proceed with HTML scraping
+                            if (candidateLinks.length === 0) {
+                                let rawLinks = [];
+                                $('a').each((_, el) => {
+                                    let href = $(el).attr('href');
+                                    if (href) {
+                                        try {
+                                            href = new URL(href, target.url).href;
+                                            rawLinks.push(href);
+                                            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                                        }
+                                        catch (e) {
+                                            // Ignore invalid URLs
+                                        }
+                                    }
+                                });
+                                rawLinks = [...new Set(rawLinks)];
+                                // Heuristic Pre-Filtering
+                                const excludePatterns = [/sobre/i, /contato/i, /\.jpg$/i, /\.png$/i, /facebook\.com/i, /instagram\.com/i, /twitter\.com/i, /mailto:/i, /login/i, /entrar/i];
+                                const preFiltered = rawLinks.filter(link => !excludePatterns.some(pattern => pattern.test(link)));
+                                const selectionResult = await selectEditalLinksFlow({ links: preFiltered });
+                                candidateLinks = selectionResult.selectedLinks;
+                            }
+                        }
+                    }
+                    else {
+                        logger.warn(`AUTO fetch failed for ${target.name}: ${response.statusText}`);
                     }
                 }
             }
