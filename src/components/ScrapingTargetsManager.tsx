@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { Button } from './ui/Button';
-import { Database, Plus, Trash2, Edit2, Check, X, Link as LinkIcon, Code } from 'lucide-react';
+import { Database, Plus, Trash2, Edit2, Check, X, Link as LinkIcon } from 'lucide-react';
 
 interface ScrapingTarget {
   id: string;
   name: string;
   url: string;
-  strategy: 'RSS' | 'API' | 'HTML';
+  strategy: 'RSS' | 'API' | 'HTML' | 'AUTO';
   cssSelector?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   createdAt?: any;
@@ -23,7 +23,7 @@ export function ScrapingTargetsManager() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
-  const [strategy, setStrategy] = useState<'RSS' | 'API' | 'HTML'>('RSS');
+  const [strategy, setStrategy] = useState<'RSS' | 'API' | 'HTML' | 'AUTO'>('AUTO');
   const [cssSelector, setCssSelector] = useState('');
 
   useEffect(() => {
@@ -44,7 +44,7 @@ export function ScrapingTargetsManager() {
   const resetForm = () => {
     setName('');
     setUrl('');
-    setStrategy('RSS');
+    setStrategy('AUTO');
     setCssSelector('');
     setEditingId(null);
     setIsFormOpen(false);
@@ -148,35 +148,6 @@ export function ScrapingTargetsManager() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Estratégia de Extração</label>
-                <select
-                  value={strategy}
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  onChange={(e) => setStrategy(e.target.value as any)}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                >
-                  <option value="RSS">RSS (Feed)</option>
-                  <option value="HTML">HTML (Scraping de Página)</option>
-                  <option value="API">API (JSON)</option>
-                </select>
-              </div>
-
-              {strategy === 'HTML' && (
-                <div>
-                  <label className="block text-sm font-medium mb-1">Seletor CSS para Links</label>
-                  <input
-                    type="text"
-                    required
-                    value={cssSelector}
-                    onChange={(e) => setCssSelector(e.target.value)}
-                    placeholder="Ex: .article-list a.title"
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  />
-                </div>
-              )}
-            </div>
 
             <div className="flex justify-end pt-2">
               <Button type="button" variant="outline" onClick={resetForm} className="mr-2">
@@ -215,6 +186,7 @@ export function ScrapingTargetsManager() {
                       <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium
                         ${target.strategy === 'RSS' ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300' :
                           target.strategy === 'HTML' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' :
+                          target.strategy === 'AUTO' ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300' :
                           'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'}`}>
                         {target.strategy}
                       </span>
@@ -224,12 +196,6 @@ export function ScrapingTargetsManager() {
                         <LinkIcon className="w-3 h-3 mr-1 shrink-0" />
                         <span className="truncate max-w-[200px]">{target.url}</span>
                       </div>
-                      {target.strategy === 'HTML' && target.cssSelector && (
-                        <div className="flex items-center text-muted-foreground text-xs">
-                          <Code className="w-3 h-3 mr-1 shrink-0" />
-                          <span>Seletor: {target.cssSelector}</span>
-                        </div>
-                      )}
                     </td>
                     <td className="px-6 py-4 text-right space-x-2">
                       <Button variant="outline" size="icon" onClick={() => handleEdit(target)}>
