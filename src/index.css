@@ -24,6 +24,8 @@
     --input: 240 3.7% 15.9%;
     --ring: 25 100% 50%; /* #FF6A00 */
     --radius: 0.5rem;
+    --osc: 180 100% 30%; /* Teal/Cyan */
+    --edital: 150 100% 35%; /* Emerald/Green */
   }
 }
 

@@ -47,6 +47,12 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        osc: {
+          DEFAULT: "hsl(var(--osc))",
+        },
+        edital: {
+          DEFAULT: "hsl(var(--edital))",
+        }
       },
       borderRadius: {
         lg: "var(--radius)",

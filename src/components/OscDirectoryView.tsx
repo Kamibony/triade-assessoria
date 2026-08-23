@@ -163,7 +163,7 @@ export function OscDirectoryView() {
                     <td className="px-4 py-3 text-xs">
                       <div className="flex flex-wrap gap-1">
                         {osc.coreActivities?.slice(0, 3).map((act, idx) => (
-                          <span key={idx} className="bg-primary/10 text-primary px-2 py-0.5 rounded-full whitespace-nowrap">
+                          <span key={idx} className="bg-osc/10 text-osc px-2 py-0.5 rounded-full whitespace-nowrap">
                             {act}
                           </span>
                         ))}
@@ -229,7 +229,7 @@ export function OscDirectoryView() {
                 <span className="text-muted-foreground block text-xs font-semibold uppercase mb-2">Atividades Principais</span>
                 <div className="flex flex-wrap gap-2">
                   {selectedOsc.coreActivities?.map((act, idx) => (
-                    <span key={idx} className="bg-muted px-2.5 py-1 rounded-md text-xs font-medium">
+                    <span key={idx} className="bg-osc/10 text-osc px-2.5 py-1 rounded-md text-xs font-medium">
                       {act}
                     </span>
                   ))}

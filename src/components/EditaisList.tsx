@@ -110,9 +110,13 @@ export function EditaisList() {
                               <div className="font-medium line-clamp-2" title={edital.title}>{edital.title}</div>
                             </td>
                             <td className="px-6 py-4 text-muted-foreground">{edital.issuer}</td>
-                            <td className="px-6 py-4 whitespace-nowrap">{edital.deadline}</td>
-                            <td className="px-6 py-4 whitespace-nowrap font-medium text-emerald-600 dark:text-emerald-400">
-                              R$ {edital.totalBudget.toLocaleString('pt-BR')}
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className="bg-muted px-2 py-1 rounded-md text-xs">{edital.deadline}</span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap font-medium text-edital">
+                              <span className="bg-edital/10 px-2 py-1 rounded-md">
+                                R$ {edital.totalBudget.toLocaleString('pt-BR')}
+                              </span>
                             </td>
                             <td className="px-6 py-4 text-right">
                                <button onClick={() => openModal(edital)} className="text-primary hover:text-primary/80 font-medium text-sm cursor-pointer">
