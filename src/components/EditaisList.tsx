@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { collection, getDocs, getFirestore } from 'firebase/firestore';
-import { Link } from 'react-router-dom';
-import { Search } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Search, X } from 'lucide-react';
+import { Button } from './ui/Button';
 
 interface Edital {
     id: string;
@@ -14,25 +15,48 @@ interface Edital {
 
 export function EditaisList() {
     const [editais, setEditais] = useState<Edital[]>([]);
+    const [oscs, setOscs] = useState<{ id: string; name: string }[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
+    const [modalOpen, setModalOpen] = useState(false);
+    const [selectedEdital, setSelectedEdital] = useState<Edital | null>(null);
+    const [selectedOscId, setSelectedOscId] = useState('');
+    const navigate = useNavigate();
 
     useEffect(() => {
-        const fetchEditais = async () => {
+        const fetchData = async () => {
             try {
                 const db = getFirestore();
-                const snapshot = await getDocs(collection(db, 'editais'));
-                const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Edital));
+                const editaisSnap = await getDocs(collection(db, 'editais'));
+                const list = editaisSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Edital));
                 setEditais(list);
+
+                const oscsSnap = await getDocs(collection(db, 'oscs'));
+                const oscsList = oscsSnap.docs.map(doc => ({ id: doc.id, name: doc.data().name || doc.id }));
+                setOscs(oscsList);
+                if (oscsList.length > 0) {
+                    setSelectedOscId(oscsList[0].id);
+                }
             } catch (error) {
-                console.error("Error fetching editais:", error);
+                console.error("Error fetching data:", error);
             } finally {
                 setLoading(false);
             }
         };
 
-        fetchEditais();
+        fetchData();
     }, []);
+
+    const openModal = (edital: Edital) => {
+        setSelectedEdital(edital);
+        setModalOpen(true);
+    };
+
+    const handleSimulate = () => {
+        if (selectedEdital && selectedOscId) {
+            navigate(`/match/${selectedEdital.id}?oscId=${selectedOscId}`);
+        }
+    };
 
     if (loading) {
         return <div className="p-8 text-center">Carregando editais...</div>;
@@ -91,15 +115,50 @@ export function EditaisList() {
                               R$ {edital.totalBudget.toLocaleString('pt-BR')}
                             </td>
                             <td className="px-6 py-4 text-right">
-                               <Link to={`/match/${edital.id}`} className="text-primary hover:text-primary/80 font-medium text-sm">
+                               <button onClick={() => openModal(edital)} className="text-primary hover:text-primary/80 font-medium text-sm cursor-pointer">
                                    Simular Match
-                               </Link>
+                               </button>
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
+                </div>
+            )}
+
+            {modalOpen && selectedEdital && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
+                    <div className="bg-card w-full max-w-md rounded-lg shadow-xl border overflow-hidden">
+                        <div className="flex justify-between items-center p-4 border-b">
+                            <h3 className="font-bold text-lg">Simular Match</h3>
+                            <button onClick={() => setModalOpen(false)} className="text-muted-foreground hover:text-foreground">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <p className="text-sm font-medium mb-1">Edital Selecionado:</p>
+                                <p className="text-sm text-muted-foreground line-clamp-2">{selectedEdital.title}</p>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-2">Selecione a OSC para o match:</label>
+                                <select
+                                    className="w-full rounded-md border border-input bg-background py-2 px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    value={selectedOscId}
+                                    onChange={(e) => setSelectedOscId(e.target.value)}
+                                >
+                                    {oscs.map(osc => (
+                                        <option key={osc.id} value={osc.id}>{osc.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-3 p-4 border-t bg-muted/20">
+                            <Button variant="outline" onClick={() => setModalOpen(false)}>Cancelar</Button>
+                            <Button onClick={handleSimulate}>Confirmar Simulação</Button>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

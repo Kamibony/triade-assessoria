@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { collection, query, where, getDocs, getFirestore } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../lib/firebase';
@@ -10,16 +10,23 @@ import type { MatchResult } from '../lib/types';
 
 export function NgoMatchView() {
     const { editalId } = useParams();
+    const [searchParams] = useSearchParams();
+    const navigate = useNavigate();
     const [match, setMatch] = useState<MatchResult | null>(null);
     const [loading, setLoading] = useState(true);
     const [generating, setGenerating] = useState(false);
 
-    // Hardcoded for MVP as we don't have auth yet
-    const currentOscId = "osc_mock_id_1";
+    const currentOscId = searchParams.get('oscId');
 
     useEffect(() => {
         const fetchMatch = async () => {
             if (!editalId) return;
+            if (!currentOscId) {
+                // If there's no OSC ID in the URL, redirect back to the editais list
+                alert("Nenhuma OSC selecionada. Por favor, selecione uma OSC para simular o match.");
+                navigate('/admin/editais');
+                return;
+            }
             try {
                 const db = getFirestore();
                 const q = query(
@@ -40,7 +47,7 @@ export function NgoMatchView() {
         };
 
         fetchMatch();
-    }, [editalId]);
+    }, [editalId, currentOscId, navigate]);
 
     const handleGenerateMatch = async (forceRecalculate: boolean = false) => {
         setGenerating(true);
