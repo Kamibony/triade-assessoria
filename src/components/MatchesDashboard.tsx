@@ -66,6 +66,9 @@ export function MatchesDashboard() {
     filteredMatches = filteredMatches.filter(m => m.matchScore >= 40);
   }
 
+  // Explicit sort before grouping
+  filteredMatches.sort((a, b) => b.matchScore - a.matchScore);
+
   // Grouping logic
   const groupedMatches: Record<string, MatchResult[]> = {};
   if (groupBy === 'edital') {
@@ -91,17 +94,21 @@ export function MatchesDashboard() {
                Visão global de todos os matches gerados pelo sistema para todas as OSCs.
            </p>
          </div>
-         <div className="flex flex-col sm:flex-row gap-3">
-             <div className="flex items-center gap-2">
-                 <label htmlFor="hideLow" className="text-sm font-medium whitespace-nowrap">Ocultar &lt; 40%</label>
-                 <input
-                    id="hideLow"
-                    type="checkbox"
-                    checked={hideLowScores}
-                    onChange={e => setHideLowScores(e.target.checked)}
-                    className="w-4 h-4 text-primary bg-background border-gray-300 rounded focus:ring-primary"
-                 />
+         <div className="flex flex-col sm:flex-row gap-4 bg-muted/30 p-4 rounded-lg border shadow-sm items-center w-full md:w-auto">
+             <div className="flex items-center gap-3">
+                 <span className="text-sm font-medium whitespace-nowrap">Ocultar &lt; 40%</span>
+                 <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      id="hideLow"
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={hideLowScores}
+                      onChange={e => setHideLowScores(e.target.checked)}
+                    />
+                    <div className="w-9 h-5 bg-muted peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                 </label>
              </div>
+             <div className="h-6 w-px bg-border hidden sm:block"></div>
              <div className="flex items-center gap-2">
                  <label htmlFor="groupBy" className="text-sm font-medium whitespace-nowrap">Agrupar por:</label>
                  <select
@@ -115,6 +122,7 @@ export function MatchesDashboard() {
                      <option value="osc">OSC</option>
                  </select>
              </div>
+             <div className="h-6 w-px bg-border hidden sm:block"></div>
              <div className="relative w-full sm:w-64">
                 <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
                   <Search className="w-4 h-4 text-muted-foreground" />

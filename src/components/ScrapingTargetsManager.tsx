@@ -199,15 +199,18 @@ export function ScrapingTargetsManager() {
                   <tr key={target.id} className="border-b last:border-0 hover:bg-muted/20">
                     <td className="px-6 py-4 font-medium">{target.name}</td>
                     <td className="px-6 py-4">
-                      <button
-                        onClick={() => handleToggleActive(target)}
-                        className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium cursor-pointer transition-colors
-                          ${target.active !== false
-                            ? 'bg-green-100 text-green-800 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300'
-                            : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}
-                      >
-                        {target.active !== false ? 'Ativo' : 'Inativo'}
-                      </button>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="sr-only peer"
+                          checked={target.active !== false}
+                          onChange={() => handleToggleActive(target)}
+                        />
+                        <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                        <span className={`ml-3 text-xs font-medium ${target.active !== false ? 'text-primary' : 'text-muted-foreground'}`}>
+                          {target.active !== false ? 'Ativo' : 'Inativo'}
+                        </span>
+                      </label>
                     </td>
                     <td className="px-6 py-4">
                       <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium
