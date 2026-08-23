@@ -66,11 +66,11 @@ export function AdminDashboard() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         {/* Total OSCs Card */}
         <div className="bg-card text-card-foreground rounded-lg border shadow-sm p-6 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-[hsl(var(--osc))]/5 rounded-bl-full -mr-8 -mt-8 pointer-events-none" />
+          <div className="absolute top-0 right-0 w-32 h-32 bg-osc/5 rounded-bl-full -mr-8 -mt-8 pointer-events-none" />
           <div className="flex items-center justify-between mb-4 relative z-10">
             <h3 className="font-semibold text-muted-foreground">Total de OSCs</h3>
-            <div className="p-2 bg-[hsl(var(--osc))]/10 rounded-md">
-              <Users className="w-5 h-5 text-[hsl(var(--osc))]" />
+            <div className="p-2 bg-osc/10 rounded-md">
+              <Users className="w-5 h-5 text-osc" />
             </div>
           </div>
           <div className="flex items-baseline gap-2 relative z-10">
@@ -80,18 +80,18 @@ export function AdminDashboard() {
               <span className="text-4xl font-bold tracking-tighter">{stats.totalOscs}</span>
             )}
           </div>
-          <Link to="/admin/directory" className="inline-flex items-center text-sm font-medium text-[hsl(var(--osc))] mt-6 hover:underline relative z-10">
+          <Link to="/admin/directory" className="inline-flex items-center text-sm font-medium text-osc mt-6 hover:underline relative z-10">
             Ver Diretório <ArrowRight className="w-4 h-4 ml-1" />
           </Link>
         </div>
 
         {/* Active Editais Card */}
         <div className="bg-card text-card-foreground rounded-lg border shadow-sm p-6 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-[hsl(var(--edital))]/5 rounded-bl-full -mr-8 -mt-8 pointer-events-none" />
+          <div className="absolute top-0 right-0 w-32 h-32 bg-edital/5 rounded-bl-full -mr-8 -mt-8 pointer-events-none" />
           <div className="flex items-center justify-between mb-4 relative z-10">
             <h3 className="font-semibold text-muted-foreground">Editais Ativos</h3>
-            <div className="p-2 bg-[hsl(var(--edital))]/10 rounded-md">
-              <FileText className="w-5 h-5 text-[hsl(var(--edital))]" />
+            <div className="p-2 bg-edital/10 rounded-md">
+              <FileText className="w-5 h-5 text-edital" />
             </div>
           </div>
           <div className="flex items-baseline gap-2 relative z-10">
@@ -101,7 +101,7 @@ export function AdminDashboard() {
               <span className="text-4xl font-bold tracking-tighter">{stats.activeEditais}</span>
             )}
           </div>
-          <Link to="/admin/editais" className="inline-flex items-center text-sm font-medium text-[hsl(var(--edital))] mt-6 hover:underline relative z-10">
+          <Link to="/admin/editais" className="inline-flex items-center text-sm font-medium text-edital mt-6 hover:underline relative z-10">
             Ver Editais <ArrowRight className="w-4 h-4 ml-1" />
           </Link>
         </div>
@@ -124,6 +124,26 @@ export function AdminDashboard() {
           </div>
           <Link to="/admin/matches" className="inline-flex items-center text-sm font-medium text-primary mt-6 hover:underline relative z-10">
             Ver Matches <ArrowRight className="w-4 h-4 ml-1" />
+          </Link>
+        </div>
+      </div>
+
+      <div className="mb-8">
+        <h2 className="text-xl font-semibold mb-4">Acesso Rápido</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <Link to="/admin/directory" className="group block p-6 bg-card rounded-lg border border-border hover:border-osc/50 transition-colors">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold text-lg group-hover:text-osc transition-colors">Rede de OSCs</h3>
+              <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-osc transition-colors" />
+            </div>
+            <p className="text-sm text-muted-foreground">Gerencie o diretório de organizações e importe novos dados.</p>
+          </Link>
+          <Link to="/admin/editais" className="group block p-6 bg-card rounded-lg border border-border hover:border-edital/50 transition-colors">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold text-lg group-hover:text-edital transition-colors">Ecossistema de Editais</h3>
+              <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-edital transition-colors" />
+            </div>
+            <p className="text-sm text-muted-foreground">Acompanhe editais ativos e configure fontes de busca autônoma.</p>
           </Link>
         </div>
       </div>
