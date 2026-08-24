@@ -432,6 +432,7 @@ const STATE_ABBREVIATIONS = {
 exports.ingestOscDataFunction = (0, https_1.onCall)({
     cors: true,
     timeoutSeconds: 540,
+    memory: '1GiB',
 }, async (request) => {
     // TODO: Re-enable auth checks once Auth is implemented.
     // if (!request.auth) {

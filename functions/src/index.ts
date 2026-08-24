@@ -459,6 +459,7 @@ const STATE_ABBREVIATIONS: Record<string, string> = {
 export const ingestOscDataFunction = onCall({
     cors: true,
     timeoutSeconds: 540,
+    memory: '1GiB',
 }, async (request) => {
     // TODO: Re-enable auth checks once Auth is implemented.
     // if (!request.auth) {
