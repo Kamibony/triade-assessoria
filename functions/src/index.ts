@@ -490,7 +490,7 @@ export const processOscChunkWorker = onTaskDispatched({
             await new Promise(resolve => setTimeout(resolve, 1000));
 
             // 1. Get CNPJ from IPEA
-            const oscDetailsRes = await fetchWithRetry(`https://mapaosc.ipea.gov.br/api/osc/${id_osc}`);
+            const oscDetailsRes = await fetchWithRetry(`https://mapaosc.ipea.gov.br/api/api/osc/cabecalho/${id_osc}`);
             const oscDetails = await oscDetailsRes.json();
             const rawCnpj = oscDetails.cd_identificador_osc;
 
