@@ -38,7 +38,7 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 
             const err = error as Error;
             logger.warn(`Fetch attempt ${i + 1} failed for ${url}: ${err.message}`);
             if (i === retries - 1) throw err;
-            await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Simple backoff
+            await new Promise(resolve => setTimeout(resolve, 2000 * Math.pow(2, i))); // Exponential backoff
         }
     }
     throw new Error(`Failed to fetch ${url} after ${retries} retries`);
@@ -462,7 +462,8 @@ export const processOscChunkWorker = onTaskDispatched({
         minBackoffSeconds: 30,
     },
     rateLimits: {
-        maxConcurrentDispatches: 5,
+        maxConcurrentDispatches: 2,
+        maxDispatchesPerSecond: 1,
     },
     timeoutSeconds: 540
 }, async (request) => {
@@ -483,6 +484,9 @@ export const processOscChunkWorker = onTaskDispatched({
 
     for (const id_osc of oscIds) {
         try {
+            // Deliberate delay to prevent rate-limiting from BrasilAPI / IPEA
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
             // 1. Get CNPJ from IPEA
             const oscDetailsRes = await fetchWithRetry(`https://mapaosc.ipea.gov.br/api/api/osc/${id_osc}`);
             const oscDetails = await oscDetailsRes.json();
