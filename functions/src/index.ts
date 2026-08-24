@@ -1,5 +1,6 @@
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
 import { getFunctions } from 'firebase-admin/functions';
 import * as admin from 'firebase-admin';
 import { genkit } from 'genkit';
@@ -54,14 +55,15 @@ const parsePdfToProfile = ai.defineFlow(
     {
         name: 'parsePdfToProfile',
         inputSchema: z.object({
-            pdfBase64: z.string().describe("Arquivo PDF codificado em Base64"),
+            pdfBase64s: z.array(z.string()).describe("Arquivos PDF codificados em Base64"),
         }),
         outputSchema: ngoProfileSchema,
     },
     async (input) => {
         const prompt = `Você é um especialista em análise de documentos legais de ONGs no Brasil.
-Eu enviarei o Estatuto Social ou Cartão CNPJ de uma ONG.
+Eu enviarei o Estatuto Social, Cartão CNPJ e/ou ATA de uma ONG.
 Extraia as informações necessárias e preencha o perfil da ONG (ngoProfileSchema) com precisão.
+Você DEVE extrair o CNPJ, Nome (Legal Name), Missão/Foco de atuação (do Estatuto) e a Validade da Diretoria (da ATA).
 Se o documento não mencionar o status da documentação, presuma 'Pendente'. Se não houver clareza sobre projetos anteriores, presuma falso.
 Sempre retorne os dados em português do Brasil (pt-BR).`;
 
@@ -70,7 +72,7 @@ Sempre retorne os dados em português do Brasil (pt-BR).`;
             messages: [
                 { role: 'user', content: [
                     { text: prompt },
-                    { media: { url: `data:application/pdf;base64,${input.pdfBase64}` } }
+                    ...input.pdfBase64s.map(pdf => ({ media: { url: `data:application/pdf;base64,${pdf}` } }))
                 ]}
             ],
             output: { schema: ngoProfileSchema }
@@ -153,7 +155,7 @@ export const parsePdfProfileFunction = onCall({
     // if (!request.auth) {
     //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
     // }
-    return await parsePdfToProfile(request.data);
+    return await parsePdfToProfile({ pdfBase64s: request.data.pdfBase64 ? [request.data.pdfBase64] : request.data.pdfBase64s || [] });
 });
 
 const selectEditalLinksFlow = ai.defineFlow(
@@ -843,6 +845,80 @@ async function processRssFeeds() {
 export const ingestGoogleAlertsRss = onSchedule('0 2 * * *', async () => {
     await processRssFeeds();
 });
+
+
+export const ingestManualOscFunction = onCall({
+    cors: true,
+    timeoutSeconds: 540,
+    memory: '1GiB',
+}, async (request) => {
+    // TODO: Re-enable auth checks once Auth is implemented.
+    // if (!request.auth) {
+    //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    // }
+
+    const { storagePaths } = request.data as { storagePaths?: string[] };
+    if (!storagePaths || !Array.isArray(storagePaths) || storagePaths.length === 0) {
+        throw new HttpsError('invalid-argument', 'Pelo menos um caminho de Storage é necessário.');
+    }
+
+    const bucket = getStorage().bucket();
+    const pdfBase64s: string[] = [];
+
+    try {
+        // Download and convert PDFs to Base64
+        for (const path of storagePaths) {
+            const file = bucket.file(path);
+            const [exists] = await file.exists();
+            if (!exists) {
+                throw new Error(`Arquivo não encontrado no Storage: ${path}`);
+            }
+            const [buffer] = await file.download();
+            pdfBase64s.push(buffer.toString('base64'));
+        }
+
+        const profileData = await parsePdfToProfile({ pdfBase64s });
+
+        // Save to Firestore
+        const oscRef = await getFirestore().collection('oscs').add({
+            ...profileData,
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+            source: 'manual_ingest'
+        });
+
+        // Cleanup: Delete temporary files
+        for (const path of storagePaths) {
+            try {
+                await bucket.file(path).delete();
+            } catch (cleanupError) {
+                console.error(`Failed to clean up temp file ${path}:`, cleanupError);
+            }
+        }
+
+        return {
+            success: true,
+            oscId: oscRef.id,
+            profile: {
+                ...profileData,
+                id: oscRef.id
+            }
+        };
+    } catch (error: unknown) {
+        console.error('Error in ingestManualOscFunction:', error);
+
+        // Ensure cleanup happens even on failure
+        for (const path of storagePaths) {
+            try {
+                await bucket.file(path).delete();
+            } catch (cleanupError) {
+                console.error(`Failed to clean up temp file ${path} during error handling:`, cleanupError);
+            }
+        }
+        throw new HttpsError('internal', 'Erro ao extrair dados dos documentos da OSC.');
+    }
+});
+
 
 export const ingestManualEditalFunction = onCall({
     cors: true,

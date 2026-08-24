@@ -1,5 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getFunctions } from "firebase/functions";
+import { getStorage } from "firebase/storage";
 
 // Configuração padrão mínima para que o getFunctions funcione (mesmo com emuladores)
 // Idealmente seria preenchido com process.env.VITE_FIREBASE_API_KEY etc.
@@ -14,3 +15,4 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const functions = getFunctions(app, 'us-central1');
+export const storage = getStorage(app);

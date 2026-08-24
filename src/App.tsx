@@ -19,6 +19,7 @@ import { OscImporter } from './components/OscImporter';
 import { AutonomousSearchView } from './components/AutonomousSearchView';
 import { ManualIngest } from './components/ManualIngest';
 import { ScrapingTargetsManager } from './components/ScrapingTargetsManager';
+import { ManualOscIngest } from './components/ManualOscIngest';
 
 function Header() {
   const location = useLocation();
@@ -73,6 +74,7 @@ function App() {
           <Route index element={<AdminDashboard />} />
           <Route path="directory" element={<OscDirectoryView />} />
           <Route path="import-oscs" element={<OscImporter />} />
+          <Route path="import-osc-manual" element={<ManualOscIngest />} />
           <Route path="search" element={<AutonomousSearchView />} />
           <Route path="manual-ingest" element={<ManualIngest />} />
           <Route path="matches" element={<MatchesDashboard />} />
