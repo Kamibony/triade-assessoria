@@ -455,7 +455,7 @@ exports.processOscChunkWorker = (0, tasks_1.onTaskDispatched)({
             // Deliberate delay to prevent rate-limiting from BrasilAPI / IPEA
             await new Promise(resolve => setTimeout(resolve, 1000));
             // 1. Get CNPJ from IPEA
-            const oscDetailsRes = await fetchWithRetry(`https://mapaosc.ipea.gov.br/api/api/osc/${id_osc}`);
+            const oscDetailsRes = await fetchWithRetry(`https://mapaosc.ipea.gov.br/api/osc/${id_osc}`);
             const oscDetails = await oscDetailsRes.json();
             const rawCnpj = oscDetails.cd_identificador_osc;
             if (!rawCnpj)
@@ -543,7 +543,7 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
     try {
         if (municipio) {
             const normalizedMunicipio = removeAccents(municipio);
-            const searchUrl = `https://mapaosc.ipea.gov.br/api/api/busca/municipio/${encodeURIComponent(normalizedMunicipio)}`;
+            const searchUrl = `https://mapaosc.ipea.gov.br/api/busca/municipio/${encodeURIComponent(normalizedMunicipio)}`;
             logger.info(`IPEA Municipio Search URL: ${searchUrl}`);
             const searchRes = await fetchWithRetry(searchUrl);
             const searchData = await searchRes.json();
@@ -552,7 +552,7 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
                 return { success: false, message: 'No municipio found or IPEA search failed.' };
             }
             const edmu_cd_municipio = searchData[0].edmu_cd_municipio;
-            const oscsRes = await fetchWithRetry(`https://mapaosc.ipea.gov.br/api/api/geo/oscs/municipio/${edmu_cd_municipio}`);
+            const oscsRes = await fetchWithRetry(`https://mapaosc.ipea.gov.br/api/geo/oscs/municipio/${edmu_cd_municipio}`);
             oscList = await oscsRes.json();
         }
         else if (uf) {
@@ -562,7 +562,7 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
                 stateName = STATE_ABBREVIATIONS[upperUf] || stateName;
             }
             const normalizedUf = removeAccents(stateName);
-            const searchUrl = `https://mapaosc.ipea.gov.br/api/api/busca/estado/${encodeURIComponent(normalizedUf)}`;
+            const searchUrl = `https://mapaosc.ipea.gov.br/api/busca/estado/${encodeURIComponent(normalizedUf)}`;
             logger.info(`IPEA Estado Search URL: ${searchUrl}`);
             const searchRes = await fetchWithRetry(searchUrl);
             const searchData = await searchRes.json();
@@ -571,7 +571,7 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
                 return { success: false, message: 'No UF found or IPEA search failed.' };
             }
             const eduf_cd_uf = searchData[0].eduf_cd_uf;
-            const oscsRes = await fetchWithRetry(`https://mapaosc.ipea.gov.br/api/api/geo/oscs/estado/${eduf_cd_uf}`);
+            const oscsRes = await fetchWithRetry(`https://mapaosc.ipea.gov.br/api/geo/oscs/estado/${eduf_cd_uf}`);
             oscList = await oscsRes.json();
         }
     }
