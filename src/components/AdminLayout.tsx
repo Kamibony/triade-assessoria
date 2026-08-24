@@ -16,6 +16,7 @@ export function AdminLayout() {
       items: [
         { name: 'Diretório de OSCs', path: '/admin/directory', icon: Database },
         { name: 'Importar OSCs', path: '/admin/import-oscs', icon: Database },
+        { name: 'Onboarding VIP', path: '/admin/import-osc-manual', icon: CheckSquare },
       ],
     },
     {
