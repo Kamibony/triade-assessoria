@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '../lib/firebase';
+import { functions, storage } from '../lib/firebase';
+import { ref, uploadBytes } from 'firebase/storage';
 import { Button } from './ui/Button';
 import { Loader2, UploadCloud, CheckCircle2, AlertCircle, File, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -28,20 +29,6 @@ export function ManualOscIngest() {
     setFiles(files.filter((_, index) => index !== indexToRemove));
   };
 
-  const toBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const result = reader.result as string;
-        // Remove the data URI prefix (e.g., "data:application/pdf;base64,")
-        const base64Str = result.split(',')[1];
-        resolve(base64Str);
-      };
-      reader.onerror = error => reject(error);
-    });
-  };
-
   const handleSubmit = async () => {
     if (files.length === 0) return;
 
@@ -49,9 +36,21 @@ export function ManualOscIngest() {
     setResult(null);
 
     try {
-      const base64Files = await Promise.all(files.map(toBase64));
+      const timestamp = Date.now();
+      const storagePaths: string[] = [];
+
+      // 1. Upload files to Firebase Storage
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const path = `temp_osc_docs/${timestamp}/${file.name}`;
+        const storageRef = ref(storage, path);
+        await uploadBytes(storageRef, file);
+        storagePaths.push(path);
+      }
+
+      // 2. Call backend function with storage paths
       const ingestManualOsc = httpsCallable(functions, 'ingestManualOscFunction');
-      const response = await ingestManualOsc({ pdfBase64s: base64Files });
+      const response = await ingestManualOsc({ storagePaths });
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const data = response.data as { success: boolean; oscId?: string; profile?: any; message?: string };
