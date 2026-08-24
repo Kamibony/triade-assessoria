@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onSearchCreated = exports.processScrapingTargetWorker = exports.seedScrapingTargets = exports.autonomousSearchWorker = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = void 0;
+exports.onSearchCreated = exports.processScrapingTargetWorker = exports.seedScrapingTargets = exports.autonomousSearchWorker = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = void 0;
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-admin/firestore");
 const functions_1 = require("firebase-admin/functions");
@@ -429,21 +429,110 @@ const STATE_ABBREVIATIONS = {
     'RO': 'Rondonia', 'RR': 'Roraima', 'SC': 'Santa Catarina', 'SP': 'Sao Paulo',
     'SE': 'Sergipe', 'TO': 'Tocantins'
 };
+exports.processOscChunkWorker = (0, tasks_1.onTaskDispatched)({
+    retryConfig: {
+        maxAttempts: 3,
+        minBackoffSeconds: 30,
+    },
+    rateLimits: {
+        maxConcurrentDispatches: 5,
+    },
+    timeoutSeconds: 540
+}, async (request) => {
+    const { oscIds, activityArea, onlyActive } = request.data;
+    if (!oscIds || !Array.isArray(oscIds)) {
+        console.error("Invalid task payload: missing oscIds.");
+        return;
+    }
+    const db = (0, firestore_1.getFirestore)();
+    let processed = 0;
+    let imported = 0;
+    for (const id_osc of oscIds) {
+        try {
+            // 1. Get CNPJ from IPEA
+            const oscDetailsRes = await fetchWithRetry(`https://mapaosc.ipea.gov.br/api/api/osc/${id_osc}`);
+            const oscDetails = await oscDetailsRes.json();
+            const rawCnpj = oscDetails.cd_identificador_osc;
+            if (!rawCnpj)
+                continue;
+            const cleanCnpj = String(rawCnpj).replace(/\D/g, '');
+            if (cleanCnpj.length !== 14)
+                continue;
+            // 2. Enrich Profile Data using BrasilAPI
+            const brasilApiResponse = await fetchWithRetry(`https://brasilapi.com.br/api/cnpj/v1/${cleanCnpj}`);
+            const rawData = await brasilApiResponse.json();
+            // 3. Apply Filters
+            if (onlyActive) {
+                // If the description is not ATIVA (e.g. INAPTA, BAIXADA) we skip
+                if (rawData.descricao_situacao_cadastral !== 'ATIVA') {
+                    continue;
+                }
+            }
+            if (activityArea) {
+                const searchArea = activityArea.toLowerCase();
+                const mainActivity = (rawData.cnae_fiscal_descricao || '').toLowerCase();
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const secActivities = (rawData.cnaes_secundarios || []).map((c) => (c.descricao || '').toLowerCase());
+                const matchesArea = mainActivity.includes(searchArea) || secActivities.some((a) => a.includes(searchArea));
+                if (!matchesArea) {
+                    continue;
+                }
+            }
+            // 4. Transform and Upsert
+            const name = rawData.razao_social || 'Nome Desconhecido';
+            const foundationDate = rawData.data_inicio_atividade || new Date().toISOString().split('T')[0];
+            const city = rawData.municipio || 'Cidade Desconhecida';
+            const state = rawData.uf || 'UF';
+            const location = `${city}/${state}`;
+            const transformedData = {
+                name,
+                foundationDate,
+                location,
+                documentationStatus: 'Pendente',
+                previousProjectsApproved: false,
+                coreActivities: [activityArea || 'Assistência Social', 'Educação'], // Default dummy activities if none selected
+            };
+            const parseResult = schemas_js_1.ngoProfileSchema.safeParse(transformedData);
+            if (!parseResult.success) {
+                console.warn(`Validation failed for CNPJ ${cleanCnpj}:`, parseResult.error);
+                continue;
+            }
+            const oscRef = db.collection('oscs').doc(cleanCnpj);
+            const oscDoc = await oscRef.get();
+            const now = firestore_1.FieldValue.serverTimestamp();
+            const upsertData = {
+                ...parseResult.data,
+                cnpj: cleanCnpj,
+                updatedAt: now,
+            };
+            if (!oscDoc.exists) {
+                Object.assign(upsertData, { createdAt: now });
+            }
+            await oscRef.set(upsertData, { merge: true });
+            imported++;
+        }
+        catch (error) {
+            console.error(`Error processing OSC ${id_osc}:`, error);
+        }
+        finally {
+            processed++;
+        }
+    }
+    logger.info(`Chunk processing complete. Processed: ${processed}, Imported: ${imported}`);
+});
 exports.ingestOscDataFunction = (0, https_1.onCall)({
     cors: true,
     timeoutSeconds: 540,
-    memory: '1GiB',
+    memory: '256MiB', // reduced memory since it's just an orchestrator now
 }, async (request) => {
     // TODO: Re-enable auth checks once Auth is implemented.
     // if (!request.auth) {
     //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
     // }
-    const { uf, municipio, limit = 50 } = request.data;
+    const { uf, municipio, activityArea, onlyActive } = request.data;
     if (!uf && !municipio) {
         throw new https_1.HttpsError('invalid-argument', 'Either uf or municipio filter is required.');
     }
-    const db = (0, firestore_1.getFirestore)();
-    const results = [];
     // 1. IPEA Discovery (Geographical Search)
     let oscList = [];
     try {
@@ -453,10 +542,9 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
             logger.info(`IPEA Municipio Search URL: ${searchUrl}`);
             const searchRes = await fetchWithRetry(searchUrl);
             const searchData = await searchRes.json();
-            logger.info(`IPEA Municipio Search Results: ${JSON.stringify(searchData)}`);
             if (!Array.isArray(searchData) || searchData.length === 0) {
                 logger.error(`IPEA Municipio Search returned empty for ${normalizedMunicipio}`);
-                return { imported: 0, results, message: 'No municipio found or IPEA search failed.' };
+                return { success: false, message: 'No municipio found or IPEA search failed.' };
             }
             const edmu_cd_municipio = searchData[0].edmu_cd_municipio;
             const oscsRes = await fetchWithRetry(`https://mapaosc.ipea.gov.br/api/api/geo/oscs/municipio/${edmu_cd_municipio}`);
@@ -473,10 +561,9 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
             logger.info(`IPEA Estado Search URL: ${searchUrl}`);
             const searchRes = await fetchWithRetry(searchUrl);
             const searchData = await searchRes.json();
-            logger.info(`IPEA Estado Search Results: ${JSON.stringify(searchData)}`);
             if (!Array.isArray(searchData) || searchData.length === 0) {
                 logger.error(`IPEA Estado Search returned empty for ${normalizedUf}`);
-                return { imported: 0, results, message: 'No UF found or IPEA search failed.' };
+                return { success: false, message: 'No UF found or IPEA search failed.' };
             }
             const eduf_cd_uf = searchData[0].eduf_cd_uf;
             const oscsRes = await fetchWithRetry(`https://mapaosc.ipea.gov.br/api/api/geo/oscs/estado/${eduf_cd_uf}`);
@@ -491,78 +578,28 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
     if (!Array.isArray(oscList)) {
         oscList = [];
     }
-    // 2. Apply Safety Limit
-    const slicedOscList = oscList.slice(0, limit);
-    logger.info(`Total OSCs discovered: ${oscList.length}. Processing limited to: ${slicedOscList.length}`);
-    // 3. Fetch CNPJs from IPEA & Enrich with BrasilAPI (Hybrid Pipeline)
-    for (const osc of slicedOscList) {
-        const id_osc = osc.id_osc;
-        try {
-            // 3.a Get CNPJ from IPEA
-            const oscDetailsRes = await fetchWithRetry(`https://mapaosc.ipea.gov.br/api/api/osc/${id_osc}`);
-            const oscDetails = await oscDetailsRes.json();
-            const rawCnpj = oscDetails.cd_identificador_osc;
-            if (!rawCnpj) {
-                results.push({ oscId: id_osc, status: 'error', error: 'No CNPJ returned from IPEA' });
-                continue;
-            }
-            const cleanCnpj = String(rawCnpj).replace(/\D/g, '');
-            if (cleanCnpj.length !== 14) {
-                results.push({ oscId: id_osc, cnpj: rawCnpj, status: 'error', error: 'Invalid CNPJ length from IPEA' });
-                continue;
-            }
-            // 3.b Enrich Profile Data using BrasilAPI
-            const brasilApiResponse = await fetchWithRetry(`https://brasilapi.com.br/api/cnpj/v1/${cleanCnpj}`);
-            const rawData = await brasilApiResponse.json();
-            // Transform data to match ngoProfileSchema using BrasilAPI rich data
-            const name = rawData.razao_social || 'Nome Desconhecido';
-            const foundationDate = rawData.data_inicio_atividade || new Date().toISOString().split('T')[0];
-            const city = rawData.municipio || 'Cidade Desconhecida';
-            const state = rawData.uf || 'UF';
-            const location = `${city}/${state}`;
-            // Add dummy data for required fields not in BrasilAPI
-            const transformedData = {
-                name,
-                foundationDate,
-                location,
-                documentationStatus: 'Pendente',
-                previousProjectsApproved: false,
-                coreActivities: ['Assistência Social', 'Educação'], // Default dummy activities
-            };
-            const parseResult = schemas_js_1.ngoProfileSchema.safeParse(transformedData);
-            if (!parseResult.success) {
-                results.push({ oscId: id_osc, cnpj: cleanCnpj, status: 'error', error: 'Failed schema validation', });
-                console.warn(`Validation failed for CNPJ ${cleanCnpj}:`, parseResult.error);
-                continue;
-            }
-            // 3.c Upsert to Firestore
-            const oscRef = db.collection('oscs').doc(cleanCnpj);
-            const oscDoc = await oscRef.get();
-            const now = firestore_1.FieldValue.serverTimestamp();
-            const upsertData = {
-                ...parseResult.data,
-                cnpj: cleanCnpj,
-                updatedAt: now,
-            };
-            if (!oscDoc.exists) {
-                Object.assign(upsertData, { createdAt: now });
-            }
-            await oscRef.set(upsertData, { merge: true });
-            results.push({ oscId: id_osc, cnpj: cleanCnpj, status: 'success' });
-        }
-        catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            results.push({ oscId: id_osc, status: 'error', error: errorMessage });
-            console.error(`Error processing OSC ${id_osc}:`, error);
-        }
+    logger.info(`Total OSCs discovered: ${oscList.length}.`);
+    if (oscList.length === 0) {
+        return { success: true, message: 'No OSCs found for the given criteria.' };
     }
-    const successCount = results.filter(r => r.status === 'success').length;
+    // 2. Chunk the results and enqueue to Cloud Tasks
+    const CHUNK_SIZE = 100;
+    const queue = (0, functions_1.getFunctions)().taskQueue('processOscChunkWorker');
+    let enqueuedTasks = 0;
+    for (let i = 0; i < oscList.length; i += CHUNK_SIZE) {
+        const chunk = oscList.slice(i, i + CHUNK_SIZE).map(osc => osc.id_osc);
+        await queue.enqueue({
+            oscIds: chunk,
+            activityArea,
+            onlyActive
+        });
+        enqueuedTasks++;
+    }
     return {
-        imported: successCount,
-        message: successCount > 0 ? `Successfully imported ${successCount} OSCs.` : 'No OSCs were successfully imported. Check results array for errors.',
-        results,
+        success: true,
+        message: `Importação iniciada em segundo plano. ${oscList.length} OSCs encontradas, divididas em ${enqueuedTasks} lotes.`,
         totalDiscovered: oscList.length,
-        processed: slicedOscList.length
+        enqueuedTasks: enqueuedTasks
     };
 });
 exports.onEditalCreated = (0, firestore_2.onDocumentCreated)('editais/{editalId}', async (event) => {

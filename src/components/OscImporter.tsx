@@ -9,6 +9,8 @@ export function OscImporter() {
   const { t } = useTranslation();
   const [uf, setUf] = useState('');
   const [municipio, setMunicipio] = useState('');
+  const [activityArea, setActivityArea] = useState('');
+  const [onlyActive, setOnlyActive] = useState(true);
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<{type: 'success' | 'error', message: string} | null>(null);
 
@@ -24,20 +26,22 @@ export function OscImporter() {
 
     try {
       const ingestOscData = httpsCallable(functions, 'ingestOscDataFunction');
-      const result = await ingestOscData({
+      await ingestOscData({
         uf: uf.trim() || undefined,
         municipio: municipio.trim() || undefined,
-        limit: 50
+        activityArea: activityArea || undefined,
+        onlyActive: onlyActive
       });
 
-      const data = result.data as { processedCount?: number };
       setImportResult({
         type: 'success',
-        message: t('admin.bulkImporter.success', { count: data.processedCount || 0 })
+        message: 'Importação iniciada em segundo plano. As OSCs ativas e validadas aparecerão no Diretório em breve.'
       });
 
       setUf('');
       setMunicipio('');
+      setActivityArea('');
+      setOnlyActive(true);
     } catch (error: unknown) {
       console.error("Error triggering OSC import:", error);
       setImportResult({
@@ -107,6 +111,39 @@ export function OscImporter() {
                 placeholder={t('admin.bulkImporter.cityPlaceholder')}
                 className="w-full rounded-md border border-input bg-background px-4 py-3 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <label htmlFor="activityArea" className="block text-sm font-medium">Área de Atuação (Filtro)</label>
+              <select
+                id="activityArea"
+                value={activityArea}
+                onChange={(e) => setActivityArea(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-4 py-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">Todas as Áreas</option>
+                <option value="Saúde">Saúde</option>
+                <option value="Educação">Educação</option>
+                <option value="Cultura">Cultura</option>
+                <option value="Meio Ambiente">Meio Ambiente</option>
+                <option value="Assistência Social">Assistência Social</option>
+                <option value="Esporte">Esporte</option>
+                <option value="Direitos Humanos">Direitos Humanos</option>
+              </select>
+            </div>
+
+            <div className="space-y-2 flex flex-col justify-center pt-6">
+              <label className="flex items-center space-x-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={onlyActive}
+                  onChange={(e) => setOnlyActive(e.target.checked)}
+                  className="w-5 h-5 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                <span className="text-sm font-medium">Importar apenas OSCs Ativas</span>
+              </label>
             </div>
           </div>
 
