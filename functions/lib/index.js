@@ -39,6 +39,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.onSearchCreated = exports.processScrapingTargetWorker = exports.seedScrapingTargets = exports.autonomousSearchWorker = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = void 0;
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-admin/firestore");
+const storage_1 = require("firebase-admin/storage");
 const functions_1 = require("firebase-admin/functions");
 const admin = __importStar(require("firebase-admin"));
 const genkit_1 = require("genkit");
@@ -756,11 +757,23 @@ exports.ingestManualOscFunction = (0, https_1.onCall)({
     // if (!request.auth) {
     //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
     // }
-    const { pdfBase64s } = request.data;
-    if (!pdfBase64s || !Array.isArray(pdfBase64s) || pdfBase64s.length === 0) {
-        throw new https_1.HttpsError('invalid-argument', 'Pelo menos um PDF em Base64 é necessário.');
+    const { storagePaths } = request.data;
+    if (!storagePaths || !Array.isArray(storagePaths) || storagePaths.length === 0) {
+        throw new https_1.HttpsError('invalid-argument', 'Pelo menos um caminho de Storage é necessário.');
     }
+    const bucket = (0, storage_1.getStorage)().bucket();
+    const pdfBase64s = [];
     try {
+        // Download and convert PDFs to Base64
+        for (const path of storagePaths) {
+            const file = bucket.file(path);
+            const [exists] = await file.exists();
+            if (!exists) {
+                throw new Error(`Arquivo não encontrado no Storage: ${path}`);
+            }
+            const [buffer] = await file.download();
+            pdfBase64s.push(buffer.toString('base64'));
+        }
         const profileData = await parsePdfToProfile({ pdfBase64s });
         // Save to Firestore
         const oscRef = await (0, firestore_1.getFirestore)().collection('oscs').add({
@@ -769,6 +782,15 @@ exports.ingestManualOscFunction = (0, https_1.onCall)({
             updatedAt: firestore_1.FieldValue.serverTimestamp(),
             source: 'manual_ingest'
         });
+        // Cleanup: Delete temporary files
+        for (const path of storagePaths) {
+            try {
+                await bucket.file(path).delete();
+            }
+            catch (cleanupError) {
+                console.error(`Failed to clean up temp file ${path}:`, cleanupError);
+            }
+        }
         return {
             success: true,
             oscId: oscRef.id,
@@ -780,6 +802,15 @@ exports.ingestManualOscFunction = (0, https_1.onCall)({
     }
     catch (error) {
         console.error('Error in ingestManualOscFunction:', error);
+        // Ensure cleanup happens even on failure
+        for (const path of storagePaths) {
+            try {
+                await bucket.file(path).delete();
+            }
+            catch (cleanupError) {
+                console.error(`Failed to clean up temp file ${path} during error handling:`, cleanupError);
+            }
+        }
         throw new https_1.HttpsError('internal', 'Erro ao extrair dados dos documentos da OSC.');
     }
 });

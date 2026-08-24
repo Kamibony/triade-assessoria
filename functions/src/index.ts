@@ -1,5 +1,6 @@
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
 import { getFunctions } from 'firebase-admin/functions';
 import * as admin from 'firebase-admin';
 import { genkit } from 'genkit';
@@ -860,12 +861,26 @@ export const ingestManualOscFunction = onCall({
     //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
     // }
 
-    const { pdfBase64s } = request.data as { pdfBase64s?: string[] };
-    if (!pdfBase64s || !Array.isArray(pdfBase64s) || pdfBase64s.length === 0) {
-        throw new HttpsError('invalid-argument', 'Pelo menos um PDF em Base64 é necessário.');
+    const { storagePaths } = request.data as { storagePaths?: string[] };
+    if (!storagePaths || !Array.isArray(storagePaths) || storagePaths.length === 0) {
+        throw new HttpsError('invalid-argument', 'Pelo menos um caminho de Storage é necessário.');
     }
 
+    const bucket = getStorage().bucket();
+    const pdfBase64s: string[] = [];
+
     try {
+        // Download and convert PDFs to Base64
+        for (const path of storagePaths) {
+            const file = bucket.file(path);
+            const [exists] = await file.exists();
+            if (!exists) {
+                throw new Error(`Arquivo não encontrado no Storage: ${path}`);
+            }
+            const [buffer] = await file.download();
+            pdfBase64s.push(buffer.toString('base64'));
+        }
+
         const profileData = await parsePdfToProfile({ pdfBase64s });
 
         // Save to Firestore
@@ -875,6 +890,15 @@ export const ingestManualOscFunction = onCall({
             updatedAt: FieldValue.serverTimestamp(),
             source: 'manual_ingest'
         });
+
+        // Cleanup: Delete temporary files
+        for (const path of storagePaths) {
+            try {
+                await bucket.file(path).delete();
+            } catch (cleanupError) {
+                console.error(`Failed to clean up temp file ${path}:`, cleanupError);
+            }
+        }
 
         return {
             success: true,
@@ -886,6 +910,15 @@ export const ingestManualOscFunction = onCall({
         };
     } catch (error: unknown) {
         console.error('Error in ingestManualOscFunction:', error);
+
+        // Ensure cleanup happens even on failure
+        for (const path of storagePaths) {
+            try {
+                await bucket.file(path).delete();
+            } catch (cleanupError) {
+                console.error(`Failed to clean up temp file ${path} during error handling:`, cleanupError);
+            }
+        }
         throw new HttpsError('internal', 'Erro ao extrair dados dos documentos da OSC.');
     }
 });
