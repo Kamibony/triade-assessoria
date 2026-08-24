@@ -84,7 +84,7 @@ export function NgoMatchView() {
 
     return (
         <div className="container mx-auto p-8 max-w-4xl">
-            <Link to="/editais" className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground mb-6 transition">
+            <Link to="/admin/editais" className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground mb-6 transition">
                 <ArrowLeft className="w-4 h-4" /> Voltar para Editais
             </Link>
 
