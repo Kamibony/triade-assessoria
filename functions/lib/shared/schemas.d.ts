@@ -1,6 +1,9 @@
 import { z } from 'zod';
 export declare const ngoProfileSchema: z.ZodObject<{
     name: z.ZodString;
+    cnpj: z.ZodOptional<z.ZodString>;
+    mission: z.ZodOptional<z.ZodString>;
+    boardValidity: z.ZodOptional<z.ZodString>;
     foundationDate: z.ZodString;
     location: z.ZodString;
     documentationStatus: z.ZodEnum<["Em dia", "Pendente", "Irregular"]>;
@@ -8,6 +11,9 @@ export declare const ngoProfileSchema: z.ZodObject<{
     coreActivities: z.ZodArray<z.ZodString, "many">;
 }, "strip", z.ZodTypeAny, {
     name: string;
+    cnpj?: string | undefined;
+    mission?: string | undefined;
+    boardValidity?: string | undefined;
     foundationDate: string;
     location: string;
     documentationStatus: "Em dia" | "Irregular" | "Pendente";
@@ -15,6 +21,9 @@ export declare const ngoProfileSchema: z.ZodObject<{
     coreActivities: string[];
 }, {
     name: string;
+    cnpj?: string | undefined;
+    mission?: string | undefined;
+    boardValidity?: string | undefined;
     foundationDate: string;
     location: string;
     documentationStatus: "Em dia" | "Irregular" | "Pendente";

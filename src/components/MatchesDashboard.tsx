@@ -2,8 +2,12 @@ import React, { useEffect, useState } from "react";
 import { collection, query, onSnapshot, getDocs, getFirestore } from 'firebase/firestore';
 import { Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp, FileText, Search } from 'lucide-react';
 import type { MatchResult, Edital } from '../lib/types';
+import { useSearchParams } from 'react-router-dom';
 
 export function MatchesDashboard() {
+  const [searchParams] = useSearchParams();
+  const filterOscId = searchParams.get('oscId');
+
   const [matches, setMatches] = useState<MatchResult[]>([]);
   const [editais, setEditais] = useState<Record<string, Edital>>({});
   const [loading, setLoading] = useState(true);
@@ -61,6 +65,10 @@ export function MatchesDashboard() {
     m.editalId.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (editais[m.editalId]?.title || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  if (filterOscId) {
+    filteredMatches = filteredMatches.filter(m => m.oscId === filterOscId);
+  }
 
   if (hideLowScores) {
     filteredMatches = filteredMatches.filter(m => m.matchScore >= 40);
