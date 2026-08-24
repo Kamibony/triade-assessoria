@@ -38,9 +38,9 @@
       "allStates": "Todos os Estados",
       "cityLabel": "Cidade",
       "cityPlaceholder": "ex: São Paulo",
-      "note": "Nota: Você deve fornecer pelo menos um filtro (Estado ou Cidade). O limite é fixado em 50 por segurança.",
+      "note": "Nota: Você deve fornecer pelo menos um filtro (Estado ou Cidade). O processo rodará em segundo plano devido ao alto volume de dados.",
       "button": "Acionar Importação",
-      "success": "Importação concluída: {{count}} ONGs salvas.",
+      "success": "Importação iniciada: Processamento de ONGs em segundo plano.",
       "error": "Falha ao acionar importação."
     },
     "title": "Painel de Administração",

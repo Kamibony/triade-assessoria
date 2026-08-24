@@ -21,28 +21,17 @@ export declare const extractEditalRulesFunction: import("firebase-functions/v2/h
     };
 }>, unknown>;
 export declare const matchEvaluatorWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
+export declare const processOscChunkWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
 export declare const ingestOscDataFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
-    imported: number;
-    results: {
-        oscId: number;
-        cnpj?: string;
-        status: string;
-        error?: string;
-    }[];
+    success: boolean;
     message: string;
     totalDiscovered?: never;
-    processed?: never;
+    enqueuedTasks?: never;
 } | {
-    imported: number;
+    success: boolean;
     message: string;
-    results: {
-        oscId: number;
-        cnpj?: string;
-        status: string;
-        error?: string;
-    }[];
     totalDiscovered: number;
-    processed: number;
+    enqueuedTasks: number;
 }>, unknown>;
 export declare const onEditalCreated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").QueryDocumentSnapshot | undefined, {
     editalId: string;
