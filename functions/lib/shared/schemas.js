@@ -4,6 +4,9 @@ exports.scrapingTargetSchema = exports.copilotResponseSchema = exports.triageSch
 const zod_1 = require("zod");
 exports.ngoProfileSchema = zod_1.z.object({
     name: zod_1.z.string().describe("Nome da ONG"),
+    cnpj: zod_1.z.string().optional().describe("CNPJ da ONG"),
+    mission: zod_1.z.string().optional().describe("Missão ou Foco de atuação da ONG (extraído do Estatuto)"),
+    boardValidity: zod_1.z.string().optional().describe("Validade da diretoria (extraído da ATA)"),
     foundationDate: zod_1.z.string().describe("Data de fundação da ONG (YYYY-MM-DD)"),
     location: zod_1.z.string().describe("Localização da sede (Cidade/Estado)"),
     documentationStatus: zod_1.z.enum(['Em dia', 'Pendente', 'Irregular']).describe("Status das certidões negativas e documentação básica"),

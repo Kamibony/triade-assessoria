@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onSearchCreated = exports.processScrapingTargetWorker = exports.seedScrapingTargets = exports.autonomousSearchWorker = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = void 0;
+exports.onSearchCreated = exports.processScrapingTargetWorker = exports.seedScrapingTargets = exports.autonomousSearchWorker = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = void 0;
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-admin/firestore");
 const functions_1 = require("firebase-admin/functions");
@@ -87,13 +87,14 @@ const ai = (0, genkit_1.genkit)({
 const parsePdfToProfile = ai.defineFlow({
     name: 'parsePdfToProfile',
     inputSchema: zod_1.z.object({
-        pdfBase64: zod_1.z.string().describe("Arquivo PDF codificado em Base64"),
+        pdfBase64s: zod_1.z.array(zod_1.z.string()).describe("Arquivos PDF codificados em Base64"),
     }),
     outputSchema: schemas_js_1.ngoProfileSchema,
 }, async (input) => {
     const prompt = `Você é um especialista em análise de documentos legais de ONGs no Brasil.
-Eu enviarei o Estatuto Social ou Cartão CNPJ de uma ONG.
+Eu enviarei o Estatuto Social, Cartão CNPJ e/ou ATA de uma ONG.
 Extraia as informações necessárias e preencha o perfil da ONG (ngoProfileSchema) com precisão.
+Você DEVE extrair o CNPJ, Nome (Legal Name), Missão/Foco de atuação (do Estatuto) e a Validade da Diretoria (da ATA).
 Se o documento não mencionar o status da documentação, presuma 'Pendente'. Se não houver clareza sobre projetos anteriores, presuma falso.
 Sempre retorne os dados em português do Brasil (pt-BR).`;
     const response = await ai.generate({
@@ -101,7 +102,7 @@ Sempre retorne os dados em português do Brasil (pt-BR).`;
         messages: [
             { role: 'user', content: [
                     { text: prompt },
-                    { media: { url: `data:application/pdf;base64,${input.pdfBase64}` } }
+                    ...input.pdfBase64s.map(pdf => ({ media: { url: `data:application/pdf;base64,${pdf}` } }))
                 ] }
         ],
         output: { schema: schemas_js_1.ngoProfileSchema }
@@ -171,7 +172,7 @@ exports.parsePdfProfileFunction = (0, https_1.onCall)({
     // if (!request.auth) {
     //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
     // }
-    return await parsePdfToProfile(request.data);
+    return await parsePdfToProfile({ pdfBase64s: request.data.pdfBase64 ? [request.data.pdfBase64] : request.data.pdfBase64s || [] });
 });
 const selectEditalLinksFlow = ai.defineFlow({
     name: 'selectEditalLinksFlow',
@@ -742,6 +743,42 @@ async function processRssFeeds() {
 }
 exports.ingestGoogleAlertsRss = (0, scheduler_1.onSchedule)('0 2 * * *', async () => {
     await processRssFeeds();
+});
+exports.ingestManualOscFunction = (0, https_1.onCall)({
+    cors: true,
+    timeoutSeconds: 540,
+    memory: '1GiB',
+}, async (request) => {
+    // TODO: Re-enable auth checks once Auth is implemented.
+    // if (!request.auth) {
+    //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    // }
+    const { pdfBase64s } = request.data;
+    if (!pdfBase64s || !Array.isArray(pdfBase64s) || pdfBase64s.length === 0) {
+        throw new https_1.HttpsError('invalid-argument', 'Pelo menos um PDF em Base64 é necessário.');
+    }
+    try {
+        const profileData = await parsePdfToProfile({ pdfBase64s });
+        // Save to Firestore
+        const oscRef = await (0, firestore_1.getFirestore)().collection('oscs').add({
+            ...profileData,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+            updatedAt: firestore_1.FieldValue.serverTimestamp(),
+            source: 'manual_ingest'
+        });
+        return {
+            success: true,
+            oscId: oscRef.id,
+            profile: {
+                ...profileData,
+                id: oscRef.id
+            }
+        };
+    }
+    catch (error) {
+        console.error('Error in ingestManualOscFunction:', error);
+        throw new https_1.HttpsError('internal', 'Erro ao extrair dados dos documentos da OSC.');
+    }
 });
 exports.ingestManualEditalFunction = (0, https_1.onCall)({
     cors: true,

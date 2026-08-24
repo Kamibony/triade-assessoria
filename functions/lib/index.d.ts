@@ -1,6 +1,9 @@
 import { FieldValue } from 'firebase-admin/firestore';
 export declare const parsePdfProfileFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     name: string;
+    cnpj?: string | undefined;
+    mission?: string | undefined;
+    boardValidity?: string | undefined;
     foundationDate: string;
     location: string;
     documentationStatus: "Em dia" | "Irregular" | "Pendente";
@@ -50,6 +53,22 @@ export declare const onOscUpdated: import("firebase-functions/core").CloudFuncti
     oscId: string;
 }>>;
 export declare const ingestGoogleAlertsRss: import("firebase-functions/v2/scheduler").ScheduleFunction;
+export declare const ingestManualOscFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+    oscId: string;
+    profile: {
+        name: string;
+        cnpj?: string | undefined;
+        mission?: string | undefined;
+        boardValidity?: string | undefined;
+        foundationDate: string;
+        location: string;
+        documentationStatus: "Em dia" | "Irregular" | "Pendente";
+        previousProjectsApproved: boolean;
+        coreActivities: string[];
+        id: string;
+    };
+}>, unknown>;
 export declare const ingestManualEditalFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
     message: string;
