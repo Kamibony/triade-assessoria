@@ -8,7 +8,7 @@ const firebaseConfig = {
   apiKey: "demo-api-key",
   authDomain: "triade-assessoria.firebaseapp.com",
   projectId: "triade-assessoria",
-  storageBucket: "triade-assessoria.appspot.com",
+  storageBucket: "triade-assessoria.firebasestorage.app",
   messagingSenderId: "1234567890",
   appId: "1:1234567890:web:abcdef"
 };
