@@ -2,6 +2,9 @@ import { z } from 'zod';
 
 export const ngoProfileSchema = z.object({
     name: z.string().describe("Nome da ONG"),
+    cnpj: z.string().optional().describe("CNPJ da ONG"),
+    mission: z.string().optional().describe("Missão ou Foco de atuação da ONG (extraído do Estatuto)"),
+    boardValidity: z.string().optional().describe("Validade da diretoria (extraído da ATA)"),
     foundationDate: z.string().describe("Data de fundação da ONG (YYYY-MM-DD)"),
     location: z.string().describe("Localização da sede (Cidade/Estado)"),
     documentationStatus: z.enum(['Em dia', 'Pendente', 'Irregular']).describe("Status das certidões negativas e documentação básica"),
