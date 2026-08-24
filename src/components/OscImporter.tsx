@@ -37,11 +37,6 @@ export function OscImporter() {
         type: 'success',
         message: 'Importação iniciada em segundo plano. As OSCs ativas e validadas aparecerão no Diretório em breve.'
       });
-
-      setUf('');
-      setMunicipio('');
-      setActivityArea('');
-      setOnlyActive(true);
     } catch (error: unknown) {
       console.error("Error triggering OSC import:", error);
       setImportResult({
