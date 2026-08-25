@@ -1,3 +1,4 @@
+import { FieldValue } from 'firebase-admin/firestore';
 export declare const parsePdfProfileFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     name: string;
     cnpj?: string | undefined;
@@ -24,6 +25,7 @@ export declare const extractEditalRulesFunction: import("firebase-functions/v2/h
     };
     embedding?: number[] | undefined;
 }>, unknown>;
+export declare const agenticSearchWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
 export declare const matchEvaluatorWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
 export declare const processOscChunkWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
 export declare const ingestOscDataFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
@@ -40,7 +42,10 @@ export declare const ingestOscDataFunction: import("firebase-functions/v2/https"
 export declare const onEditalCreated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").QueryDocumentSnapshot | undefined, {
     editalId: string;
 }>>;
-export declare const triggerMatchOrchestrator: import("firebase-functions/v2/https").CallableFunction<any, Promise<any>, unknown>;
+export declare const triggerMatchOrchestrator: import("firebase-functions/v2/https").CallableFunction<any, Promise<Record<string, unknown> | {
+    id: string;
+    createdAt: FieldValue;
+} | null>, unknown>;
 export declare const onOscUpdated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").Change<import("firebase-functions/v2/firestore").QueryDocumentSnapshot> | undefined, {
     oscId: string;
 }>>;
