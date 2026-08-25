@@ -11,15 +11,27 @@ export function AutonomousSearchView() {
   const db = getFirestore();
 
   // Autonomous Edital Search State
-  const [autonomousQuery, setAutonomousQuery] = useState('');
+  const [autonomousQuery, setAutonomousQuery] = useState(() => sessionStorage.getItem('autonomousQuery') || '');
   const [isRunningAutonomous, setIsRunningAutonomous] = useState(false);
   const [autonomousResult, setAutonomousResult] = useState<{type: 'success' | 'error', message: string} | null>(null);
-  const [activeSearchId, setActiveSearchId] = useState<string | null>(null);
+  const [activeSearchId, setActiveSearchId] = useState<string | null>(() => sessionStorage.getItem('activeSearchId') || null);
 
   const [isSeeding, setIsSeeding] = useState(false);
   const [seedResult, setSeedResult] = useState<{type: 'success' | 'error', message: string} | null>(null);
   const [searchLogs, setSearchLogs] = useState<Array<{link: string, status: string, reason: string}>>([]);
   const [searchProgress, setSearchProgress] = useState<{totalTargets: number, completedTargets: number, processedCount: number, savedCount: number} | null>(null);
+
+  useEffect(() => {
+    sessionStorage.setItem('autonomousQuery', autonomousQuery);
+  }, [autonomousQuery]);
+
+  useEffect(() => {
+    if (activeSearchId) {
+      sessionStorage.setItem('activeSearchId', activeSearchId);
+    } else {
+      sessionStorage.removeItem('activeSearchId');
+    }
+  }, [activeSearchId]);
 
   useEffect(() => {
     if (!activeSearchId) return;
@@ -87,7 +99,6 @@ export function AutonomousSearchView() {
            type: 'success',
            message: "Agente Autônomo enviado para execução em segundo plano."
          });
-         setAutonomousQuery('');
       } else {
          setAutonomousResult({
              type: 'error',

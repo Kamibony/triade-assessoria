@@ -11,6 +11,8 @@ interface Edital {
     publicationDate: string;
     deadline: string;
     totalBudget: number;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    createdAt?: any;
 }
 
 export function EditaisList() {
@@ -29,6 +31,14 @@ export function EditaisList() {
                 const db = getFirestore();
                 const editaisSnap = await getDocs(collection(db, 'editais'));
                 const list = editaisSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Edital));
+
+                // Sort by createdAt descending
+                list.sort((a, b) => {
+                    const timeA = a.createdAt?.toMillis?.() || (typeof a.createdAt === 'number' ? a.createdAt : 0);
+                    const timeB = b.createdAt?.toMillis?.() || (typeof b.createdAt === 'number' ? b.createdAt : 0);
+                    return timeB - timeA;
+                });
+
                 setEditais(list);
 
                 const oscsSnap = await getDocs(collection(db, 'oscs'));
@@ -67,6 +77,23 @@ export function EditaisList() {
       e.issuer.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const isNewEdital = (createdAt: any) => {
+        if (!createdAt) return false;
+        const time = createdAt.toMillis?.() || (typeof createdAt === 'number' ? createdAt : 0);
+        if (time === 0) return false;
+        const oneDay = 24 * 60 * 60 * 1000;
+        return (Date.now() - time) < oneDay;
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const formatDate = (createdAt: any) => {
+        if (!createdAt) return '-';
+        const time = createdAt.toMillis?.() || (typeof createdAt === 'number' ? createdAt : 0);
+        if (time === 0) return '-';
+        return new Date(time).toLocaleDateString('pt-BR');
+    };
+
     return (
         <div className="container mx-auto p-8 max-w-7xl">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
@@ -100,6 +127,7 @@ export function EditaisList() {
                           <th className="px-6 py-4 font-medium">Emissor</th>
                           <th className="px-6 py-4 font-medium">Prazo</th>
                           <th className="px-6 py-4 font-medium">Orçamento</th>
+                          <th className="px-6 py-4 font-medium">Adicionado em</th>
                           <th className="px-6 py-4 font-medium text-right">Ações</th>
                         </tr>
                       </thead>
@@ -107,7 +135,12 @@ export function EditaisList() {
                         {filteredEditais.map((edital) => (
                           <tr key={edital.id} className="hover:bg-muted/50 transition-colors">
                             <td className="px-6 py-4">
-                              <div className="font-medium line-clamp-2" title={edital.title}>{edital.title}</div>
+                              <div className="font-medium line-clamp-2 flex items-center gap-2" title={edital.title}>
+                                {edital.title}
+                                {isNewEdital(edital.createdAt) && (
+                                    <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded">NOVO</span>
+                                )}
+                              </div>
                             </td>
                             <td className="px-6 py-4 text-muted-foreground">{edital.issuer}</td>
                             <td className="px-6 py-4 whitespace-nowrap">
@@ -117,6 +150,9 @@ export function EditaisList() {
                               <span className="bg-edital/10 px-2 py-1 rounded-md">
                                 R$ {edital.totalBudget.toLocaleString('pt-BR')}
                               </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-muted-foreground">
+                              {formatDate(edital.createdAt)}
                             </td>
                             <td className="px-6 py-4 text-right">
                                <button onClick={() => openModal(edital)} className="text-primary hover:text-primary/80 font-medium text-sm cursor-pointer">
