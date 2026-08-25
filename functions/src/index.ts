@@ -311,7 +311,46 @@ export const extractEditalRulesFunction = onCall({
 
 
 import { onDocumentCreated, onDocumentUpdated, onDocumentWritten } from 'firebase-functions/v2/firestore';
+import { search as googleSearch, ResultTypes, OrganicResultNode } from 'google-sr';
 
+
+const generateSearchQueries = ai.defineFlow(
+    {
+        name: 'generateSearchQueries',
+        inputSchema: z.object({
+            osc: ngoProfileSchema,
+        }),
+        outputSchema: z.object({
+            queries: z.array(z.string()).describe("Lista de queries de busca"),
+        }),
+    },
+    async (input) => {
+        const prompt = `Você é um agente especialista em captação de recursos para ONGs no Brasil.
+Baseado no perfil da ONG abaixo, gere 3 queries (termos de busca) curtas e diretas para o Google, focadas em encontrar editais abertos, financiamentos ou chamadas públicas que sejam compatíveis com a missão, atividades e localização da ONG.
+Inclua sempre termos como "edital", "financiamento", "inscrições abertas", ou "chamada pública".
+
+Perfil da ONG:
+Nome: ${input.osc.name}
+Localização: ${input.osc.location}
+Atividades Principais: ${input.osc.coreActivities.join(', ')}
+Missão: ${input.osc.mission || 'Não especificada'}
+
+Retorne apenas as queries.`;
+
+        const response = await ai.generate({
+            model: 'vertexai/gemini-2.5-flash',
+            messages: [
+                { role: 'user', content: [{ text: prompt }] }
+            ],
+            output: { schema: z.object({ queries: z.array(z.string()) }) }
+        });
+
+        if (!response.output) {
+            throw new Error("Falha ao gerar queries de busca");
+        }
+        return response.output;
+    }
+);
 
 
 function cosineSimilarity(vecA: number[], vecB: number[]): number {
@@ -333,8 +372,9 @@ async function generateTextEmbedding(text: string): Promise<number[]> {
         });
         if (Array.isArray(response)) {
             // Genkit 1.0 ai.embed returns an array of objects { embedding: number[] }
-            if (response.length > 0 && (response as { embedding: number[] }[])[0]?.embedding) {
-                return (response as { embedding: number[] }[])[0].embedding;
+            const typedResponse = response as { embedding: number[] }[];
+            if (typedResponse.length > 0 && typedResponse[0] && typedResponse[0].embedding) {
+                return typedResponse[0].embedding;
             }
         }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -482,7 +522,7 @@ async function processMatchEvaluation(oscId: string, editalId: string, forceReca
 
     const matchRef = existingMatchRef || db.collection('matches').doc();
     const matchDocData = {
-        ...matchResult,
+        ...(matchResult as object),
         id: matchRef.id,
         createdAt: FieldValue.serverTimestamp()
     };
@@ -490,6 +530,98 @@ async function processMatchEvaluation(oscId: string, editalId: string, forceReca
     await matchRef.set(matchDocData, { merge: true });
     return matchDocData;
 }
+
+export const agenticSearchWorker = onTaskDispatched({
+    retryConfig: {
+        maxAttempts: 3,
+        minBackoffSeconds: 60,
+    },
+    rateLimits: {
+        maxConcurrentDispatches: 2,
+    },
+    timeoutSeconds: 540
+}, async (request) => {
+    const { oscId } = request.data as { oscId: string };
+
+    if (!oscId) {
+        console.error("Invalid task payload: missing oscId.");
+        return;
+    }
+
+    try {
+        const db = getFirestore();
+        const oscDoc = await db.collection('oscs').doc(oscId).get();
+        if (!oscDoc.exists) {
+            console.error(`OSC ${oscId} not found.`);
+            return;
+        }
+
+        const rawOscData = oscDoc.data();
+        const parseResult = ngoProfileSchema.safeParse(rawOscData);
+        if (!parseResult.success) {
+            console.warn(`Invalid OSC data for ${oscId}`);
+            return;
+        }
+
+        const oscData = parseResult.data;
+        let oscEmbedding = rawOscData?.embedding || null;
+        if (!oscEmbedding) {
+            const oscText = `Missão: ${oscData.mission || ''}. Foco: ${oscData.coreActivities?.join(', ') || ''}. Nome: ${oscData.name || ''}`;
+            oscEmbedding = await generateTextEmbedding(oscText);
+            await db.collection('oscs').doc(oscId).update({ embedding: oscEmbedding });
+        }
+
+        const { queries } = await generateSearchQueries({ osc: oscData });
+        console.log(`Generated queries for OSC ${oscId}:`, queries);
+
+        const searchedLinks = new Set<string>();
+
+        for (const query of queries) {
+            try {
+                const searchResults = await googleSearch({ query });
+
+                let processedResults = 0;
+                for (const r of searchResults) {
+                    if (processedResults >= 3) break;
+
+                    if (r.type === ResultTypes.OrganicResult) {
+                        const node = r as OrganicResultNode;
+                        if (!node.link || searchedLinks.has(node.link)) continue;
+                        searchedLinks.add(node.link);
+
+                        const existingRef = await db.collection('editais').where('sourceUrl', '==', node.link).limit(1).get();
+                        if (!existingRef.empty) continue;
+
+                        const text = await fetchAndExtractText(node.link);
+                        if (!text || text.length < 500) continue;
+
+                        const textEmbedding = await generateTextEmbedding(text.substring(0, 5000));
+                        const similarityScore = cosineSimilarity(oscEmbedding, textEmbedding);
+                        console.log(`Vector similarity for ${node.link} is ${similarityScore}`);
+
+                        if (similarityScore > 0.60) {
+                            const triageResult = await triageEditalWebpage({ text, searchQuery: query });
+                            if (triageResult.isValidEdital) {
+                                await enqueueEditalExtraction(node.link, text, triageResult.reason, "AGENTIC_SEARCH");
+                                console.log(`Successfully enqueued agentic extraction for ${node.link}`);
+                            }
+                        }
+
+                        processedResults++;
+                    }
+                }
+            } catch (err) {
+                console.error(`Error searching for query ${query}:`, err);
+            }
+        }
+
+        console.log(`Successfully finished agentic search for OSC ${oscId}`);
+    } catch (error) {
+        console.error(`Agentic search failed for OSC ${oscId}`, error);
+        throw error;
+    }
+});
+
 
 export const matchEvaluatorWorker = onTaskDispatched({
     retryConfig: {
@@ -855,8 +987,16 @@ export const onOscUpdated = onDocumentUpdated('oscs/{oscId}', async (event) => {
         });
     });
 
+    // Trigger the agentic search task for proactive edital discovery
+    const agenticQueue = getFunctions().taskQueue('agenticSearchWorker');
+    enqueuePromises.push(
+        agenticQueue.enqueue({
+            oscId: oscId
+        }) as unknown as Promise<void>
+    );
+
     await Promise.all(enqueuePromises);
-    console.log(`Enqueued ${editaisSnapshot.docs.length} match tasks for OSC update ${oscId}.`);
+    console.log(`Enqueued ${editaisSnapshot.docs.length} match tasks and 1 agentic search task for OSC update ${oscId}.`);
 });
 
 
@@ -1355,6 +1495,9 @@ export const seedScrapingTargets = onCall({
     const batch = db.batch();
 
     const targets = [
+        { name: "Prosas (RSS Editais)", url: "https://blog.prosas.com.br/categoria/editais/feed/", strategy: "RSS" },
+        { name: "Diário Oficial da União (Gov)", url: "https://www.in.gov.br", strategy: "AUTO" },
+        { name: "Ministério da Cultura (Editais)", url: "https://www.gov.br/cultura/pt-br/assuntos/editais", strategy: "AUTO" },
         { name: "Prosas", url: "https://prosas.com.br", strategy: "AUTO" },
         { name: "ABCR (Associação Brasileira de Captadores de Recursos)", url: "https://captadores.org.br", strategy: "AUTO" },
         { name: "GIFE", url: "https://gife.org.br", strategy: "AUTO" },
