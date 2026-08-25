@@ -703,6 +703,25 @@ export const onEditalCreated = onDocumentCreated('editais/{editalId}', async (ev
 });
 
 
+
+async function enqueueEditalExtraction(link: string, text: string, reason: string, searchId?: string) {
+    const db = getFirestore();
+    const tempContentRef = db.collection('scraping_contents').doc();
+    await tempContentRef.set({
+        text: text,
+        createdAt: FieldValue.serverTimestamp()
+    });
+
+    const queue = getFunctions().taskQueue('extractionWorker');
+    await queue.enqueue({
+        searchId: searchId || null,
+        link: link,
+        contentId: tempContentRef.id,
+        reason: reason
+    });
+    return tempContentRef.id;
+}
+
 export const triggerMatchOrchestrator = onCall({
     cors: true
 }, async (request) => {
@@ -814,26 +833,11 @@ async function processRssFeeds() {
 
                 if (triageResult.isValidEdital) {
                     try {
-                        const editalResult = await extractEditalRules({ text });
-                        const parseResult = editalSchema.safeParse(editalResult);
-
-                        if (parseResult.success) {
-                            const editalDocData = {
-                                ...parseResult.data,
-                                rawText: text.substring(0, 5000), // Save a snippet
-                                sourceUrl: item.link,
-                                createdAt: FieldValue.serverTimestamp(),
-                            };
-
-                            const editalRef = db.collection('editais').doc();
-                            await editalRef.set(editalDocData);
-                            savedCount++;
-                            console.log(`Successfully saved Edital from ${item.link}`);
-                        } else {
-                            console.warn(`Validation failed for extracted Edital from ${item.link}:`, parseResult.error);
-                        }
+                        await enqueueEditalExtraction(item.link, text, triageResult.reason, "RSS");
+                        console.log(`Successfully enqueued Edital extraction for ${item.link}`);
+                        savedCount++; // Incrementing for now to reflect enqueued count
                     } catch (e) {
-                         console.error(`Error extracting rules for ${item.link}:`, e);
+                         console.error(`Error enqueuing extraction for ${item.link}:`, e);
                     }
                 }
             }
@@ -948,23 +952,8 @@ export const ingestManualEditalFunction = onCall({
              return { success: false, message: `O conteúdo não parece ser um edital válido. Motivo: ${triageResult.reason}` };
         }
 
-        const editalResult = await extractEditalRules({ text });
-        const parseResult = editalSchema.safeParse(editalResult);
-
-        if (!parseResult.success) {
-            return { success: false, message: "Falha na formatação dos dados estruturados do edital pelo modelo de IA." };
-        }
-
-        const db = getFirestore();
-        const editalDocData = {
-            ...parseResult.data,
-            rawText: text.substring(0, 5000), // Save a snippet
-            sourceUrl: url,
-            createdAt: FieldValue.serverTimestamp(),
-        };
-
-        const docRef = await db.collection('editais').add(editalDocData);
-        return { success: true, editalId: docRef.id, message: "Edital adicionado com sucesso." };
+        await enqueueEditalExtraction(url, text, triageResult.reason, "MANUAL");
+        return { success: true, editalId: "pending", message: "Edital válido. Adicionado à fila de processamento e extração com IA." };
 
     } catch (error: unknown) {
         console.error('Error in ingestManualEditalFunction:', error);
@@ -1365,15 +1354,15 @@ export const extractionWorker = onTaskDispatched({
     rateLimits: { maxConcurrentDispatches: 2 },
     timeoutSeconds: 540
 }, async (request) => {
-    const { searchId, link, contentId, reason } = request.data as { searchId: string, link: string, contentId: string, reason: string };
+    const { searchId, link, contentId, reason } = request.data as { searchId?: string, link: string, contentId: string, reason: string };
 
-    if (!searchId || !link || !contentId) {
-        console.error("Invalid task payload: missing searchId, link, or contentId.");
+    if (!link || !contentId) {
+        console.error("Invalid task payload: missing link, or contentId.");
         return;
     }
 
     const db = getFirestore();
-    const searchRef = db.collection('searches').doc(searchId);
+    const searchRef = searchId && searchId !== "MANUAL" && searchId !== "RSS" ? db.collection('searches').doc(searchId) : null;
     const contentRef = db.collection('scraping_contents').doc(contentId);
 
     try {
@@ -1399,14 +1388,18 @@ export const extractionWorker = onTaskDispatched({
             };
 
             await db.collection('editais').add(editalDocData);
-            await searchRef.update({
-                logs: FieldValue.arrayUnion({ link, status: 'Importado', reason: reason }),
-                savedCount: FieldValue.increment(1)
-            });
+            if (searchRef) {
+                await searchRef.update({
+                    logs: FieldValue.arrayUnion({ link, status: 'Importado', reason: reason }),
+                    savedCount: FieldValue.increment(1)
+                });
+            }
         } else {
-            await searchRef.update({
-                logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: 'Falha na validação do schema do edital.' })
-            });
+            if (searchRef) {
+                await searchRef.update({
+                    logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: 'Falha na validação do schema do edital.' })
+                });
+            }
         }
 
         // Cleanup the temporary content document only on success (to allow retries on error)
@@ -1417,9 +1410,11 @@ export const extractionWorker = onTaskDispatched({
         }
     } catch (error) {
         console.error(`Error in extractionWorker for link ${link}:`, error);
-        await searchRef.update({
-            logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: error instanceof Error ? error.message : 'Erro desconhecido na extração' })
-        });
+        if (searchRef) {
+            await searchRef.update({
+                logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: error instanceof Error ? error.message : 'Erro desconhecido na extração' })
+            });
+        }
         throw error;
     }
 });
@@ -1606,19 +1601,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
 
                 if (triageResult.isValidEdital) {
                     // Claim Check pattern: Save text to Firestore to avoid 100KB Cloud Tasks payload limit
-                    const tempContentRef = db.collection('scraping_contents').doc();
-                    await tempContentRef.set({
-                        text: text,
-                        createdAt: FieldValue.serverTimestamp()
-                    });
-
-                    const queue = getFunctions().taskQueue('extractionWorker');
-                    await queue.enqueue({
-                        searchId: searchId,
-                        link: link,
-                        contentId: tempContentRef.id,
-                        reason: triageResult.reason
-                    });
+                    await enqueueEditalExtraction(link, text, triageResult.reason, searchId);
 
                     await searchRef.update({
                         logs: FieldValue.arrayUnion({ link, status: 'Em Processamento (Extração)', reason: triageResult.reason })
