@@ -1,18 +1,18 @@
 import { initializeApp } from "firebase/app";
 import { getFunctions } from "firebase/functions";
 import { getStorage } from "firebase/storage";
+import { getAuth } from "firebase/auth";
 
-// Configuração padrão mínima para que o getFunctions funcione (mesmo com emuladores)
-// Idealmente seria preenchido com process.env.VITE_FIREBASE_API_KEY etc.
 const firebaseConfig = {
-  apiKey: "demo-api-key",
-  authDomain: "triade-assessoria.firebaseapp.com",
-  projectId: "triade-assessoria",
-  storageBucket: "triade-assessoria.firebasestorage.app",
-  messagingSenderId: "1234567890",
-  appId: "1:1234567890:web:abcdef"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "demo-api-key",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "triade-assessoria.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "triade-assessoria",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "triade-assessoria.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "1234567890",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:1234567890:web:abcdef"
 };
 
 const app = initializeApp(firebaseConfig);
 export const functions = getFunctions(app, 'us-central1');
 export const storage = getStorage(app);
+export const auth = getAuth(app);
