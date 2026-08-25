@@ -11,6 +11,9 @@ interface ScrapingTarget {
   cssSelector?: string;
   keywords?: string;
   active?: boolean;
+  failureCount?: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  lastFailedAt?: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   createdAt?: any;
 }
@@ -211,12 +214,13 @@ export function ScrapingTargetsManager() {
                   <th className="px-6 py-3 font-medium">Status</th>
                   <th className="px-6 py-3 font-medium">Estratégia</th>
                   <th className="px-6 py-3 font-medium">Detalhes</th>
+                  <th className="px-6 py-3 font-medium">Falhas</th>
                   <th className="px-6 py-3 font-medium text-right">Ações</th>
                 </tr>
               </thead>
               <tbody>
                 {targets.map((target) => (
-                  <tr key={target.id} className="border-b last:border-0 hover:bg-muted/20">
+                  <tr key={target.id} className={`border-b last:border-0 hover:bg-muted/20 ${target.active === false && target.failureCount && target.failureCount >= 3 ? 'bg-red-50/50 dark:bg-red-950/20' : ''}`}>
                     <td className="px-6 py-4 font-medium">{target.name}</td>
                     <td className="px-6 py-4">
                       <label className="relative inline-flex items-center cursor-pointer">
@@ -245,6 +249,16 @@ export function ScrapingTargetsManager() {
                       <div className="flex items-center text-muted-foreground mb-1" title={target.url}>
                         <LinkIcon className="w-3 h-3 mr-1 shrink-0" />
                         <span className="truncate max-w-[200px]">{target.url}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col">
+                        <span>{target.failureCount || 0}</span>
+                        {target.failureCount !== undefined && target.failureCount > 0 && target.lastFailedAt && (
+                          <span className="text-[10px] text-red-500 mt-1">
+                            {target.lastFailedAt?.toDate?.()?.toLocaleString() || 'Erro recente'}
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="px-6 py-4 text-right space-x-2">

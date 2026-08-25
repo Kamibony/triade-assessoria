@@ -333,8 +333,8 @@ async function generateTextEmbedding(text: string): Promise<number[]> {
         });
         if (Array.isArray(response)) {
             // Genkit 1.0 ai.embed returns an array of objects { embedding: number[] }
-            if (response.length > 0 && (response as any)[0]?.embedding) {
-                return (response as any)[0].embedding;
+            if (response.length > 0 && (response as { embedding: number[] }[])[0]?.embedding) {
+                return (response as { embedding: number[] }[])[0].embedding;
             }
         }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -461,7 +461,7 @@ async function processMatchEvaluation(oscId: string, editalId: string, forceReca
     const similarityScore = cosineSimilarity(oscEmbedding, editalEmbedding);
     console.log(`Vector similarity score for OSC ${oscId} and Edital ${editalId}: ${similarityScore}`);
 
-    let matchResult: any;
+    let matchResult: unknown;
 
     if (similarityScore < 0.60) {
         console.log(`Skipping LLM evaluation due to low vector similarity: ${similarityScore}`);
@@ -1511,7 +1511,7 @@ async function handleScraperFailure(db: FirebaseFirestore.Firestore, targetId: s
         const currentCount = doc.data()?.failureCount || 0;
         const newCount = currentCount + 1;
 
-        const updateData: any = {
+        const updateData: Record<string, unknown> = {
             failureCount: newCount,
             lastFailedAt: FieldValue.serverTimestamp(),
             disabledReason: errorMsg
