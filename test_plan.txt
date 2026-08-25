@@ -1,0 +1,6 @@
+1. We know `autonomousSearchWorker` gets targets via `const allTargets = targetsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));`, so `target.id` exists in the `targets` array.
+2. In `processScrapingTargetWorker`, I will modify the error handling to detect failures:
+   - If `response.ok === false` or if `catch` triggers during RSS parsing or overall extracting links.
+   - I'll add a helper function `handleScraperFailure(targetId, errorMsg)` that increments `failureCount` and toggles `active: false` if it hits 3.
+   - If candidate links are successfully extracted (`candidateLinks.length > 0`), I'll reset `failureCount` to 0.
+3. Will use `admin.firestore()` transaction or just read/update to do the counter logic.
