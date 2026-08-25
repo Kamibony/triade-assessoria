@@ -11,7 +11,8 @@ exports.ngoProfileSchema = zod_1.z.object({
     location: zod_1.z.string().describe("Localização da sede (Cidade/Estado)"),
     documentationStatus: zod_1.z.enum(['Em dia', 'Pendente', 'Irregular']).describe("Status das certidões negativas e documentação básica"),
     previousProjectsApproved: zod_1.z.boolean().describe("Se a ONG já teve projetos culturais aprovados anteriormente"),
-    coreActivities: zod_1.z.array(zod_1.z.string()).describe("Lista de atividades principais da ONG")
+    coreActivities: zod_1.z.array(zod_1.z.string()).describe("Lista de atividades principais da ONG"),
+    embedding: zod_1.z.array(zod_1.z.number()).optional().describe("Vetor de embedding para busca semântica")
 });
 exports.editalSchema = zod_1.z.object({
     title: zod_1.z.string().describe("Título do edital"),
@@ -24,7 +25,8 @@ exports.editalSchema = zod_1.z.object({
         requiredLocations: zod_1.z.array(zod_1.z.string()).describe("Lista de estados ou cidades exigidos para participação (ex: ['PB', 'PE'])"),
         requiredDocumentation: zod_1.z.array(zod_1.z.string()).describe("Lista de documentações exigidas"),
         allowedActivities: zod_1.z.array(zod_1.z.string()).describe("Lista de atividades permitidas ou focos de atuação"),
-    }).describe("Critérios de elegibilidade do edital")
+    }).describe("Critérios de elegibilidade do edital"),
+    embedding: zod_1.z.array(zod_1.z.number()).optional().describe("Vetor de embedding para busca semântica")
 });
 exports.matchSchema = zod_1.z.object({
     editalId: zod_1.z.string().describe("ID do edital analisado"),

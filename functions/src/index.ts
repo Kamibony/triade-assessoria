@@ -313,6 +313,40 @@ export const extractEditalRulesFunction = onCall({
 import { onDocumentCreated, onDocumentUpdated, onDocumentWritten } from 'firebase-functions/v2/firestore';
 
 
+
+function cosineSimilarity(vecA: number[], vecB: number[]): number {
+    if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
+    let dotProduct = 0; let normA = 0; let normB = 0;
+    for (let i = 0; i < vecA.length; i++) {
+        dotProduct += (vecA[i] || 0) * (vecB[i] || 0);
+        normA += (vecA[i] || 0) * (vecA[i] || 0);
+        normB += (vecB[i] || 0) * (vecB[i] || 0);
+    }
+    return (normA === 0 || normB === 0) ? 0 : dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+async function generateTextEmbedding(text: string): Promise<number[]> {
+    try {
+        const response = await ai.embed({
+            embedder: 'vertexai/text-embedding-004',
+            content: text.substring(0, 5000)
+        });
+        if (Array.isArray(response)) {
+            // Genkit 1.0 ai.embed returns an array of objects { embedding: number[] }
+            if (response.length > 0 && (response as any)[0]?.embedding) {
+                return (response as any)[0].embedding;
+            }
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        if (response && (response as any).embedding) return (response as any).embedding as number[];
+
+        throw new Error('Formato de retorno de embedding desconhecido.');
+    } catch(err) {
+        console.error("Error generating embedding:", err);
+        throw err;
+    }
+}
+
 async function processMatchEvaluation(oscId: string, editalId: string, forceRecalculate: boolean = false) {
     const db = getFirestore();
 
@@ -403,12 +437,48 @@ async function processMatchEvaluation(oscId: string, editalId: string, forceReca
     }
 
     console.log(`Evaluating match for OSC ${oscId} and Edital ${editalId}`);
-    const matchResult = await scoreMatch({
-        osc: oscData,
-        edital: editalData,
-        oscId: oscId,
-        editalId: editalId
-    });
+
+    // Vector Pre-filtering
+    let oscEmbedding = rawOscData?.embedding || null;
+    let editalEmbedding = rawEditalData?.embedding || null;
+
+    if (!oscEmbedding) {
+        console.log(`Generating missing embedding for OSC ${oscId}`);
+        const oscText = `Missão: ${oscData.mission || ''}. Foco: ${oscData.coreActivities?.join(', ') || ''}. Nome: ${oscData.name || ''}`;
+        oscEmbedding = await generateTextEmbedding(oscText);
+        await db.collection('oscs').doc(oscId).update({ embedding: oscEmbedding });
+        oscData.embedding = oscEmbedding;
+    }
+
+    if (!editalEmbedding) {
+        console.log(`Generating missing embedding for Edital ${editalId}`);
+        const editalText = `Objetivo e Título: ${editalData.title || ''}. Elegibilidade: Atividades permitidas: ${editalData.eligibilityCriteria.allowedActivities?.join(', ') || ''}.`;
+        editalEmbedding = await generateTextEmbedding(editalText);
+        await db.collection('editais').doc(editalId).update({ embedding: editalEmbedding });
+        editalData.embedding = editalEmbedding;
+    }
+
+    const similarityScore = cosineSimilarity(oscEmbedding, editalEmbedding);
+    console.log(`Vector similarity score for OSC ${oscId} and Edital ${editalId}: ${similarityScore}`);
+
+    let matchResult: any;
+
+    if (similarityScore < 0.60) {
+        console.log(`Skipping LLM evaluation due to low vector similarity: ${similarityScore}`);
+        matchResult = {
+            matchScore: Math.round(similarityScore * 100),
+            reasoning: 'Match descartado na pré-filtragem por similaridade vetorial (Cosine Similarity < 0.60).',
+            eligibility: false
+        };
+    } else {
+        matchResult = await scoreMatch({
+            osc: oscData,
+            edital: editalData,
+            oscId: oscId,
+            editalId: editalId
+        });
+    }
+
 
     const matchRef = existingMatchRef || db.collection('matches').doc();
     const matchDocData = {
@@ -1380,10 +1450,20 @@ export const extractionWorker = onTaskDispatched({
         const parseResult = editalSchema.safeParse(editalResult);
 
         if (parseResult.success) {
+            let embedding: number[] = [];
+            try {
+                const editalData = parseResult.data;
+                const editalText = `Objetivo e Título: ${editalData.title || ''}. Elegibilidade: Atividades permitidas: ${editalData.eligibilityCriteria.allowedActivities?.join(', ') || ''}.`;
+                embedding = await generateTextEmbedding(editalText);
+            } catch (embedError) {
+                console.warn("Failed to generate embedding for new edital:", embedError);
+            }
+
             const editalDocData = {
                 ...parseResult.data,
                 rawText: text.substring(0, 5000),
                 sourceUrl: link,
+                embedding: embedding.length > 0 ? embedding : null,
                 createdAt: FieldValue.serverTimestamp(),
             };
 
