@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onSearchCreated = exports.processScrapingTargetWorker = exports.seedScrapingTargets = exports.autonomousSearchWorker = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = void 0;
+exports.onSearchCreated = exports.processScrapingTargetWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.autonomousSearchWorker = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = void 0;
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-admin/firestore");
 const storage_1 = require("firebase-admin/storage");
@@ -1179,6 +1179,64 @@ exports.seedScrapingTargets = (0, https_1.onCall)({
         message: `${targets.length} alvos de scraping oficiais inseridos com sucesso (dados anteriores removidos).`
     };
 });
+exports.extractionWorker = (0, tasks_1.onTaskDispatched)({
+    retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
+    rateLimits: { maxConcurrentDispatches: 2 },
+    timeoutSeconds: 540
+}, async (request) => {
+    const { searchId, link, contentId, reason } = request.data;
+    if (!searchId || !link || !contentId) {
+        console.error("Invalid task payload: missing searchId, link, or contentId.");
+        return;
+    }
+    const db = (0, firestore_1.getFirestore)();
+    const searchRef = db.collection('searches').doc(searchId);
+    const contentRef = db.collection('scraping_contents').doc(contentId);
+    try {
+        const contentDoc = await contentRef.get();
+        if (!contentDoc.exists) {
+            throw new Error(`Content document ${contentId} not found.`);
+        }
+        const text = contentDoc.data()?.text;
+        if (!text) {
+            throw new Error(`Content document ${contentId} has no text.`);
+        }
+        const editalResult = await extractEditalRules({ text });
+        const parseResult = schemas_js_1.editalSchema.safeParse(editalResult);
+        if (parseResult.success) {
+            const editalDocData = {
+                ...parseResult.data,
+                rawText: text.substring(0, 5000),
+                sourceUrl: link,
+                createdAt: firestore_1.FieldValue.serverTimestamp(),
+            };
+            await db.collection('editais').add(editalDocData);
+            await searchRef.update({
+                logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Importado', reason: reason }),
+                savedCount: firestore_1.FieldValue.increment(1)
+            });
+        }
+        else {
+            await searchRef.update({
+                logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Erro', reason: 'Falha na validação do schema do edital.' })
+            });
+        }
+        // Cleanup the temporary content document only on success (to allow retries on error)
+        try {
+            await contentRef.delete();
+        }
+        catch (cleanupError) {
+            console.error(`Failed to delete temporary content document ${contentId}:`, cleanupError);
+        }
+    }
+    catch (error) {
+        console.error(`Error in extractionWorker for link ${link}:`, error);
+        await searchRef.update({
+            logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Erro', reason: error instanceof Error ? error.message : 'Erro desconhecido na extração' })
+        });
+        throw error;
+    }
+});
 exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
     retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
     rateLimits: { maxConcurrentDispatches: 5 },
@@ -1194,7 +1252,6 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
     const searchRef = db.collection('searches').doc(searchId);
     try {
         let totalProcessed = 0;
-        let totalSaved = 0;
         let candidateLinks = [];
         try {
             if (target.strategy === 'RSS') {
@@ -1358,26 +1415,22 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                 }
                 const triageResult = await triageEditalWebpage({ text, searchQuery: query });
                 if (triageResult.isValidEdital) {
-                    const editalResult = await extractEditalRules({ text });
-                    const parseResult = schemas_js_1.editalSchema.safeParse(editalResult);
-                    if (parseResult.success) {
-                        const editalDocData = {
-                            ...parseResult.data,
-                            rawText: text.substring(0, 5000),
-                            sourceUrl: link,
-                            createdAt: firestore_1.FieldValue.serverTimestamp(),
-                        };
-                        await db.collection('editais').add(editalDocData);
-                        await searchRef.update({
-                            logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Importado', reason: triageResult.reason })
-                        });
-                        totalSaved++;
-                    }
-                    else {
-                        await searchRef.update({
-                            logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Erro', reason: 'Falha na validação do schema do edital.' })
-                        });
-                    }
+                    // Claim Check pattern: Save text to Firestore to avoid 100KB Cloud Tasks payload limit
+                    const tempContentRef = db.collection('scraping_contents').doc();
+                    await tempContentRef.set({
+                        text: text,
+                        createdAt: firestore_1.FieldValue.serverTimestamp()
+                    });
+                    const queue = (0, functions_1.getFunctions)().taskQueue('extractionWorker');
+                    await queue.enqueue({
+                        searchId: searchId,
+                        link: link,
+                        contentId: tempContentRef.id,
+                        reason: triageResult.reason
+                    });
+                    await searchRef.update({
+                        logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Em Processamento (Extração)', reason: triageResult.reason })
+                    });
                 }
                 else {
                     await searchRef.update({
@@ -1395,7 +1448,7 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
         }
         await searchRef.update({
             processedCount: firestore_1.FieldValue.increment(totalProcessed),
-            savedCount: firestore_1.FieldValue.increment(totalSaved),
+            // savedCount is now incremented in extractionWorker
             completedTargets: firestore_1.FieldValue.increment(1)
         });
     }

@@ -1360,6 +1360,70 @@ export const seedScrapingTargets = onCall({
 });
 
 
+export const extractionWorker = onTaskDispatched({
+    retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
+    rateLimits: { maxConcurrentDispatches: 2 },
+    timeoutSeconds: 540
+}, async (request) => {
+    const { searchId, link, contentId, reason } = request.data as { searchId: string, link: string, contentId: string, reason: string };
+
+    if (!searchId || !link || !contentId) {
+        console.error("Invalid task payload: missing searchId, link, or contentId.");
+        return;
+    }
+
+    const db = getFirestore();
+    const searchRef = db.collection('searches').doc(searchId);
+    const contentRef = db.collection('scraping_contents').doc(contentId);
+
+    try {
+        const contentDoc = await contentRef.get();
+        if (!contentDoc.exists) {
+            throw new Error(`Content document ${contentId} not found.`);
+        }
+        const text = contentDoc.data()?.text;
+
+        if (!text) {
+            throw new Error(`Content document ${contentId} has no text.`);
+        }
+
+        const editalResult = await extractEditalRules({ text });
+        const parseResult = editalSchema.safeParse(editalResult);
+
+        if (parseResult.success) {
+            const editalDocData = {
+                ...parseResult.data,
+                rawText: text.substring(0, 5000),
+                sourceUrl: link,
+                createdAt: FieldValue.serverTimestamp(),
+            };
+
+            await db.collection('editais').add(editalDocData);
+            await searchRef.update({
+                logs: FieldValue.arrayUnion({ link, status: 'Importado', reason: reason }),
+                savedCount: FieldValue.increment(1)
+            });
+        } else {
+            await searchRef.update({
+                logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: 'Falha na validação do schema do edital.' })
+            });
+        }
+
+        // Cleanup the temporary content document only on success (to allow retries on error)
+        try {
+            await contentRef.delete();
+        } catch (cleanupError) {
+            console.error(`Failed to delete temporary content document ${contentId}:`, cleanupError);
+        }
+    } catch (error) {
+        console.error(`Error in extractionWorker for link ${link}:`, error);
+        await searchRef.update({
+            logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: error instanceof Error ? error.message : 'Erro desconhecido na extração' })
+        });
+        throw error;
+    }
+});
+
 export const processScrapingTargetWorker = onTaskDispatched({
     retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
     rateLimits: { maxConcurrentDispatches: 5 },
@@ -1378,7 +1442,6 @@ export const processScrapingTargetWorker = onTaskDispatched({
 
     try {
         let totalProcessed = 0;
-        let totalSaved = 0;
         let candidateLinks: string[] = [];
 
         try {
@@ -1542,27 +1605,24 @@ export const processScrapingTargetWorker = onTaskDispatched({
                 const triageResult = await triageEditalWebpage({ text, searchQuery: query });
 
                 if (triageResult.isValidEdital) {
-                    const editalResult = await extractEditalRules({ text });
-                    const parseResult = editalSchema.safeParse(editalResult);
+                    // Claim Check pattern: Save text to Firestore to avoid 100KB Cloud Tasks payload limit
+                    const tempContentRef = db.collection('scraping_contents').doc();
+                    await tempContentRef.set({
+                        text: text,
+                        createdAt: FieldValue.serverTimestamp()
+                    });
 
-                    if (parseResult.success) {
-                        const editalDocData = {
-                            ...parseResult.data,
-                            rawText: text.substring(0, 5000),
-                            sourceUrl: link,
-                            createdAt: FieldValue.serverTimestamp(),
-                        };
+                    const queue = getFunctions().taskQueue('extractionWorker');
+                    await queue.enqueue({
+                        searchId: searchId,
+                        link: link,
+                        contentId: tempContentRef.id,
+                        reason: triageResult.reason
+                    });
 
-                        await db.collection('editais').add(editalDocData);
-                        await searchRef.update({
-                            logs: FieldValue.arrayUnion({ link, status: 'Importado', reason: triageResult.reason })
-                        });
-                        totalSaved++;
-                    } else {
-                         await searchRef.update({
-                             logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: 'Falha na validação do schema do edital.' })
-                         });
-                    }
+                    await searchRef.update({
+                        logs: FieldValue.arrayUnion({ link, status: 'Em Processamento (Extração)', reason: triageResult.reason })
+                    });
                 } else {
                     await searchRef.update({
                         logs: FieldValue.arrayUnion({ link, status: 'Rejeitado', reason: triageResult.reason })
@@ -1580,7 +1640,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
 
         await searchRef.update({
             processedCount: FieldValue.increment(totalProcessed),
-            savedCount: FieldValue.increment(totalSaved),
+            // savedCount is now incremented in extractionWorker
             completedTargets: FieldValue.increment(1)
         });
 
