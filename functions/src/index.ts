@@ -1419,6 +1419,39 @@ export const extractionWorker = onTaskDispatched({
     }
 });
 
+
+async function handleScraperFailure(db: FirebaseFirestore.Firestore, targetId: string, errorMsg: string) {
+    if (!targetId) return;
+    const targetRef = db.collection('scraping_targets').doc(targetId);
+
+    await db.runTransaction(async (transaction) => {
+        const doc = await transaction.get(targetRef);
+        if (!doc.exists) return;
+
+        const currentCount = doc.data()?.failureCount || 0;
+        const newCount = currentCount + 1;
+
+        const updateData: any = {
+            failureCount: newCount,
+            lastFailedAt: FieldValue.serverTimestamp(),
+            disabledReason: errorMsg
+        };
+
+        if (newCount >= 3) {
+            updateData.active = false;
+            logger.error(`Circuit Breaker triggered for target ${targetId}. Disabled due to ${newCount} consecutive failures: ${errorMsg}`);
+        }
+
+        transaction.update(targetRef, updateData);
+    });
+}
+
+async function handleScraperSuccess(db: FirebaseFirestore.Firestore, targetId: string) {
+    if (!targetId) return;
+    const targetRef = db.collection('scraping_targets').doc(targetId);
+    await targetRef.update({ failureCount: 0 });
+}
+
 export const processScrapingTargetWorker = onTaskDispatched({
     retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
     rateLimits: { maxConcurrentDispatches: 5 },
@@ -1461,6 +1494,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
                     candidateLinks = [...new Set(matches)];
                 } else {
                     logger.warn(`API fetch failed for ${target.name}: ${response.statusText}`);
+                    await handleScraperFailure(db, target.id, `API fetch failed: ${response.statusText}`);
                 }
             } else if (target.strategy === 'HTML') {
                 const controller = new AbortController();
@@ -1494,6 +1528,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
                     candidateLinks = [...new Set(candidateLinks)];
                 } else {
                     logger.warn(`HTML fetch failed for ${target.name}: ${response.statusText}`);
+                    await handleScraperFailure(db, target.id, `HTML fetch failed: ${response.statusText}`);
                 }
             } else if (target.strategy === 'AUTO') {
                 const isRss = target.url.toLowerCase().endsWith('.xml') || target.url.toLowerCase().includes('feed');
@@ -1568,11 +1603,17 @@ export const processScrapingTargetWorker = onTaskDispatched({
                         }
                     } else {
                         logger.warn(`AUTO fetch failed for ${target.name}: ${response.statusText}`);
+                        await handleScraperFailure(db, target.id, `AUTO fetch failed: ${response.statusText}`);
                     }
                 }
             }
         } catch (error) {
             logger.error(`Error extracting links for target ${target.name}:`, error);
+            await handleScraperFailure(db, target.id, error instanceof Error ? error.message : 'Unknown extraction error');
+        }
+
+        if (candidateLinks.length > 0) {
+            await handleScraperSuccess(db, target.id);
         }
 
         const linksToProcess = candidateLinks.slice(0, 10);
