@@ -300,6 +300,41 @@ exports.extractEditalRulesFunction = (0, https_1.onCall)({
     return await extractEditalRules(request.data);
 });
 const firestore_2 = require("firebase-functions/v2/firestore");
+function cosineSimilarity(vecA, vecB) {
+    if (!vecA || !vecB || vecA.length !== vecB.length)
+        return 0;
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+    for (let i = 0; i < vecA.length; i++) {
+        dotProduct += (vecA[i] || 0) * (vecB[i] || 0);
+        normA += (vecA[i] || 0) * (vecA[i] || 0);
+        normB += (vecB[i] || 0) * (vecB[i] || 0);
+    }
+    return (normA === 0 || normB === 0) ? 0 : dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+async function generateTextEmbedding(text) {
+    try {
+        const response = await ai.embed({
+            embedder: 'vertexai/text-embedding-004',
+            content: text.substring(0, 5000)
+        });
+        if (Array.isArray(response)) {
+            // Genkit 1.0 ai.embed returns an array of objects { embedding: number[] }
+            if (response.length > 0 && response[0]?.embedding) {
+                return response[0].embedding;
+            }
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        if (response && response.embedding)
+            return response.embedding;
+        throw new Error('Formato de retorno de embedding desconhecido.');
+    }
+    catch (err) {
+        console.error("Error generating embedding:", err);
+        throw err;
+    }
+}
 async function processMatchEvaluation(oscId, editalId, forceRecalculate = false) {
     const db = (0, firestore_1.getFirestore)();
     // Fetch OSC and Edital
@@ -383,12 +418,42 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
         return existingMatchData;
     }
     console.log(`Evaluating match for OSC ${oscId} and Edital ${editalId}`);
-    const matchResult = await scoreMatch({
-        osc: oscData,
-        edital: editalData,
-        oscId: oscId,
-        editalId: editalId
-    });
+    // Vector Pre-filtering
+    let oscEmbedding = rawOscData?.embedding || null;
+    let editalEmbedding = rawEditalData?.embedding || null;
+    if (!oscEmbedding) {
+        console.log(`Generating missing embedding for OSC ${oscId}`);
+        const oscText = `Missão: ${oscData.mission || ''}. Foco: ${oscData.coreActivities?.join(', ') || ''}. Nome: ${oscData.name || ''}`;
+        oscEmbedding = await generateTextEmbedding(oscText);
+        await db.collection('oscs').doc(oscId).update({ embedding: oscEmbedding });
+        oscData.embedding = oscEmbedding;
+    }
+    if (!editalEmbedding) {
+        console.log(`Generating missing embedding for Edital ${editalId}`);
+        const editalText = `Objetivo e Título: ${editalData.title || ''}. Elegibilidade: Atividades permitidas: ${editalData.eligibilityCriteria.allowedActivities?.join(', ') || ''}.`;
+        editalEmbedding = await generateTextEmbedding(editalText);
+        await db.collection('editais').doc(editalId).update({ embedding: editalEmbedding });
+        editalData.embedding = editalEmbedding;
+    }
+    const similarityScore = cosineSimilarity(oscEmbedding, editalEmbedding);
+    console.log(`Vector similarity score for OSC ${oscId} and Edital ${editalId}: ${similarityScore}`);
+    let matchResult;
+    if (similarityScore < 0.60) {
+        console.log(`Skipping LLM evaluation due to low vector similarity: ${similarityScore}`);
+        matchResult = {
+            matchScore: Math.round(similarityScore * 100),
+            reasoning: 'Match descartado na pré-filtragem por similaridade vetorial (Cosine Similarity < 0.60).',
+            eligibility: false
+        };
+    }
+    else {
+        matchResult = await scoreMatch({
+            osc: oscData,
+            edital: editalData,
+            oscId: oscId,
+            editalId: editalId
+        });
+    }
     const matchRef = existingMatchRef || db.collection('matches').doc();
     const matchDocData = {
         ...matchResult,
@@ -626,6 +691,22 @@ exports.onEditalCreated = (0, firestore_2.onDocumentCreated)('editais/{editalId}
     await Promise.all(enqueuePromises);
     console.log(`Enqueued ${oscsSnapshot.docs.length} match tasks for new Edital ${editalId}.`);
 });
+async function enqueueEditalExtraction(link, text, reason, searchId) {
+    const db = (0, firestore_1.getFirestore)();
+    const tempContentRef = db.collection('scraping_contents').doc();
+    await tempContentRef.set({
+        text: text,
+        createdAt: firestore_1.FieldValue.serverTimestamp()
+    });
+    const queue = (0, functions_1.getFunctions)().taskQueue('extractionWorker');
+    await queue.enqueue({
+        searchId: searchId || null,
+        link: link,
+        contentId: tempContentRef.id,
+        reason: reason
+    });
+    return tempContentRef.id;
+}
 exports.triggerMatchOrchestrator = (0, https_1.onCall)({
     cors: true
 }, async (request) => {
@@ -714,26 +795,12 @@ async function processRssFeeds() {
                 console.log(`Triage for ${item.link}: isValidEdital=${triageResult.isValidEdital}, reason=${triageResult.reason}`);
                 if (triageResult.isValidEdital) {
                     try {
-                        const editalResult = await extractEditalRules({ text });
-                        const parseResult = schemas_js_1.editalSchema.safeParse(editalResult);
-                        if (parseResult.success) {
-                            const editalDocData = {
-                                ...parseResult.data,
-                                rawText: text.substring(0, 5000), // Save a snippet
-                                sourceUrl: item.link,
-                                createdAt: firestore_1.FieldValue.serverTimestamp(),
-                            };
-                            const editalRef = db.collection('editais').doc();
-                            await editalRef.set(editalDocData);
-                            savedCount++;
-                            console.log(`Successfully saved Edital from ${item.link}`);
-                        }
-                        else {
-                            console.warn(`Validation failed for extracted Edital from ${item.link}:`, parseResult.error);
-                        }
+                        await enqueueEditalExtraction(item.link, text, triageResult.reason, "RSS");
+                        console.log(`Successfully enqueued Edital extraction for ${item.link}`);
+                        savedCount++; // Incrementing for now to reflect enqueued count
                     }
                     catch (e) {
-                        console.error(`Error extracting rules for ${item.link}:`, e);
+                        console.error(`Error enqueuing extraction for ${item.link}:`, e);
                     }
                 }
             }
@@ -834,20 +901,8 @@ exports.ingestManualEditalFunction = (0, https_1.onCall)({
         if (!triageResult.isValidEdital) {
             return { success: false, message: `O conteúdo não parece ser um edital válido. Motivo: ${triageResult.reason}` };
         }
-        const editalResult = await extractEditalRules({ text });
-        const parseResult = schemas_js_1.editalSchema.safeParse(editalResult);
-        if (!parseResult.success) {
-            return { success: false, message: "Falha na formatação dos dados estruturados do edital pelo modelo de IA." };
-        }
-        const db = (0, firestore_1.getFirestore)();
-        const editalDocData = {
-            ...parseResult.data,
-            rawText: text.substring(0, 5000), // Save a snippet
-            sourceUrl: url,
-            createdAt: firestore_1.FieldValue.serverTimestamp(),
-        };
-        const docRef = await db.collection('editais').add(editalDocData);
-        return { success: true, editalId: docRef.id, message: "Edital adicionado com sucesso." };
+        await enqueueEditalExtraction(url, text, triageResult.reason, "MANUAL");
+        return { success: true, editalId: "pending", message: "Edital válido. Adicionado à fila de processamento e extração com IA." };
     }
     catch (error) {
         console.error('Error in ingestManualEditalFunction:', error);
@@ -1185,12 +1240,12 @@ exports.extractionWorker = (0, tasks_1.onTaskDispatched)({
     timeoutSeconds: 540
 }, async (request) => {
     const { searchId, link, contentId, reason } = request.data;
-    if (!searchId || !link || !contentId) {
-        console.error("Invalid task payload: missing searchId, link, or contentId.");
+    if (!link || !contentId) {
+        console.error("Invalid task payload: missing link, or contentId.");
         return;
     }
     const db = (0, firestore_1.getFirestore)();
-    const searchRef = db.collection('searches').doc(searchId);
+    const searchRef = searchId && searchId !== "MANUAL" && searchId !== "RSS" ? db.collection('searches').doc(searchId) : null;
     const contentRef = db.collection('scraping_contents').doc(contentId);
     try {
         const contentDoc = await contentRef.get();
@@ -1204,22 +1259,36 @@ exports.extractionWorker = (0, tasks_1.onTaskDispatched)({
         const editalResult = await extractEditalRules({ text });
         const parseResult = schemas_js_1.editalSchema.safeParse(editalResult);
         if (parseResult.success) {
+            let embedding = [];
+            try {
+                const editalData = parseResult.data;
+                const editalText = `Objetivo e Título: ${editalData.title || ''}. Elegibilidade: Atividades permitidas: ${editalData.eligibilityCriteria.allowedActivities?.join(', ') || ''}.`;
+                embedding = await generateTextEmbedding(editalText);
+            }
+            catch (embedError) {
+                console.warn("Failed to generate embedding for new edital:", embedError);
+            }
             const editalDocData = {
                 ...parseResult.data,
                 rawText: text.substring(0, 5000),
                 sourceUrl: link,
+                embedding: embedding.length > 0 ? embedding : null,
                 createdAt: firestore_1.FieldValue.serverTimestamp(),
             };
             await db.collection('editais').add(editalDocData);
-            await searchRef.update({
-                logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Importado', reason: reason }),
-                savedCount: firestore_1.FieldValue.increment(1)
-            });
+            if (searchRef) {
+                await searchRef.update({
+                    logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Importado', reason: reason }),
+                    savedCount: firestore_1.FieldValue.increment(1)
+                });
+            }
         }
         else {
-            await searchRef.update({
-                logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Erro', reason: 'Falha na validação do schema do edital.' })
-            });
+            if (searchRef) {
+                await searchRef.update({
+                    logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Erro', reason: 'Falha na validação do schema do edital.' })
+                });
+            }
         }
         // Cleanup the temporary content document only on success (to allow retries on error)
         try {
@@ -1231,12 +1300,42 @@ exports.extractionWorker = (0, tasks_1.onTaskDispatched)({
     }
     catch (error) {
         console.error(`Error in extractionWorker for link ${link}:`, error);
-        await searchRef.update({
-            logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Erro', reason: error instanceof Error ? error.message : 'Erro desconhecido na extração' })
-        });
+        if (searchRef) {
+            await searchRef.update({
+                logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Erro', reason: error instanceof Error ? error.message : 'Erro desconhecido na extração' })
+            });
+        }
         throw error;
     }
 });
+async function handleScraperFailure(db, targetId, errorMsg) {
+    if (!targetId)
+        return;
+    const targetRef = db.collection('scraping_targets').doc(targetId);
+    await db.runTransaction(async (transaction) => {
+        const doc = await transaction.get(targetRef);
+        if (!doc.exists)
+            return;
+        const currentCount = doc.data()?.failureCount || 0;
+        const newCount = currentCount + 1;
+        const updateData = {
+            failureCount: newCount,
+            lastFailedAt: firestore_1.FieldValue.serverTimestamp(),
+            disabledReason: errorMsg
+        };
+        if (newCount >= 3) {
+            updateData.active = false;
+            logger.error(`Circuit Breaker triggered for target ${targetId}. Disabled due to ${newCount} consecutive failures: ${errorMsg}`);
+        }
+        transaction.update(targetRef, updateData);
+    });
+}
+async function handleScraperSuccess(db, targetId) {
+    if (!targetId)
+        return;
+    const targetRef = db.collection('scraping_targets').doc(targetId);
+    await targetRef.update({ failureCount: 0 });
+}
 exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
     retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
     rateLimits: { maxConcurrentDispatches: 5 },
@@ -1276,6 +1375,7 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                 }
                 else {
                     logger.warn(`API fetch failed for ${target.name}: ${response.statusText}`);
+                    await handleScraperFailure(db, target.id, `API fetch failed: ${response.statusText}`);
                 }
             }
             else if (target.strategy === 'HTML') {
@@ -1310,6 +1410,7 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                 }
                 else {
                     logger.warn(`HTML fetch failed for ${target.name}: ${response.statusText}`);
+                    await handleScraperFailure(db, target.id, `HTML fetch failed: ${response.statusText}`);
                 }
             }
             else if (target.strategy === 'AUTO') {
@@ -1387,12 +1488,17 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                     }
                     else {
                         logger.warn(`AUTO fetch failed for ${target.name}: ${response.statusText}`);
+                        await handleScraperFailure(db, target.id, `AUTO fetch failed: ${response.statusText}`);
                     }
                 }
             }
         }
         catch (error) {
             logger.error(`Error extracting links for target ${target.name}:`, error);
+            await handleScraperFailure(db, target.id, error instanceof Error ? error.message : 'Unknown extraction error');
+        }
+        if (candidateLinks.length > 0) {
+            await handleScraperSuccess(db, target.id);
         }
         const linksToProcess = candidateLinks.slice(0, 10);
         for (let i = 0; i < linksToProcess.length; i++) {
@@ -1416,18 +1522,7 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                 const triageResult = await triageEditalWebpage({ text, searchQuery: query });
                 if (triageResult.isValidEdital) {
                     // Claim Check pattern: Save text to Firestore to avoid 100KB Cloud Tasks payload limit
-                    const tempContentRef = db.collection('scraping_contents').doc();
-                    await tempContentRef.set({
-                        text: text,
-                        createdAt: firestore_1.FieldValue.serverTimestamp()
-                    });
-                    const queue = (0, functions_1.getFunctions)().taskQueue('extractionWorker');
-                    await queue.enqueue({
-                        searchId: searchId,
-                        link: link,
-                        contentId: tempContentRef.id,
-                        reason: triageResult.reason
-                    });
+                    await enqueueEditalExtraction(link, text, triageResult.reason, searchId);
                     await searchRef.update({
                         logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Em Processamento (Extração)', reason: triageResult.reason })
                     });

@@ -313,6 +313,40 @@ export const extractEditalRulesFunction = onCall({
 import { onDocumentCreated, onDocumentUpdated, onDocumentWritten } from 'firebase-functions/v2/firestore';
 
 
+
+function cosineSimilarity(vecA: number[], vecB: number[]): number {
+    if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
+    let dotProduct = 0; let normA = 0; let normB = 0;
+    for (let i = 0; i < vecA.length; i++) {
+        dotProduct += (vecA[i] || 0) * (vecB[i] || 0);
+        normA += (vecA[i] || 0) * (vecA[i] || 0);
+        normB += (vecB[i] || 0) * (vecB[i] || 0);
+    }
+    return (normA === 0 || normB === 0) ? 0 : dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+async function generateTextEmbedding(text: string): Promise<number[]> {
+    try {
+        const response = await ai.embed({
+            embedder: 'vertexai/text-embedding-004',
+            content: text.substring(0, 5000)
+        });
+        if (Array.isArray(response)) {
+            // Genkit 1.0 ai.embed returns an array of objects { embedding: number[] }
+            if (response.length > 0 && (response as any)[0]?.embedding) {
+                return (response as any)[0].embedding;
+            }
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        if (response && (response as any).embedding) return (response as any).embedding as number[];
+
+        throw new Error('Formato de retorno de embedding desconhecido.');
+    } catch(err) {
+        console.error("Error generating embedding:", err);
+        throw err;
+    }
+}
+
 async function processMatchEvaluation(oscId: string, editalId: string, forceRecalculate: boolean = false) {
     const db = getFirestore();
 
@@ -403,12 +437,48 @@ async function processMatchEvaluation(oscId: string, editalId: string, forceReca
     }
 
     console.log(`Evaluating match for OSC ${oscId} and Edital ${editalId}`);
-    const matchResult = await scoreMatch({
-        osc: oscData,
-        edital: editalData,
-        oscId: oscId,
-        editalId: editalId
-    });
+
+    // Vector Pre-filtering
+    let oscEmbedding = rawOscData?.embedding || null;
+    let editalEmbedding = rawEditalData?.embedding || null;
+
+    if (!oscEmbedding) {
+        console.log(`Generating missing embedding for OSC ${oscId}`);
+        const oscText = `Missão: ${oscData.mission || ''}. Foco: ${oscData.coreActivities?.join(', ') || ''}. Nome: ${oscData.name || ''}`;
+        oscEmbedding = await generateTextEmbedding(oscText);
+        await db.collection('oscs').doc(oscId).update({ embedding: oscEmbedding });
+        oscData.embedding = oscEmbedding;
+    }
+
+    if (!editalEmbedding) {
+        console.log(`Generating missing embedding for Edital ${editalId}`);
+        const editalText = `Objetivo e Título: ${editalData.title || ''}. Elegibilidade: Atividades permitidas: ${editalData.eligibilityCriteria.allowedActivities?.join(', ') || ''}.`;
+        editalEmbedding = await generateTextEmbedding(editalText);
+        await db.collection('editais').doc(editalId).update({ embedding: editalEmbedding });
+        editalData.embedding = editalEmbedding;
+    }
+
+    const similarityScore = cosineSimilarity(oscEmbedding, editalEmbedding);
+    console.log(`Vector similarity score for OSC ${oscId} and Edital ${editalId}: ${similarityScore}`);
+
+    let matchResult: any;
+
+    if (similarityScore < 0.60) {
+        console.log(`Skipping LLM evaluation due to low vector similarity: ${similarityScore}`);
+        matchResult = {
+            matchScore: Math.round(similarityScore * 100),
+            reasoning: 'Match descartado na pré-filtragem por similaridade vetorial (Cosine Similarity < 0.60).',
+            eligibility: false
+        };
+    } else {
+        matchResult = await scoreMatch({
+            osc: oscData,
+            edital: editalData,
+            oscId: oscId,
+            editalId: editalId
+        });
+    }
+
 
     const matchRef = existingMatchRef || db.collection('matches').doc();
     const matchDocData = {
@@ -703,6 +773,25 @@ export const onEditalCreated = onDocumentCreated('editais/{editalId}', async (ev
 });
 
 
+
+async function enqueueEditalExtraction(link: string, text: string, reason: string, searchId?: string) {
+    const db = getFirestore();
+    const tempContentRef = db.collection('scraping_contents').doc();
+    await tempContentRef.set({
+        text: text,
+        createdAt: FieldValue.serverTimestamp()
+    });
+
+    const queue = getFunctions().taskQueue('extractionWorker');
+    await queue.enqueue({
+        searchId: searchId || null,
+        link: link,
+        contentId: tempContentRef.id,
+        reason: reason
+    });
+    return tempContentRef.id;
+}
+
 export const triggerMatchOrchestrator = onCall({
     cors: true
 }, async (request) => {
@@ -814,26 +903,11 @@ async function processRssFeeds() {
 
                 if (triageResult.isValidEdital) {
                     try {
-                        const editalResult = await extractEditalRules({ text });
-                        const parseResult = editalSchema.safeParse(editalResult);
-
-                        if (parseResult.success) {
-                            const editalDocData = {
-                                ...parseResult.data,
-                                rawText: text.substring(0, 5000), // Save a snippet
-                                sourceUrl: item.link,
-                                createdAt: FieldValue.serverTimestamp(),
-                            };
-
-                            const editalRef = db.collection('editais').doc();
-                            await editalRef.set(editalDocData);
-                            savedCount++;
-                            console.log(`Successfully saved Edital from ${item.link}`);
-                        } else {
-                            console.warn(`Validation failed for extracted Edital from ${item.link}:`, parseResult.error);
-                        }
+                        await enqueueEditalExtraction(item.link, text, triageResult.reason, "RSS");
+                        console.log(`Successfully enqueued Edital extraction for ${item.link}`);
+                        savedCount++; // Incrementing for now to reflect enqueued count
                     } catch (e) {
-                         console.error(`Error extracting rules for ${item.link}:`, e);
+                         console.error(`Error enqueuing extraction for ${item.link}:`, e);
                     }
                 }
             }
@@ -948,23 +1022,8 @@ export const ingestManualEditalFunction = onCall({
              return { success: false, message: `O conteúdo não parece ser um edital válido. Motivo: ${triageResult.reason}` };
         }
 
-        const editalResult = await extractEditalRules({ text });
-        const parseResult = editalSchema.safeParse(editalResult);
-
-        if (!parseResult.success) {
-            return { success: false, message: "Falha na formatação dos dados estruturados do edital pelo modelo de IA." };
-        }
-
-        const db = getFirestore();
-        const editalDocData = {
-            ...parseResult.data,
-            rawText: text.substring(0, 5000), // Save a snippet
-            sourceUrl: url,
-            createdAt: FieldValue.serverTimestamp(),
-        };
-
-        const docRef = await db.collection('editais').add(editalDocData);
-        return { success: true, editalId: docRef.id, message: "Edital adicionado com sucesso." };
+        await enqueueEditalExtraction(url, text, triageResult.reason, "MANUAL");
+        return { success: true, editalId: "pending", message: "Edital válido. Adicionado à fila de processamento e extração com IA." };
 
     } catch (error: unknown) {
         console.error('Error in ingestManualEditalFunction:', error);
@@ -1365,15 +1424,15 @@ export const extractionWorker = onTaskDispatched({
     rateLimits: { maxConcurrentDispatches: 2 },
     timeoutSeconds: 540
 }, async (request) => {
-    const { searchId, link, contentId, reason } = request.data as { searchId: string, link: string, contentId: string, reason: string };
+    const { searchId, link, contentId, reason } = request.data as { searchId?: string, link: string, contentId: string, reason: string };
 
-    if (!searchId || !link || !contentId) {
-        console.error("Invalid task payload: missing searchId, link, or contentId.");
+    if (!link || !contentId) {
+        console.error("Invalid task payload: missing link, or contentId.");
         return;
     }
 
     const db = getFirestore();
-    const searchRef = db.collection('searches').doc(searchId);
+    const searchRef = searchId && searchId !== "MANUAL" && searchId !== "RSS" ? db.collection('searches').doc(searchId) : null;
     const contentRef = db.collection('scraping_contents').doc(contentId);
 
     try {
@@ -1391,22 +1450,36 @@ export const extractionWorker = onTaskDispatched({
         const parseResult = editalSchema.safeParse(editalResult);
 
         if (parseResult.success) {
+            let embedding: number[] = [];
+            try {
+                const editalData = parseResult.data;
+                const editalText = `Objetivo e Título: ${editalData.title || ''}. Elegibilidade: Atividades permitidas: ${editalData.eligibilityCriteria.allowedActivities?.join(', ') || ''}.`;
+                embedding = await generateTextEmbedding(editalText);
+            } catch (embedError) {
+                console.warn("Failed to generate embedding for new edital:", embedError);
+            }
+
             const editalDocData = {
                 ...parseResult.data,
                 rawText: text.substring(0, 5000),
                 sourceUrl: link,
+                embedding: embedding.length > 0 ? embedding : null,
                 createdAt: FieldValue.serverTimestamp(),
             };
 
             await db.collection('editais').add(editalDocData);
-            await searchRef.update({
-                logs: FieldValue.arrayUnion({ link, status: 'Importado', reason: reason }),
-                savedCount: FieldValue.increment(1)
-            });
+            if (searchRef) {
+                await searchRef.update({
+                    logs: FieldValue.arrayUnion({ link, status: 'Importado', reason: reason }),
+                    savedCount: FieldValue.increment(1)
+                });
+            }
         } else {
-            await searchRef.update({
-                logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: 'Falha na validação do schema do edital.' })
-            });
+            if (searchRef) {
+                await searchRef.update({
+                    logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: 'Falha na validação do schema do edital.' })
+                });
+            }
         }
 
         // Cleanup the temporary content document only on success (to allow retries on error)
@@ -1417,12 +1490,47 @@ export const extractionWorker = onTaskDispatched({
         }
     } catch (error) {
         console.error(`Error in extractionWorker for link ${link}:`, error);
-        await searchRef.update({
-            logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: error instanceof Error ? error.message : 'Erro desconhecido na extração' })
-        });
+        if (searchRef) {
+            await searchRef.update({
+                logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: error instanceof Error ? error.message : 'Erro desconhecido na extração' })
+            });
+        }
         throw error;
     }
 });
+
+
+async function handleScraperFailure(db: FirebaseFirestore.Firestore, targetId: string, errorMsg: string) {
+    if (!targetId) return;
+    const targetRef = db.collection('scraping_targets').doc(targetId);
+
+    await db.runTransaction(async (transaction) => {
+        const doc = await transaction.get(targetRef);
+        if (!doc.exists) return;
+
+        const currentCount = doc.data()?.failureCount || 0;
+        const newCount = currentCount + 1;
+
+        const updateData: any = {
+            failureCount: newCount,
+            lastFailedAt: FieldValue.serverTimestamp(),
+            disabledReason: errorMsg
+        };
+
+        if (newCount >= 3) {
+            updateData.active = false;
+            logger.error(`Circuit Breaker triggered for target ${targetId}. Disabled due to ${newCount} consecutive failures: ${errorMsg}`);
+        }
+
+        transaction.update(targetRef, updateData);
+    });
+}
+
+async function handleScraperSuccess(db: FirebaseFirestore.Firestore, targetId: string) {
+    if (!targetId) return;
+    const targetRef = db.collection('scraping_targets').doc(targetId);
+    await targetRef.update({ failureCount: 0 });
+}
 
 export const processScrapingTargetWorker = onTaskDispatched({
     retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
@@ -1466,6 +1574,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
                     candidateLinks = [...new Set(matches)];
                 } else {
                     logger.warn(`API fetch failed for ${target.name}: ${response.statusText}`);
+                    await handleScraperFailure(db, target.id, `API fetch failed: ${response.statusText}`);
                 }
             } else if (target.strategy === 'HTML') {
                 const controller = new AbortController();
@@ -1499,6 +1608,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
                     candidateLinks = [...new Set(candidateLinks)];
                 } else {
                     logger.warn(`HTML fetch failed for ${target.name}: ${response.statusText}`);
+                    await handleScraperFailure(db, target.id, `HTML fetch failed: ${response.statusText}`);
                 }
             } else if (target.strategy === 'AUTO') {
                 const isRss = target.url.toLowerCase().endsWith('.xml') || target.url.toLowerCase().includes('feed');
@@ -1573,11 +1683,17 @@ export const processScrapingTargetWorker = onTaskDispatched({
                         }
                     } else {
                         logger.warn(`AUTO fetch failed for ${target.name}: ${response.statusText}`);
+                        await handleScraperFailure(db, target.id, `AUTO fetch failed: ${response.statusText}`);
                     }
                 }
             }
         } catch (error) {
             logger.error(`Error extracting links for target ${target.name}:`, error);
+            await handleScraperFailure(db, target.id, error instanceof Error ? error.message : 'Unknown extraction error');
+        }
+
+        if (candidateLinks.length > 0) {
+            await handleScraperSuccess(db, target.id);
         }
 
         const linksToProcess = candidateLinks.slice(0, 10);
@@ -1606,19 +1722,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
 
                 if (triageResult.isValidEdital) {
                     // Claim Check pattern: Save text to Firestore to avoid 100KB Cloud Tasks payload limit
-                    const tempContentRef = db.collection('scraping_contents').doc();
-                    await tempContentRef.set({
-                        text: text,
-                        createdAt: FieldValue.serverTimestamp()
-                    });
-
-                    const queue = getFunctions().taskQueue('extractionWorker');
-                    await queue.enqueue({
-                        searchId: searchId,
-                        link: link,
-                        contentId: tempContentRef.id,
-                        reason: triageResult.reason
-                    });
+                    await enqueueEditalExtraction(link, text, triageResult.reason, searchId);
 
                     await searchRef.update({
                         logs: FieldValue.arrayUnion({ link, status: 'Em Processamento (Extração)', reason: triageResult.reason })

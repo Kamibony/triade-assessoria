@@ -9,6 +9,7 @@ export declare const ngoProfileSchema: z.ZodObject<{
     documentationStatus: z.ZodEnum<["Em dia", "Pendente", "Irregular"]>;
     previousProjectsApproved: z.ZodBoolean;
     coreActivities: z.ZodArray<z.ZodString, "many">;
+    embedding: z.ZodOptional<z.ZodArray<z.ZodNumber, "many">>;
 }, "strip", z.ZodTypeAny, {
     name: string;
     cnpj?: string | undefined;
@@ -19,6 +20,7 @@ export declare const ngoProfileSchema: z.ZodObject<{
     documentationStatus: "Em dia" | "Irregular" | "Pendente";
     previousProjectsApproved: boolean;
     coreActivities: string[];
+    embedding?: number[] | undefined;
 }, {
     name: string;
     cnpj?: string | undefined;
@@ -29,6 +31,7 @@ export declare const ngoProfileSchema: z.ZodObject<{
     documentationStatus: "Em dia" | "Irregular" | "Pendente";
     previousProjectsApproved: boolean;
     coreActivities: string[];
+    embedding?: number[] | undefined;
 }>;
 export declare const editalSchema: z.ZodObject<{
     title: z.ZodString;
@@ -52,6 +55,7 @@ export declare const editalSchema: z.ZodObject<{
         requiredDocumentation: string[];
         allowedActivities: string[];
     }>;
+    embedding: z.ZodOptional<z.ZodArray<z.ZodNumber, "many">>;
 }, "strip", z.ZodTypeAny, {
     title: string;
     issuer: string;
@@ -64,6 +68,7 @@ export declare const editalSchema: z.ZodObject<{
         requiredDocumentation: string[];
         allowedActivities: string[];
     };
+    embedding?: number[] | undefined;
 }, {
     title: string;
     issuer: string;
@@ -76,6 +81,7 @@ export declare const editalSchema: z.ZodObject<{
         requiredDocumentation: string[];
         allowedActivities: string[];
     };
+    embedding?: number[] | undefined;
 }>;
 export declare const matchSchema: z.ZodObject<{
     editalId: z.ZodString;
