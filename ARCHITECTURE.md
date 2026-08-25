@@ -67,3 +67,46 @@ To support the automated multi-agent workflow (Eligibility -> Proposal Builder -
     - *Output:* Generates a final readiness score and actionable feedback report in pt-BR.
 
 This architecture ensures high scalability, leverages existing Google Cloud tooling, and strictly separates the presentation layer from the complex AI orchestration logic.
+
+## 4. The Hybrid Engine: Scaling the Platform
+
+As the platform evolves, we are implementing a **Hybrid Engine** combining two core philosophies for matching NGOs with grants:
+
+### A. Ostreľovač (Agentic OSC-First Search)
+
+The **Ostreľovač** strategy is proactive and precision-driven. It focuses on finding grants tailored to a specific NGO (OSC).
+
+*   **Mechanism:** When a new OSC profile is imported (e.g., via the `ingestOscDataFunction` orchestrator or manual creation) or updated, the `onOscUpdated` Firestore trigger activates.
+*   **Orchestration:** This trigger, or a manual request via `triggerMatchOrchestrator`, enqueues match evaluation tasks using Google Cloud Tasks.
+*   **Evaluation:** The `processMatchEvaluation` function compares the OSC's profile against existing editais in the database, leveraging Genkit (`scoreMatch` flow with `gemini-2.5-flash`) to generate a match score, eligibility status, and reasoning.
+*   **Benefits:** Ensures immediate, highly relevant opportunities are identified for NGOs as soon as they join the platform or update their details, creating a personalized experience.
+
+### B. Široká sieť (Mass Data Lake Ingestion)
+
+The **Široká sieť** strategy focuses on breadth and volume. It aims to continuously ingest and catalog a massive array of public and private funding opportunities.
+
+*   **Mechanism:** A robust scraping pipeline, driven by dynamic configuration in the `scraping_targets` Firestore collection.
+*   **Scrapers:** The `processScrapingTargetWorker` Cloud Function handles concurrent scraping of various sources (RSS, API, HTML, and a hybrid 'AUTO' strategy). It utilizes an asynchronous fan-out pipeline initiated by `autonomousSearchWorker`.
+*   **AI Pre-filtering (Triage):** To ensure data quality, the `triageEditalWebpage` Genkit flow acts as an intelligent pre-filter. It uses `gemini-2.5-flash` to analyze scraped text and determine if it represents a valid, active funding opportunity (including landing pages), preventing the database from being flooded with irrelevant content.
+*   **Extraction:** Valid editais are then processed by the `extractEditalRules` flow to structure the data (eligibility criteria, financial rules) before saving it to Firestore.
+
+### Integration within the Architecture
+
+These two philosophies work synergistically within the existing Firebase/Cloud Run/Genkit ecosystem:
+
+1.  **Event-Driven Synergy:** The "Široká sieť" continuously populates the `editais` collection. When a new edital is created (`onEditalCreated` trigger), it enqueues tasks to evaluate it against all existing OSCs, acting as a reverse "Ostreľovač".
+2.  **Cloud Tasks Decoupling:** Both scraping (`processScrapingTargetWorker`) and match evaluation (`matchEvaluatorWorker`) rely heavily on Cloud Tasks. This decouples the work from synchronous triggers, prevents timeouts, manages rate limits (vital for external APIs and Vertex AI), and ensures scalability.
+3.  **Caching for Efficiency:** The `processMatchEvaluation` function implements a robust caching layer (comparing `updatedAt` timestamps) to avoid redundant AI calls for unchanged data, optimizing costs.
+
+### Proposed Architectural Improvements
+
+While the current implementation is solid, scaling this Hybrid Engine requires some refinements:
+
+1.  **Decouple Genkit Extraction from Scraping:** Currently, `processScrapingTargetWorker` performs scraping, triage, and full extraction synchronously for each link. At high volumes, this can lead to timeouts or Vertex AI quota limits.
+    *   *Proposal:* Split this. The scraping worker should only perform the fetch and triage. Valid raw content should be saved to a staging collection or enqueued to a separate `extractionWorker`. This allows independent scaling and retry mechanisms for the expensive LLM extraction phase.
+2.  **Unified Generic Ingestion API:** The platform relies on various sources (manual URLs, RSS, automatic scraping).
+    *   *Proposal:* Create a unified `ingestEdital` API endpoint/function that accepts raw text, HTML, or URLs. This centralizes the triage, extraction, and validation logic, making it easier to add new data sources (e.g., email forwarding, PDF uploads) without duplicating pipeline logic.
+3.  **Robust Error Handling & Circuit Breakers for Scrapers:** Scraping external sites is inherently fragile.
+    *   *Proposal:* Implement circuit breakers in the `processScrapingTargetWorker`. If a specific target (e.g., an HTML source) fails consecutively (e.g., due to DOM changes), the system should automatically disable the target (`active: false`) and alert an administrator, rather than endlessly retrying and wasting resources.
+4.  **Vector Search for Initial Filtering:** As the database grows, running Genkit evaluations on every Edital-OSC combination becomes cost-prohibitive.
+    *   *Proposal:* Introduce Firebase Extension for Vector Search with Vertex AI. Generate embeddings for OSC profiles and Edital criteria. Before enqueuing a full Genkit match evaluation, perform a fast, cheap vector similarity search to pre-filter candidates, only sending high-probability pairs to the expensive `scoreMatch` flow.
