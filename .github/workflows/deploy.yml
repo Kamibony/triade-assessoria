@@ -29,11 +29,6 @@ jobs:
       - name: Install Dependencies and Build Functions
         run: cd functions && npm ci && npm run build
 
-      - name: Deploy to Firebase (Hosting, Functions, and Storage Rules)
-        run: npx firebase-tools deploy --only hosting,functions,storage --project triade-assessoria --force
-        env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
@@ -43,6 +38,11 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: triade-assessoria
+
+      - name: Deploy to Firebase (Hosting, Functions, and Storage Rules)
+        run: npx firebase-tools deploy --only hosting,functions,storage --project triade-assessoria --force
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
 
       - name: Apply Storage CORS Policy
         run: npm run storage:cors
