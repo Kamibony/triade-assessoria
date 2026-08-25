@@ -20,6 +20,9 @@ import { AutonomousSearchView } from './components/AutonomousSearchView';
 import { ManualIngest } from './components/ManualIngest';
 import { ScrapingTargetsManager } from './components/ScrapingTargetsManager';
 import { ManualOscIngest } from './components/ManualOscIngest';
+import { Login } from './components/Login';
+import { ProtectedRoute } from './components/ProtectedRoute';
+import { AuthProvider } from './contexts/AuthContext';
 
 function Header() {
   const location = useLocation();
@@ -68,25 +71,32 @@ function PublicLayout() {
 
 function App() {
   return (
-    <Router>
-      <Routes>
-        <Route path="/admin" element={<AdminLayout />}>
-          <Route index element={<AdminDashboard />} />
-          <Route path="directory" element={<OscDirectoryView />} />
-          <Route path="import-oscs" element={<OscImporter />} />
-          <Route path="import-osc-manual" element={<ManualOscIngest />} />
-          <Route path="search" element={<AutonomousSearchView />} />
-          <Route path="manual-ingest" element={<ManualIngest />} />
-          <Route path="matches" element={<MatchesDashboard />} />
-          <Route path="editais" element={<EditaisList />} />
-          <Route path="sources" element={<ScrapingTargetsManager />} />
-        </Route>
-        <Route path="/" element={<PublicLayout />}>
-          <Route index element={<LandingPage />} />
-          <Route path="match/:editalId" element={<NgoMatchView />} />
-        </Route>
-      </Routes>
-    </Router>
+    <AuthProvider>
+      <Router>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+
+          <Route element={<ProtectedRoute />}>
+            <Route path="/admin" element={<AdminLayout />}>
+              <Route index element={<AdminDashboard />} />
+              <Route path="directory" element={<OscDirectoryView />} />
+              <Route path="import-oscs" element={<OscImporter />} />
+              <Route path="import-osc-manual" element={<ManualOscIngest />} />
+              <Route path="search" element={<AutonomousSearchView />} />
+              <Route path="manual-ingest" element={<ManualIngest />} />
+              <Route path="matches" element={<MatchesDashboard />} />
+              <Route path="editais" element={<EditaisList />} />
+              <Route path="sources" element={<ScrapingTargetsManager />} />
+            </Route>
+          </Route>
+
+          <Route path="/" element={<PublicLayout />}>
+            <Route index element={<LandingPage />} />
+            <Route path="match/:editalId" element={<NgoMatchView />} />
+          </Route>
+        </Routes>
+      </Router>
+    </AuthProvider>
   );
 }
 
