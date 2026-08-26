@@ -37,6 +37,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.onSearchCreated = exports.processScrapingTargetWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = void 0;
+process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const playwright_extra_1 = require("playwright-extra");
 const puppeteer_extra_plugin_stealth_1 = __importDefault(require("puppeteer-extra-plugin-stealth"));
@@ -44,6 +45,7 @@ const firestore_1 = require("firebase-admin/firestore");
 const storage_1 = require("firebase-admin/storage");
 const functions_1 = require("firebase-admin/functions");
 const admin = __importStar(require("firebase-admin"));
+const params_1 = require("firebase-functions/params");
 const genkit_1 = require("genkit");
 const zod_1 = require("zod");
 const google_genai_1 = require("@genkit-ai/google-genai");
@@ -53,6 +55,8 @@ const logger = __importStar(require("firebase-functions/logger"));
 const schemas_js_1 = require("./shared/schemas.js");
 const cheerio = __importStar(require("cheerio"));
 const rss_parser_1 = __importDefault(require("rss-parser"));
+const googleApiKeyString = (0, params_1.defineString)('GOOGLE_SEARCH_API_KEY');
+const searchEngineIdString = (0, params_1.defineString)('GOOGLE_SEARCH_ENGINE_ID');
 function removeAccents(str) {
     return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
@@ -538,8 +542,8 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         const searchedLinks = new Set();
         for (const query of queries) {
             try {
-                const googleApiKey = process.env.GOOGLE_SEARCH_API_KEY;
-                const searchEngineId = process.env.GOOGLE_SEARCH_ENGINE_ID;
+                const googleApiKey = googleApiKeyString.value();
+                const searchEngineId = searchEngineIdString.value();
                 if (!googleApiKey || !searchEngineId) {
                     throw new Error("GOOGLE_SEARCH_API_KEY or GOOGLE_SEARCH_ENGINE_ID environment variable is not set.");
                 }

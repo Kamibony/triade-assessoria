@@ -1,3 +1,4 @@
+process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { chromium } from 'playwright-extra';
 import stealth from 'puppeteer-extra-plugin-stealth';
@@ -5,6 +6,7 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { getFunctions } from 'firebase-admin/functions';
 import * as admin from 'firebase-admin';
+import { defineString } from 'firebase-functions/params';
 import { genkit } from 'genkit';
 import { z } from 'zod';
 import { vertexAI } from '@genkit-ai/google-genai';
@@ -14,6 +16,9 @@ import * as logger from 'firebase-functions/logger';
 import { ngoProfileSchema, editalSchema, matchSchema, triageSchema, copilotResponseSchema } from './shared/schemas.js';
 import * as cheerio from 'cheerio';
 import Parser from 'rss-parser';
+
+const googleApiKeyString = defineString('GOOGLE_SEARCH_API_KEY');
+const searchEngineIdString = defineString('GOOGLE_SEARCH_ENGINE_ID');
 
 function removeAccents(str: string): string {
     return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -580,8 +585,8 @@ export const agenticSearchWorker = onTaskDispatched({
 
         for (const query of queries) {
             try {
-                const googleApiKey = process.env.GOOGLE_SEARCH_API_KEY;
-                const searchEngineId = process.env.GOOGLE_SEARCH_ENGINE_ID;
+                const googleApiKey = googleApiKeyString.value();
+                const searchEngineId = searchEngineIdString.value();
                 if (!googleApiKey || !searchEngineId) {
                     throw new Error("GOOGLE_SEARCH_API_KEY or GOOGLE_SEARCH_ENGINE_ID environment variable is not set.");
                 }
