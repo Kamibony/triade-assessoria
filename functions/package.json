@@ -4,7 +4,7 @@
   "description": "",
   "main": "lib/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "npx playwright install chromium --with-deps && tsc",
     "start": "npm run build && firebase emulators:start --only functions",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -26,6 +26,9 @@
     "genkit": "^1.41.0",
     "google-sr": "^6.0.0",
     "node-fetch": "^3.3.2",
+    "playwright-core": "^1.62.1",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "rss-parser": "^3.13.0",
     "zod": "^3.25.76",
     "zx": "^8.8.5"
