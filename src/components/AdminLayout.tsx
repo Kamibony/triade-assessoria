@@ -1,37 +1,31 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Database, Search, ArrowLeft, FileText, CheckSquare } from 'lucide-react';
+import { LayoutDashboard, Database, ArrowLeft, FileText, CheckSquare } from 'lucide-react';
 
 export function AdminLayout() {
   const location = useLocation();
 
   const navGroups = [
     {
-      title: 'VISÃO GERAL',
+      title: 'VISÃO GERAL & MONITORAMENTO',
       items: [
         { name: 'Dashboard', path: '/admin', icon: LayoutDashboard },
+        { name: 'Matriz de Matches Global', path: '/admin/matches', icon: CheckSquare },
+        { name: 'Diretório de Editais', path: '/admin/editais', icon: FileText },
       ],
     },
     {
       title: 'REDE DE OSCS',
       items: [
         { name: 'Diretório de OSCs', path: '/admin/directory', icon: Database },
-        { name: 'Importar OSCs', path: '/admin/import-oscs', icon: Database },
         { name: 'Onboarding VIP', path: '/admin/import-osc-manual', icon: CheckSquare },
+        { name: 'Importação em Massa', path: '/admin/import-oscs', icon: Database },
       ],
     },
     {
-      title: 'ECOSSISTEMA DE EDITAIS',
+      title: 'ECOSSISTEMA DE DADOS',
       items: [
-        { name: 'Diretório de Editais', path: '/admin/editais', icon: FileText },
-        { name: 'Busca Autônoma', path: '/admin/search', icon: Search },
-        { name: 'Ingestão Manual', path: '/admin/manual-ingest', icon: Database },
         { name: 'Fontes de Dados', path: '/admin/sources', icon: Database },
-      ],
-    },
-    {
-      title: 'INTELIGÊNCIA',
-      items: [
-        { name: 'Master Matches', path: '/admin/matches', icon: CheckSquare },
+        { name: 'Ingestão Manual', path: '/admin/manual-ingest', icon: Database },
       ],
     },
   ];

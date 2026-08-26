@@ -29,6 +29,7 @@ export function ManualIngest() {
           type: 'success',
           message: t('admin.manualIngest.success', { id: data.editalId })
         });
+        // Note: Intentionally NOT clearing setManualUrl('') to fix the UX form clearing bug
       } else {
         setManualIngestResult({
           type: 'error',

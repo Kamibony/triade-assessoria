@@ -16,7 +16,7 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { AdminLayout } from './components/AdminLayout';
 import { OscDirectoryView } from './components/OscDirectoryView';
 import { OscImporter } from './components/OscImporter';
-import { AutonomousSearchView } from './components/AutonomousSearchView';
+import { OscProfileView } from './components/OscProfileView';
 import { ManualIngest } from './components/ManualIngest';
 import { ScrapingTargetsManager } from './components/ScrapingTargetsManager';
 import { ManualOscIngest } from './components/ManualOscIngest';
@@ -82,7 +82,7 @@ function App() {
               <Route path="directory" element={<OscDirectoryView />} />
               <Route path="import-oscs" element={<OscImporter />} />
               <Route path="import-osc-manual" element={<ManualOscIngest />} />
-              <Route path="search" element={<AutonomousSearchView />} />
+              <Route path="directory/:oscId" element={<OscProfileView />} />
               <Route path="manual-ingest" element={<ManualIngest />} />
               <Route path="matches" element={<MatchesDashboard />} />
               <Route path="editais" element={<EditaisList />} />

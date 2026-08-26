@@ -62,7 +62,7 @@ export function ManualOscIngest() {
           profile: data.profile,
           oscId: data.oscId
         });
-        setFiles([]);
+        // Form Clearing Bug Fix: Do not clear files automatically
       } else {
         setResult({
           type: 'error',

@@ -95,10 +95,19 @@ export declare const scheduledMatchSweeper: import("firebase-functions/v2/schedu
 export declare const onMatchGenerated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").Change<import("firebase-functions/v2/firestore").DocumentSnapshot> | undefined, {
     matchId: string;
 }>>;
+export declare const triggerAgenticSearch: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+    message: string;
+}>, unknown>;
 export declare const autonomousSearchWorker: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
     searchId: string;
     message: string;
+}>, unknown>;
+export declare const triggerScrapingWorker: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+    message: string;
+    searchId: string;
 }>, unknown>;
 export declare const seedScrapingTargets: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
