@@ -538,23 +538,18 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         const searchedLinks = new Set();
         for (const query of queries) {
             try {
-                const serpApiKey = process.env.SERP_API_KEY;
-                if (!serpApiKey) {
-                    throw new Error("SERP_API_KEY environment variable is not set.");
+                const googleApiKey = process.env.GOOGLE_SEARCH_API_KEY;
+                const searchEngineId = process.env.GOOGLE_SEARCH_ENGINE_ID;
+                if (!googleApiKey || !searchEngineId) {
+                    throw new Error("GOOGLE_SEARCH_API_KEY or GOOGLE_SEARCH_ENGINE_ID environment variable is not set.");
                 }
-                const serpResponse = await fetch('https://google.serper.dev/search', {
-                    method: 'POST',
-                    headers: {
-                        'X-API-KEY': serpApiKey,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ q: query })
-                });
-                if (!serpResponse.ok) {
-                    throw new Error(`SERP API request failed with status: ${serpResponse.status}`);
+                const url = `https://www.googleapis.com/customsearch/v1?q=${encodeURIComponent(query)}&key=${googleApiKey}&cx=${searchEngineId}`;
+                const searchResponse = await fetch(url);
+                if (!searchResponse.ok) {
+                    throw new Error(`Google Custom Search API request failed with status: ${searchResponse.status}`);
                 }
-                const serpData = await serpResponse.json();
-                const searchResults = serpData.organic || serpData.organic_results || [];
+                const googleData = await searchResponse.json();
+                const searchResults = googleData.items || [];
                 let processedResults = 0;
                 for (const r of searchResults) {
                     if (processedResults >= 3)
