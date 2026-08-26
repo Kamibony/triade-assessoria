@@ -300,7 +300,6 @@ exports.extractEditalRulesFunction = (0, https_1.onCall)({
     return await extractEditalRules(request.data);
 });
 const firestore_2 = require("firebase-functions/v2/firestore");
-const google_sr_1 = require("google-sr");
 const generateSearchQueries = ai.defineFlow({
     name: 'generateSearchQueries',
     inputSchema: zod_1.z.object({
@@ -537,34 +536,48 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         const searchedLinks = new Set();
         for (const query of queries) {
             try {
-                const searchResults = await (0, google_sr_1.search)({ query });
+                const serpApiKey = process.env.SERP_API_KEY;
+                if (!serpApiKey) {
+                    throw new Error("SERP_API_KEY environment variable is not set.");
+                }
+                const serpResponse = await fetch('https://google.serper.dev/search', {
+                    method: 'POST',
+                    headers: {
+                        'X-API-KEY': serpApiKey,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ q: query })
+                });
+                if (!serpResponse.ok) {
+                    throw new Error(`SERP API request failed with status: ${serpResponse.status}`);
+                }
+                const serpData = await serpResponse.json();
+                const searchResults = serpData.organic || serpData.organic_results || [];
                 let processedResults = 0;
                 for (const r of searchResults) {
                     if (processedResults >= 3)
                         break;
-                    if (r.type === google_sr_1.ResultTypes.OrganicResult) {
-                        const node = r;
-                        if (!node.link || searchedLinks.has(node.link))
-                            continue;
-                        searchedLinks.add(node.link);
-                        const existingRef = await db.collection('editais').where('sourceUrl', '==', node.link).limit(1).get();
-                        if (!existingRef.empty)
-                            continue;
-                        const text = await fetchAndExtractText(node.link);
-                        if (!text || text.length < 500)
-                            continue;
-                        const textEmbedding = await generateTextEmbedding(text.substring(0, 5000));
-                        const similarityScore = cosineSimilarity(oscEmbedding, textEmbedding);
-                        console.log(`Vector similarity for ${node.link} is ${similarityScore}`);
-                        if (similarityScore > 0.60) {
-                            const triageResult = await triageEditalWebpage({ text, searchQuery: query });
-                            if (triageResult.isValidEdital) {
-                                await enqueueEditalExtraction(node.link, text, triageResult.reason, "AGENTIC_SEARCH");
-                                console.log(`Successfully enqueued agentic extraction for ${node.link}`);
-                            }
+                    const link = r.link;
+                    if (!link || searchedLinks.has(link))
+                        continue;
+                    searchedLinks.add(link);
+                    const existingRef = await db.collection('editais').where('sourceUrl', '==', link).limit(1).get();
+                    if (!existingRef.empty)
+                        continue;
+                    const text = await fetchAndExtractText(link);
+                    if (!text || text.length < 500)
+                        continue;
+                    const textEmbedding = await generateTextEmbedding(text.substring(0, 5000));
+                    const similarityScore = cosineSimilarity(oscEmbedding, textEmbedding);
+                    console.log(`Vector similarity for ${link} is ${similarityScore}`);
+                    if (similarityScore > 0.60) {
+                        const triageResult = await triageEditalWebpage({ text, searchQuery: query });
+                        if (triageResult.isValidEdital) {
+                            await enqueueEditalExtraction(link, text, triageResult.reason, "AGENTIC_SEARCH");
+                            console.log(`Successfully enqueued agentic extraction for ${link}`);
                         }
-                        processedResults++;
                     }
+                    processedResults++;
                 }
             }
             catch (err) {

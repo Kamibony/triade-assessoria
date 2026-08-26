@@ -311,7 +311,7 @@ export const extractEditalRulesFunction = onCall({
 
 
 import { onDocumentCreated, onDocumentUpdated, onDocumentWritten } from 'firebase-functions/v2/firestore';
-import { search as googleSearch, ResultTypes, OrganicResultNode } from 'google-sr';
+
 
 
 const generateSearchQueries = ai.defineFlow(
@@ -578,37 +578,54 @@ export const agenticSearchWorker = onTaskDispatched({
 
         for (const query of queries) {
             try {
-                const searchResults = await googleSearch({ query });
+                const serpApiKey = process.env.SERP_API_KEY;
+                if (!serpApiKey) {
+                    throw new Error("SERP_API_KEY environment variable is not set.");
+                }
+
+                const serpResponse = await fetch('https://google.serper.dev/search', {
+                    method: 'POST',
+                    headers: {
+                        'X-API-KEY': serpApiKey,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ q: query })
+                });
+
+                if (!serpResponse.ok) {
+                    throw new Error(`SERP API request failed with status: ${serpResponse.status}`);
+                }
+
+                const serpData = await serpResponse.json() as any;
+                const searchResults = serpData.organic || serpData.organic_results || [];
 
                 let processedResults = 0;
                 for (const r of searchResults) {
                     if (processedResults >= 3) break;
 
-                    if (r.type === ResultTypes.OrganicResult) {
-                        const node = r as OrganicResultNode;
-                        if (!node.link || searchedLinks.has(node.link)) continue;
-                        searchedLinks.add(node.link);
+                    const link = r.link;
+                    if (!link || searchedLinks.has(link)) continue;
+                    searchedLinks.add(link);
 
-                        const existingRef = await db.collection('editais').where('sourceUrl', '==', node.link).limit(1).get();
-                        if (!existingRef.empty) continue;
+                    const existingRef = await db.collection('editais').where('sourceUrl', '==', link).limit(1).get();
+                    if (!existingRef.empty) continue;
 
-                        const text = await fetchAndExtractText(node.link);
-                        if (!text || text.length < 500) continue;
+                    const text = await fetchAndExtractText(link);
+                    if (!text || text.length < 500) continue;
 
-                        const textEmbedding = await generateTextEmbedding(text.substring(0, 5000));
-                        const similarityScore = cosineSimilarity(oscEmbedding, textEmbedding);
-                        console.log(`Vector similarity for ${node.link} is ${similarityScore}`);
+                    const textEmbedding = await generateTextEmbedding(text.substring(0, 5000));
+                    const similarityScore = cosineSimilarity(oscEmbedding, textEmbedding);
+                    console.log(`Vector similarity for ${link} is ${similarityScore}`);
 
-                        if (similarityScore > 0.60) {
-                            const triageResult = await triageEditalWebpage({ text, searchQuery: query });
-                            if (triageResult.isValidEdital) {
-                                await enqueueEditalExtraction(node.link, text, triageResult.reason, "AGENTIC_SEARCH");
-                                console.log(`Successfully enqueued agentic extraction for ${node.link}`);
-                            }
+                    if (similarityScore > 0.60) {
+                        const triageResult = await triageEditalWebpage({ text, searchQuery: query });
+                        if (triageResult.isValidEdital) {
+                            await enqueueEditalExtraction(link, text, triageResult.reason, "AGENTIC_SEARCH");
+                            console.log(`Successfully enqueued agentic extraction for ${link}`);
                         }
-
-                        processedResults++;
                     }
+
+                    processedResults++;
                 }
             } catch (err) {
                 console.error(`Error searching for query ${query}:`, err);
