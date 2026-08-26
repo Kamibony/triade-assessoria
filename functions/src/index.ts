@@ -1681,7 +1681,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
     timeoutSeconds: 540
 }, async (request) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { searchId, target, query } = request.data as { searchId: string, target: any, query?: string };
+    const { searchId, target, query, page = 1, linksQueue = [] } = request.data as { searchId: string, target: any, query?: string, page?: number, linksQueue?: string[] };
 
     if (!searchId || !target) {
         console.error("Invalid task payload: missing searchId or target.");
@@ -1693,82 +1693,41 @@ export const processScrapingTargetWorker = onTaskDispatched({
 
     try {
         let totalProcessed = 0;
-        let candidateLinks: string[] = [];
+        let candidateLinks: string[] = linksQueue;
+        let isNewFetch = false;
 
-        try {
-            if (target.strategy === 'RSS') {
-                const parser = new Parser();
-                const feed = await parser.parseURL(target.url);
-                candidateLinks = feed.items.map(item => item.link).filter(link => !!link) as string[];
-            } else if (target.strategy === 'API') {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 15000);
-                const response = await fetch(target.url, {
-                    signal: controller.signal,
-                    headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' }
-                });
-                clearTimeout(timeoutId);
+        if (candidateLinks.length === 0) {
+            isNewFetch = true;
+            try {
+                const fetchUrl = target.strategy === 'RSS' || page === 1 ? target.url : (target.url.includes('?') ? `${target.url}&page=${page}` : `${target.url}?page=${page}`);
 
-                if (response.ok) {
-                    const data = await response.json();
-                    const jsonString = JSON.stringify(data);
-                    const urlRegex = /(https?:\/\/[^\s"',]+)/g;
-                    const matches = jsonString.match(urlRegex) || [];
-                    candidateLinks = [...new Set(matches)];
-                } else {
-                    logger.warn(`API fetch failed for ${target.name}: ${response.statusText}`);
-                    await handleScraperFailure(db, target.id, `API fetch failed: ${response.statusText}`);
-                }
-            } else if (target.strategy === 'HTML') {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 15000);
-                const response = await fetch(target.url, {
-                    signal: controller.signal,
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0',
-                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-                    }
-                });
-                clearTimeout(timeoutId);
-
-                if (response.ok) {
-                    const html = await response.text();
-                    const $ = cheerio.load(html);
-                    const selector = target.cssSelector || 'a';
-
-                    $(selector).each((_, el) => {
-                        let href = $(el).attr('href');
-                        if (href) {
-                            try {
-                                href = new URL(href, target.url).href;
-                                candidateLinks.push(href);
-                            } catch {
-                                // Ignore
-                            }
-                        }
-                    });
-                    candidateLinks = [...new Set(candidateLinks)];
-                } else {
-                    logger.warn(`HTML fetch failed for ${target.name}: ${response.statusText}`);
-                    await handleScraperFailure(db, target.id, `HTML fetch failed: ${response.statusText}`);
-                }
-            } else if (target.strategy === 'AUTO') {
-                const isRss = target.url.toLowerCase().endsWith('.xml') || target.url.toLowerCase().includes('feed');
-                if (isRss) {
-                    try {
-                        const parser = new Parser();
-                        const feed = await parser.parseURL(target.url);
-                        candidateLinks = feed.items.map(item => item.link).filter(link => !!link) as string[];
-                    } catch {
-                        logger.warn(`Direct RSS parsing failed for ${target.url}`);
-                    }
-                }
-
-                if (candidateLinks.length === 0) {
+                if (target.strategy === 'RSS') {
+                    const parser = new Parser();
+                    const feed = await parser.parseURL(fetchUrl);
+                    candidateLinks = feed.items.map(item => item.link).filter(link => !!link) as string[];
+                } else if (target.strategy === 'API') {
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 15000);
-                    const response = await fetch(target.url, {
+                    const response = await fetch(fetchUrl, {
+                        signal: controller.signal,
+                        headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' }
+                    });
+                    clearTimeout(timeoutId);
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        const jsonString = JSON.stringify(data);
+                        const urlRegex = /(https?:\/\/[^\s"',]+)/g;
+                        const matches = jsonString.match(urlRegex) || [];
+                        candidateLinks = [...new Set(matches)];
+                    } else {
+                        logger.warn(`API fetch failed for ${target.name}: ${response.statusText}`);
+                        await handleScraperFailure(db, target.id, `API fetch failed: ${response.statusText}`);
+                    }
+                } else if (target.strategy === 'HTML') {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 15000);
+                    const response = await fetch(fetchUrl, {
                         signal: controller.signal,
                         headers: {
                             'User-Agent': 'Mozilla/5.0',
@@ -1779,67 +1738,115 @@ export const processScrapingTargetWorker = onTaskDispatched({
                     clearTimeout(timeoutId);
 
                     if (response.ok) {
-                        const contentType = response.headers.get('content-type') || '';
                         const html = await response.text();
+                        const $ = cheerio.load(html);
+                        const selector = target.cssSelector || 'a';
 
-                        if (contentType.includes('xml') || contentType.includes('rss')) {
-                            try {
-                                const parser = new Parser();
-                                const feed = await parser.parseString(html);
-                                candidateLinks = feed.items.map(item => item.link).filter(link => !!link) as string[];
-                            } catch {
-                                logger.warn(`Failed to parse XML response as RSS for ${target.url}`);
-                            }
-                        } else {
-                            const $ = cheerio.load(html);
-                            const rssLink = $('link[type="application/rss+xml"]').attr('href');
-                            if (rssLink) {
+                        $(selector).each((_, el) => {
+                            let href = $(el).attr('href');
+                            if (href) {
                                 try {
-                                    const absoluteRssUrl = new URL(rssLink, target.url).href;
-                                    const parser = new Parser();
-                                    const feed = await parser.parseURL(absoluteRssUrl);
-                                    candidateLinks = feed.items.map(item => item.link).filter(link => !!link) as string[];
+                                    href = new URL(href, fetchUrl).href;
+                                    candidateLinks.push(href);
                                 } catch {
-                                    logger.warn(`Failed to parse discovered RSS feed`);
+                                    // Ignore
                                 }
                             }
-
-                            if (candidateLinks.length === 0) {
-                                let rawLinks: string[] = [];
-                                $('a').each((_, el) => {
-                                    let href = $(el).attr('href');
-                                    if (href) {
-                                        try {
-                                            href = new URL(href, target.url).href;
-                                            rawLinks.push(href);
-                                        } catch {
-                                            // Ignore
-                                        }
-                                    }
-                                });
-                                rawLinks = [...new Set(rawLinks)];
-                                const excludePatterns = [/sobre/i, /contato/i, /\.jpg$/i, /\.png$/i, /facebook\.com/i, /instagram\.com/i, /twitter\.com/i, /mailto:/i, /login/i, /entrar/i];
-                                const preFiltered = rawLinks.filter(link => !excludePatterns.some(pattern => pattern.test(link)));
-                                const selectionResult = await selectEditalLinksFlow({ links: preFiltered });
-                                candidateLinks = selectionResult.selectedLinks;
-                            }
-                        }
+                        });
+                        candidateLinks = [...new Set(candidateLinks)];
                     } else {
-                        logger.warn(`AUTO fetch failed for ${target.name}: ${response.statusText}`);
-                        await handleScraperFailure(db, target.id, `AUTO fetch failed: ${response.statusText}`);
+                        logger.warn(`HTML fetch failed for ${target.name}: ${response.statusText}`);
+                        await handleScraperFailure(db, target.id, `HTML fetch failed: ${response.statusText}`);
+                    }
+                } else if (target.strategy === 'AUTO') {
+                    const isRss = fetchUrl.toLowerCase().endsWith('.xml') || fetchUrl.toLowerCase().includes('feed');
+                    if (isRss) {
+                        try {
+                            const parser = new Parser();
+                            const feed = await parser.parseURL(fetchUrl);
+                            candidateLinks = feed.items.map(item => item.link).filter(link => !!link) as string[];
+                        } catch {
+                            logger.warn(`Direct RSS parsing failed for ${fetchUrl}`);
+                        }
+                    }
+
+                    if (candidateLinks.length === 0) {
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), 15000);
+                        const response = await fetch(fetchUrl, {
+                            signal: controller.signal,
+                            headers: {
+                                'User-Agent': 'Mozilla/5.0',
+                                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                                'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+                            }
+                        });
+                        clearTimeout(timeoutId);
+
+                        if (response.ok) {
+                            const contentType = response.headers.get('content-type') || '';
+                            const html = await response.text();
+
+                            if (contentType.includes('xml') || contentType.includes('rss')) {
+                                try {
+                                    const parser = new Parser();
+                                    const feed = await parser.parseString(html);
+                                    candidateLinks = feed.items.map(item => item.link).filter(link => !!link) as string[];
+                                } catch {
+                                    logger.warn(`Failed to parse XML response as RSS for ${fetchUrl}`);
+                                }
+                            } else {
+                                const $ = cheerio.load(html);
+                                const rssLink = $('link[type="application/rss+xml"]').attr('href');
+                                if (rssLink) {
+                                    try {
+                                        const absoluteRssUrl = new URL(rssLink, fetchUrl).href;
+                                        const parser = new Parser();
+                                        const feed = await parser.parseURL(absoluteRssUrl);
+                                        candidateLinks = feed.items.map(item => item.link).filter(link => !!link) as string[];
+                                    } catch {
+                                        logger.warn(`Failed to parse discovered RSS feed`);
+                                    }
+                                }
+
+                                if (candidateLinks.length === 0) {
+                                    let rawLinks: string[] = [];
+                                    $('a').each((_, el) => {
+                                        let href = $(el).attr('href');
+                                        if (href) {
+                                            try {
+                                                href = new URL(href, fetchUrl).href;
+                                                rawLinks.push(href);
+                                            } catch {
+                                                // Ignore
+                                            }
+                                        }
+                                    });
+                                    rawLinks = [...new Set(rawLinks)];
+                                    const excludePatterns = [/sobre/i, /contato/i, /\.jpg$/i, /\.png$/i, /facebook\.com/i, /instagram\.com/i, /twitter\.com/i, /mailto:/i, /login/i, /entrar/i];
+                                    const preFiltered = rawLinks.filter(link => !excludePatterns.some(pattern => pattern.test(link)));
+                                    const selectionResult = await selectEditalLinksFlow({ links: preFiltered });
+                                    candidateLinks = selectionResult.selectedLinks;
+                                }
+                            }
+                        } else {
+                            logger.warn(`AUTO fetch failed for ${target.name}: ${response.statusText}`);
+                            await handleScraperFailure(db, target.id, `AUTO fetch failed: ${response.statusText}`);
+                        }
                     }
                 }
+            } catch (error) {
+                logger.error(`Error extracting links for target ${target.name}:`, error);
+                await handleScraperFailure(db, target.id, error instanceof Error ? error.message : 'Unknown extraction error');
             }
-        } catch (error) {
-            logger.error(`Error extracting links for target ${target.name}:`, error);
-            await handleScraperFailure(db, target.id, error instanceof Error ? error.message : 'Unknown extraction error');
-        }
 
-        if (candidateLinks.length > 0) {
-            await handleScraperSuccess(db, target.id);
-        }
+            if (candidateLinks.length > 0) {
+                await handleScraperSuccess(db, target.id);
+            }
+        } // end if isNewFetch
 
         const linksToProcess = candidateLinks.slice(0, 10);
+        const remainingLinks = candidateLinks.slice(10);
 
         for (let i = 0; i < linksToProcess.length; i++) {
             const link = linksToProcess[i];
@@ -1864,9 +1871,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
                 const triageResult = await triageEditalWebpage({ text, searchQuery: query });
 
                 if (triageResult.isValidEdital) {
-                    // Claim Check pattern: Save text to Firestore to avoid 100KB Cloud Tasks payload limit
                     await enqueueEditalExtraction(link, text, triageResult.reason, searchId);
-
                     await searchRef.update({
                         logs: FieldValue.arrayUnion({ link, status: 'Em Processamento (Extração)', reason: triageResult.reason })
                     });
@@ -1881,15 +1886,41 @@ export const processScrapingTargetWorker = onTaskDispatched({
                     logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: error instanceof Error ? error.message : 'Erro desconhecido' })
                 });
             }
-
             totalProcessed++;
         }
 
-        await searchRef.update({
-            processedCount: FieldValue.increment(totalProcessed),
-            // savedCount is now incremented in extractionWorker
-            completedTargets: FieldValue.increment(1)
-        });
+        const queue = getFunctions().taskQueue('processScrapingTargetWorker');
+
+        if (remainingLinks.length > 0) {
+            // Still have links from the current page to process
+            await queue.enqueue({
+                searchId,
+                target,
+                query,
+                page,
+                linksQueue: remainingLinks
+            });
+        } else if (candidateLinks.length > 0 && target.strategy !== 'RSS' && page < 100) {
+            // Finished current page's links, fetch next page
+            await queue.enqueue({
+                searchId,
+                target,
+                query,
+                page: page + 1,
+                linksQueue: []
+            });
+        } else if (remainingLinks.length === 0) {
+            // No more links to process, and no next page to fetch (either RSS, reached end, or max pages)
+            await searchRef.update({
+                completedTargets: FieldValue.increment(1)
+            });
+        }
+
+        if (totalProcessed > 0) {
+            await searchRef.update({
+                processedCount: FieldValue.increment(totalProcessed)
+            });
+        }
 
     } catch (error) {
         console.error('Error during autonomous search target worker:', error);
