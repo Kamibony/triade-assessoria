@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../lib/firebase';
 import { Button } from './ui/Button';
-import { Database, Plus, Trash2, Edit2, Check, X, Link as LinkIcon } from 'lucide-react';
+import { Plus, Trash2, Edit2, Check, X, Database, Link as LinkIcon, RefreshCw } from 'lucide-react';
 
 interface ScrapingTarget {
   id: string;
@@ -27,6 +29,7 @@ export function ScrapingTargetsManager() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
+  const [syncingIds, setSyncingIds] = useState<Set<string>>(new Set());
   const [url, setUrl] = useState('');
   const [strategy, setStrategy] = useState<'RSS' | 'API' | 'HTML' | 'AUTO'>('AUTO');
   const [cssSelector, setCssSelector] = useState('');
@@ -86,6 +89,27 @@ export function ScrapingTargetsManager() {
     }
   };
 
+  const handleSync = async (targetId: string) => {
+    setSyncingIds(prev => new Set(prev).add(targetId));
+    try {
+      const triggerScrapingWorker = httpsCallable(functions, 'triggerScrapingWorker');
+      const result = await triggerScrapingWorker({ targetId });
+      const data = result.data as { success: boolean; message: string; searchId?: string };
+      if (data.success) {
+        alert(data.message || 'Sincronização iniciada.');
+      }
+    } catch (error) {
+      console.error("Erro ao sincronizar fonte:", error);
+      alert('Falha ao iniciar sincronização.');
+    } finally {
+      setSyncingIds(prev => {
+        const next = new Set(prev);
+        next.delete(targetId);
+        return next;
+      });
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -112,7 +136,9 @@ export function ScrapingTargetsManager() {
         targetData.active = true;
         await addDoc(collection(db, 'scraping_targets'), targetData);
       }
-      resetForm();
+      // Form Clearing Bug Fix: Do not reset form automatically after submit
+      // resetForm();
+      alert("Fonte salva com sucesso!");
     } catch (error) {
       console.error("Error saving target:", error);
       alert("Erro ao salvar a fonte.");
@@ -262,6 +288,10 @@ export function ScrapingTargetsManager() {
                       </div>
                     </td>
                     <td className="px-6 py-4 text-right space-x-2">
+                      <Button variant="outline" size="sm" onClick={() => handleSync(target.id)} disabled={syncingIds.has(target.id)} className="mr-2">
+                        <RefreshCw className={`w-4 h-4 mr-1 ${syncingIds.has(target.id) ? 'animate-spin' : ''}`} />
+                        Sync Now
+                      </Button>
                       <Button variant="outline" size="icon" onClick={() => handleEdit(target)}>
                         <Edit2 className="w-4 h-4" />
                       </Button>

@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onSearchCreated = exports.processScrapingTargetWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.autonomousSearchWorker = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = void 0;
+exports.onSearchCreated = exports.processScrapingTargetWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = void 0;
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-admin/firestore");
 const storage_1 = require("firebase-admin/storage");
@@ -1227,6 +1227,26 @@ exports.onMatchGenerated = (0, firestore_2.onDocumentWritten)('matches/{matchId}
         }
     }
 });
+exports.triggerAgenticSearch = (0, https_1.onCall)({
+    cors: true,
+    timeoutSeconds: 300,
+}, async (request) => {
+    try {
+        const oscId = request.data.oscId;
+        if (!oscId) {
+            throw new https_1.HttpsError('invalid-argument', 'oscId is required');
+        }
+        const agenticQueue = (0, functions_1.getFunctions)().taskQueue('agenticSearchWorker');
+        await agenticQueue.enqueue({
+            oscId: oscId
+        });
+        return { success: true, message: `Busca agêntica enfileirada para OSC ${oscId}` };
+    }
+    catch (error) {
+        console.error("Error triggering agentic search:", error);
+        throw new https_1.HttpsError('internal', 'Falha ao iniciar a busca agêntica.');
+    }
+});
 exports.autonomousSearchWorker = (0, https_1.onCall)({
     enforceAppCheck: false
 }, async (request) => {
@@ -1276,6 +1296,46 @@ exports.autonomousSearchWorker = (0, https_1.onCall)({
         searchId: searchRef.id,
         message: 'Busca autônoma iniciada em segundo plano.'
     };
+});
+exports.triggerScrapingWorker = (0, https_1.onCall)({
+    cors: true,
+    timeoutSeconds: 300,
+}, async (request) => {
+    try {
+        const targetId = request.data.targetId;
+        if (!targetId) {
+            throw new https_1.HttpsError('invalid-argument', 'targetId is required');
+        }
+        const db = (0, firestore_1.getFirestore)();
+        const targetDoc = await db.collection('scraping_targets').doc(targetId).get();
+        if (!targetDoc.exists) {
+            throw new https_1.HttpsError('not-found', 'Scraping target not found');
+        }
+        const targetData = { id: targetDoc.id, ...targetDoc.data() };
+        // Create a tracking document just like autonomousSearchWorker does
+        const searchRef = db.collection('searches').doc();
+        await searchRef.set({
+            query: `Manual Sync: ${targetData.name || targetData.id}`,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+            status: 'running',
+            logs: [],
+            totalTargets: 1,
+            completedTargets: 0,
+            processedCount: 0,
+            savedCount: 0
+        });
+        const queue = (0, functions_1.getFunctions)().taskQueue('processScrapingTargetWorker');
+        await queue.enqueue({
+            searchId: searchRef.id,
+            target: targetData,
+            query: ''
+        });
+        return { success: true, message: `Sincronização iniciada para a fonte.`, searchId: searchRef.id };
+    }
+    catch (error) {
+        console.error("Error triggering manual sync:", error);
+        throw new https_1.HttpsError('internal', 'Falha ao iniciar a sincronização.');
+    }
 });
 exports.seedScrapingTargets = (0, https_1.onCall)({
     enforceAppCheck: false

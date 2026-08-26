@@ -1413,6 +1413,28 @@ export const onMatchGenerated = onDocumentWritten('matches/{matchId}', async (ev
     }
 });
 
+export const triggerAgenticSearch = onCall({
+    cors: true,
+    timeoutSeconds: 300,
+}, async (request) => {
+    try {
+        const oscId = request.data.oscId;
+        if (!oscId) {
+            throw new HttpsError('invalid-argument', 'oscId is required');
+        }
+
+        const agenticQueue = getFunctions().taskQueue('agenticSearchWorker');
+        await agenticQueue.enqueue({
+            oscId: oscId
+        });
+
+        return { success: true, message: `Busca agêntica enfileirada para OSC ${oscId}` };
+    } catch (error: unknown) {
+        console.error("Error triggering agentic search:", error);
+        throw new HttpsError('internal', 'Falha ao iniciar a busca agêntica.');
+    }
+});
+
 export const autonomousSearchWorker = onCall({
     enforceAppCheck: false
 }, async (request) => {
@@ -1471,6 +1493,51 @@ export const autonomousSearchWorker = onCall({
         searchId: searchRef.id,
         message: 'Busca autônoma iniciada em segundo plano.'
     };
+});
+
+export const triggerScrapingWorker = onCall({
+    cors: true,
+    timeoutSeconds: 300,
+}, async (request) => {
+    try {
+        const targetId = request.data.targetId;
+        if (!targetId) {
+            throw new HttpsError('invalid-argument', 'targetId is required');
+        }
+
+        const db = getFirestore();
+        const targetDoc = await db.collection('scraping_targets').doc(targetId).get();
+        if (!targetDoc.exists) {
+            throw new HttpsError('not-found', 'Scraping target not found');
+        }
+
+        const targetData = { id: targetDoc.id, ...targetDoc.data() } as { id: string, name?: string, strategy?: string, url?: string, cssSelector?: string, keywords?: string };
+
+        // Create a tracking document just like autonomousSearchWorker does
+        const searchRef = db.collection('searches').doc();
+        await searchRef.set({
+            query: `Manual Sync: ${targetData.name || targetData.id}`,
+            createdAt: FieldValue.serverTimestamp(),
+            status: 'running',
+            logs: [],
+            totalTargets: 1,
+            completedTargets: 0,
+            processedCount: 0,
+            savedCount: 0
+        });
+
+        const queue = getFunctions().taskQueue('processScrapingTargetWorker');
+        await queue.enqueue({
+            searchId: searchRef.id,
+            target: targetData,
+            query: ''
+        });
+
+        return { success: true, message: `Sincronização iniciada para a fonte.`, searchId: searchRef.id };
+    } catch (error: unknown) {
+        console.error("Error triggering manual sync:", error);
+        throw new HttpsError('internal', 'Falha ao iniciar a sincronização.');
+    }
 });
 
 export const seedScrapingTargets = onCall({

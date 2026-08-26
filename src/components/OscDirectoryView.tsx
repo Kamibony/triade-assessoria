@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { getFirestore, collection, onSnapshot, query, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { Loader2, Search, Trash2, Edit, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/Button';
 import type { NgoProfile } from '../lib/types';
 
@@ -68,12 +69,10 @@ export function OscDirectoryView() {
     }
   };
 
-  const openModal = (osc: NgoProfile) => {
-    setSelectedOsc(osc);
-    // Use type assertion carefully for any extra properties if needed, or update type
-    setEditNotes((osc as unknown as Record<string, string>).notes || '');
-    setEditDocStatus(osc.documentationStatus || 'Pendente');
-    setIsModalOpen(true);
+  const navigate = useNavigate();
+
+  const openProfile = (osc: NgoProfile) => {
+    navigate(`/admin/directory/${osc.id}`);
   };
 
   const closeModal = () => {
@@ -176,7 +175,7 @@ export function OscDirectoryView() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-2">
-                        <Button variant="outline" size="sm" onClick={() => openModal(osc)} title="Visualizar/Editar">
+                        <Button variant="outline" size="sm" onClick={() => openProfile(osc)} title="Visualizar/Editar">
                           <Edit className="w-4 h-4" />
                         </Button>
                         <Button variant="outline" size="sm" onClick={() => handleDelete(osc.id, osc.name)} className="text-destructive hover:bg-destructive/10 hover:text-destructive" title="Excluir">
