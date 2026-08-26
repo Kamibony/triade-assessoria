@@ -35,7 +35,7 @@ jobs:
           VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
 
       - name: Install Dependencies and Build Functions
-        run: cd functions && npm ci && npm run build
+        run: cd functions && npm ci && npx playwright install chromium --with-deps && npm run build
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2

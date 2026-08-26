@@ -1,4 +1,6 @@
 import { onSchedule } from 'firebase-functions/v2/scheduler';
+import { chromium } from 'playwright-extra';
+import stealth from 'puppeteer-extra-plugin-stealth';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { getFunctions } from 'firebase-admin/functions';
@@ -1801,25 +1803,17 @@ export const processScrapingTargetWorker = onTaskDispatched({
                 logger.info(`[Scraper] Fetching URL: ${fetchUrl}`);
 
                 if (isProsas) {
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 15000);
-                    const response = await fetch(fetchUrl, {
-                        signal: controller.signal,
-                        headers: {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                            'Accept': 'application/json, text/plain, */*',
-                            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-                            'Referer': 'https://produtos.prosas.com.br/',
-                            'Origin': 'https://produtos.prosas.com.br',
-                            'Sec-Fetch-Dest': 'empty',
-                            'Sec-Fetch-Mode': 'cors',
-                            'Sec-Fetch-Site': 'same-site'
-                        }
+                    chromium.use(stealth());
+                    const browser = await chromium.launch({
+                        headless: true,
+                        args: ['--no-sandbox', '--disable-setuid-sandbox']
                     });
-                    clearTimeout(timeoutId);
 
-                    if (response.ok) {
-                        const data = await response.json();
+                    try {
+                        const pageContext = await browser.newPage();
+                        await pageContext.goto(fetchUrl, { waitUntil: 'networkidle' });
+                        const jsonContent = await pageContext.evaluate(() => document.body.innerText);
+                        const data = JSON.parse(jsonContent);
                         if (data && data.data && Array.isArray(data.data)) {
                             candidateLinks = data.data.map((item: any) => `https://prosas.com.br/editais/${item.id}`);
                         }
@@ -1827,9 +1821,11 @@ export const processScrapingTargetWorker = onTaskDispatched({
                         if (candidateLinks.length === 0) {
                             logger.info(`[Scraper] No links found for Prosas on page ${page}. Stopping pagination.`);
                         }
-                    } else {
-                        logger.warn(`Prosas API fetch failed for ${target.name}: ${response.statusText}`);
-                        await handleScraperFailure(db, target.id, `Prosas API fetch failed: ${response.statusText}`);
+                    } catch (e: any) {
+                        logger.warn(`Prosas API fetch failed for ${target.name}: ${e.message}`);
+                        await handleScraperFailure(db, target.id, `Prosas API fetch failed: ${e.message}`);
+                    } finally {
+                        await browser.close();
                     }
                 } else if (target.strategy === 'RSS') {
                     const parser = new Parser();
