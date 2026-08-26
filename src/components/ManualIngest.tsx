@@ -29,7 +29,6 @@ export function ManualIngest() {
           type: 'success',
           message: t('admin.manualIngest.success', { id: data.editalId })
         });
-        setManualUrl('');
       } else {
         setManualIngestResult({
           type: 'error',
