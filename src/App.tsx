@@ -23,6 +23,7 @@ import { ManualOscIngest } from './components/ManualOscIngest';
 import { Login } from './components/Login';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AuthProvider } from './contexts/AuthContext';
+import { Toaster } from 'react-hot-toast';
 
 function Header() {
   const location = useLocation();
@@ -72,6 +73,7 @@ function PublicLayout() {
 function App() {
   return (
     <AuthProvider>
+      <Toaster position="top-right" />
       <Router>
         <Routes>
           <Route path="/login" element={<Login />} />

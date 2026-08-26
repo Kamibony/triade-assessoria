@@ -5,6 +5,7 @@ import { httpsCallable } from 'firebase/functions';
 import { functions } from '../lib/firebase';
 import { Button } from './ui/Button';
 import { Loader2, Search, ArrowLeft, Building2, CheckCircle2, AlertCircle } from 'lucide-react';
+import toast from 'react-hot-toast';
 import type { NgoProfile } from '../lib/types';
 
 export function OscProfileView() {
@@ -34,21 +35,27 @@ export function OscProfileView() {
     if (!oscId) return;
     setIsAgenticRunning(true);
     setAgenticResult(null);
+    const loadingToast = toast.loading('Iniciando Busca Agêntica...');
 
     try {
         const triggerAgenticSearch = httpsCallable(functions, 'triggerAgenticSearch');
         const result = await triggerAgenticSearch({ oscId });
         const data = result.data as { success: boolean; message: string };
         if (data.success) {
+            toast.success(data.message || 'Busca enviada para fila de processamento.', { id: loadingToast });
             setAgenticResult({
                 type: 'success',
                 message: data.message || "Busca enviada para fila de processamento."
             });
+        } else {
+            toast.error(data.message || 'Erro ao iniciar busca.', { id: loadingToast });
         }
     } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : "Erro desconhecido.";
+        toast.error(errorMessage, { id: loadingToast });
         setAgenticResult({
             type: 'error',
-            message: error instanceof Error ? error.message : "Erro desconhecido."
+            message: errorMessage
         });
     } finally {
         setIsAgenticRunning(false);

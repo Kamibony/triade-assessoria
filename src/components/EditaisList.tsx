@@ -73,8 +73,8 @@ export function EditaisList() {
     }
 
     const filteredEditais = editais.filter(e =>
-      e.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      e.issuer.toLowerCase().includes(searchTerm.toLowerCase())
+      e.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      e.issuer?.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

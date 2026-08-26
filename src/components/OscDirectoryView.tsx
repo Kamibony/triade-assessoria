@@ -46,7 +46,7 @@ export function OscDirectoryView() {
   const filteredOscs = useMemo(() => {
     return oscs.filter(osc => {
       const matchesSearch =
-        (osc.name?.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (osc.name?.toLowerCase()?.includes(searchTerm?.toLowerCase() || '')) ||
         (osc.id?.includes(searchTerm)); // ID is CNPJ
 
       const matchesActivity = activityFilter
