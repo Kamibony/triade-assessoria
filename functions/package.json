@@ -36,7 +36,7 @@
   "devDependencies": {
     "@types/cheerio": "^0.22.35",
     "@types/handlebars": "^4.0.40",
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.3.0",
     "typescript": "^7.0.2"
   }
 }
