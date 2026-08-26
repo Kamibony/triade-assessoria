@@ -1540,7 +1540,19 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
         if (candidateLinks.length === 0) {
             isNewFetch = true;
             try {
-                const fetchUrl = target.strategy === 'RSS' || page === 1 ? target.url : (target.url.includes('?') ? `${target.url}&page=${page}` : `${target.url}?page=${page}`);
+                let fetchUrl = target.url;
+                if (fetchUrl.includes('{{page}}')) {
+                    fetchUrl = fetchUrl.replace(/\{\{page\}\}/g, String(page));
+                }
+                else if (page > 1) {
+                    if (target.strategy === 'AUTO') {
+                        fetchUrl = fetchUrl.includes('?') ? `${fetchUrl}&page=${page}` : `${fetchUrl}?page=${page}`;
+                    }
+                    else if (target.strategy !== 'RSS') {
+                        logger.info(`[Scraper] Stopping pagination for ${target.name}. No {{page}} pattern defined and page is ${page}.`);
+                        return;
+                    }
+                }
                 logger.info(`[Scraper] Fetching URL: ${fetchUrl}`);
                 if (target.strategy === 'RSS') {
                     const parser = new rss_parser_1.default();
