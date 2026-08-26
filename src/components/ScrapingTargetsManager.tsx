@@ -206,13 +206,16 @@ export function ScrapingTargetsManager() {
               <div>
                 <label className="block text-sm font-medium mb-1">URL</label>
                 <input
-                  type="url"
+                  type="text"
                   required
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://..."
+                  placeholder="https://... ou https://.../page/{{page}}"
                   className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                 />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Use {'{{page}}'} na URL para paginação manual em API/HTML.
+                </p>
               </div>
             </div>
 
