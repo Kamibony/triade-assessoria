@@ -1541,20 +1541,57 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
             isNewFetch = true;
             try {
                 let fetchUrl = target.url;
-                if (fetchUrl.includes('{{page}}')) {
-                    fetchUrl = fetchUrl.replace(/\{\{page\}\}/g, String(page));
+                const isProsas = target.name?.toLowerCase().includes('prosas') || fetchUrl.toLowerCase().includes('prosas.com.br');
+                if (isProsas) {
+                    fetchUrl = `https://prosas.com.br/selecao/api/v2/third_party/oportunidades/inscricoes_abertas?include=area_interesses%2Cincentivador&page%5Bpage%5D=${page}&page%5Bsize%5D=20&&sort=`;
                 }
-                else if (page > 1) {
-                    if (target.strategy === 'AUTO') {
-                        fetchUrl = fetchUrl.includes('?') ? `${fetchUrl}&page=${page}` : `${fetchUrl}?page=${page}`;
+                else {
+                    if (fetchUrl.includes('{{page}}')) {
+                        fetchUrl = fetchUrl.replace(/\{\{page\}\}/g, String(page));
                     }
-                    else if (target.strategy !== 'RSS') {
-                        logger.info(`[Scraper] Stopping pagination for ${target.name}. No {{page}} pattern defined and page is ${page}.`);
-                        return;
+                    else if (page > 1) {
+                        if (target.strategy === 'AUTO') {
+                            fetchUrl = fetchUrl.includes('?') ? `${fetchUrl}&page=${page}` : `${fetchUrl}?page=${page}`;
+                        }
+                        else if (target.strategy !== 'RSS') {
+                            logger.info(`[Scraper] Stopping pagination for ${target.name}. No {{page}} pattern defined and page is ${page}.`);
+                            return;
+                        }
                     }
                 }
                 logger.info(`[Scraper] Fetching URL: ${fetchUrl}`);
-                if (target.strategy === 'RSS') {
+                if (isProsas) {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 15000);
+                    const response = await fetch(fetchUrl, {
+                        signal: controller.signal,
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                            'Accept': 'application/json, text/plain, */*',
+                            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+                            'Referer': 'https://produtos.prosas.com.br/',
+                            'Origin': 'https://produtos.prosas.com.br',
+                            'Sec-Fetch-Dest': 'empty',
+                            'Sec-Fetch-Mode': 'cors',
+                            'Sec-Fetch-Site': 'same-site'
+                        }
+                    });
+                    clearTimeout(timeoutId);
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data && data.data && Array.isArray(data.data)) {
+                            candidateLinks = data.data.map((item) => `https://prosas.com.br/editais/${item.id}`);
+                        }
+                        if (candidateLinks.length === 0) {
+                            logger.info(`[Scraper] No links found for Prosas on page ${page}. Stopping pagination.`);
+                        }
+                    }
+                    else {
+                        logger.warn(`Prosas API fetch failed for ${target.name}: ${response.statusText}`);
+                        await handleScraperFailure(db, target.id, `Prosas API fetch failed: ${response.statusText}`);
+                    }
+                }
+                else if (target.strategy === 'RSS') {
                     const parser = new rss_parser_1.default();
                     const feed = await parser.parseURL(fetchUrl);
                     candidateLinks = feed.items.map(item => item.link).filter(link => !!link);
