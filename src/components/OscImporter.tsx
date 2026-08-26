@@ -4,6 +4,7 @@ import { functions } from '../lib/firebase';
 import { Button } from './ui/Button';
 import { Loader2, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import toast from 'react-hot-toast';
 
 export function OscImporter() {
   const { t } = useTranslation();
@@ -17,12 +18,14 @@ export function OscImporter() {
   const handleImportOsc = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!uf.trim() && !municipio.trim()) {
+      toast.error('Por favor, forneça pelo menos Estado (UF) ou Cidade.');
       setImportResult({ type: 'error', message: 'Por favor, forneça pelo menos Estado (UF) ou Cidade.' });
       return;
     }
 
     setIsImporting(true);
     setImportResult(null);
+    const loadingToast = toast.loading('Acionando importação...');
 
     try {
       const ingestOscData = httpsCallable(functions, 'ingestOscDataFunction');
@@ -33,12 +36,14 @@ export function OscImporter() {
         onlyActive: onlyActive
       });
 
+      toast.success('Importação iniciada em segundo plano.', { id: loadingToast });
       setImportResult({
         type: 'success',
         message: 'Importação iniciada em segundo plano. As OSCs ativas e validadas aparecerão no Diretório em breve.'
       });
     } catch (error: unknown) {
       console.error("Error triggering OSC import:", error);
+      toast.error('Falha ao acionar a importação.', { id: loadingToast });
       setImportResult({
         type: 'error',
         message: error instanceof Error ? error.message : String(error) || t('admin.bulkImporter.triggerError')

@@ -1758,6 +1758,8 @@ export const processScrapingTargetWorker = onTaskDispatched({
     const db = getFirestore();
     const searchRef = db.collection('searches').doc(searchId);
 
+    logger.info(`[Scraper] Starting processing for target: ${target.name} | URL: ${target.url} | Page: ${page} | Strategy: ${target.strategy}`);
+
     try {
         let totalProcessed = 0;
         let candidateLinks: string[] = linksQueue;
@@ -1767,6 +1769,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
             isNewFetch = true;
             try {
                 const fetchUrl = target.strategy === 'RSS' || page === 1 ? target.url : (target.url.includes('?') ? `${target.url}&page=${page}` : `${target.url}?page=${page}`);
+                logger.info(`[Scraper] Fetching URL: ${fetchUrl}`);
 
                 if (target.strategy === 'RSS') {
                     const parser = new Parser();
@@ -1903,9 +1906,11 @@ export const processScrapingTargetWorker = onTaskDispatched({
                     }
                 }
             } catch (error) {
-                logger.error(`Error extracting links for target ${target.name}:`, error);
+                logger.error(`[Scraper Error] Error extracting links for target ${target.name} (Page ${page}):`, error);
                 await handleScraperFailure(db, target.id, error instanceof Error ? error.message : 'Unknown extraction error');
             }
+
+            logger.info(`[Scraper] Discovered ${candidateLinks.length} total edital links for target ${target.name} on Page ${page}`);
 
             if (candidateLinks.length > 0) {
                 await handleScraperSuccess(db, target.id);
@@ -1914,6 +1919,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
 
         const linksToProcess = candidateLinks.slice(0, 10);
         const remainingLinks = candidateLinks.slice(10);
+        logger.info(`[Scraper] Processing batch of ${linksToProcess.length} links. Remaining in queue for this page: ${remainingLinks.length}`);
 
         for (let i = 0; i < linksToProcess.length; i++) {
             const link = linksToProcess[i];

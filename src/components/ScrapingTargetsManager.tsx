@@ -4,6 +4,7 @@ import { httpsCallable } from 'firebase/functions';
 import { functions } from '../lib/firebase';
 import { Button } from './ui/Button';
 import { Plus, Trash2, Edit2, Check, X, Database, Link as LinkIcon, RefreshCw } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 interface ScrapingTarget {
   id: string;
@@ -91,16 +92,19 @@ export function ScrapingTargetsManager() {
 
   const handleSync = async (targetId: string) => {
     setSyncingIds(prev => new Set(prev).add(targetId));
+    const loadingToast = toast.loading('Iniciando sincronização...');
     try {
       const triggerScrapingWorker = httpsCallable(functions, 'triggerScrapingWorker');
       const result = await triggerScrapingWorker({ targetId });
       const data = result.data as { success: boolean; message: string; searchId?: string };
       if (data.success) {
-        alert(data.message || 'Sincronização iniciada.');
+        toast.success(data.message || 'Sincronização iniciada.', { id: loadingToast });
+      } else {
+        toast.error('Erro ao sincronizar fonte.', { id: loadingToast });
       }
     } catch (error) {
       console.error("Erro ao sincronizar fonte:", error);
-      alert('Falha ao iniciar sincronização.');
+      toast.error('Erro ao sincronizar fonte. Verifique os logs.', { id: loadingToast });
     } finally {
       setSyncingIds(prev => {
         const next = new Set(prev);

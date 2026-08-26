@@ -38,9 +38,12 @@ export function MatchesDashboard() {
               const chunkSize = 10;
               for (let i = 0; i < editalIds.length; i += chunkSize) {
                   const chunk = editalIds.slice(i, i + chunkSize);
-                  const q = query(collection(db, "editais"), where(documentId(), "in", chunk));
-                  const editaisSnap = await getDocs(q);
-                  editaisSnap.forEach(doc => { editaisMap[doc.id] = { id: doc.id, ...doc.data() } as Edital; });
+                  const validChunk = chunk.filter(id => !!id);
+                  if (validChunk.length > 0) {
+                      const q = query(collection(db, "editais"), where(documentId(), "in", validChunk));
+                      const editaisSnap = await getDocs(q);
+                      editaisSnap.forEach(doc => { editaisMap[doc.id] = { id: doc.id, ...doc.data() } as Edital; });
+                  }
               }
               setEditais(editaisMap);
           } catch (e) {
@@ -61,9 +64,9 @@ export function MatchesDashboard() {
   }
 
   let filteredMatches = matches.filter(m =>
-    m.oscId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    m.editalId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (editais[m.editalId]?.title || '').toLowerCase().includes(searchTerm.toLowerCase())
+    m.oscId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    m.editalId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (editais[m.editalId]?.title || '')?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   if (filterOscId) {
