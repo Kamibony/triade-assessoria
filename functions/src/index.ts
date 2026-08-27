@@ -18,7 +18,6 @@ import * as cheerio from 'cheerio';
 import Parser from 'rss-parser';
 
 const braveApiKeyString = defineString('BRAVE_SEARCH_API_KEY');
-const scrapingBeeApiKeyString = defineString('SCRAPINGBEE_API_KEY');
 
 function removeAccents(str: string): string {
     return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -1874,41 +1873,24 @@ export const processScrapingTargetWorker = onTaskDispatched({
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-                        let scrapingBeeApiKey = process.env.SCRAPINGBEE_API_KEY;
-                        if (!scrapingBeeApiKey) {
-                            try { scrapingBeeApiKey = scrapingBeeApiKeyString.value(); } catch (e) { /* ignore */ }
-                        }
-
                         let html = '';
                         let isOk = false;
                         let statusText = '';
 
-                        if (scrapingBeeApiKey) {
-                            logger.info(`[Scraper] Using ScrapingBee for HTML fetch: ${fetchUrl}`);
-                            const sbUrl = `https://app.scrapingbee.com/api/v1/?api_key=${scrapingBeeApiKey}&url=${encodeURIComponent(fetchUrl)}`;
-                            const response = await fetch(sbUrl, { signal: controller.signal });
-                            clearTimeout(timeoutId);
-                            isOk = response.ok;
-                            statusText = response.statusText;
-                            if (isOk) {
-                                html = await response.text();
+                        logger.info(`[Scraper] Using native fetch for HTML: ${fetchUrl}`);
+                        const response = await fetch(fetchUrl, {
+                            signal: controller.signal,
+                            headers: {
+                                'User-Agent': 'Mozilla/5.0',
+                                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                                'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
                             }
-                        } else {
-                            logger.info(`[Scraper] Using native fetch for HTML (ScrapingBee key not found): ${fetchUrl}`);
-                            const response = await fetch(fetchUrl, {
-                                signal: controller.signal,
-                                headers: {
-                                    'User-Agent': 'Mozilla/5.0',
-                                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                                    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-                                }
-                            });
-                            clearTimeout(timeoutId);
-                            isOk = response.ok;
-                            statusText = response.statusText;
-                            if (isOk) {
-                                html = await response.text();
-                        }
+                        });
+                        clearTimeout(timeoutId);
+                        isOk = response.ok;
+                        statusText = response.statusText;
+                        if (isOk) {
+                            html = await response.text();
                         }
 
                         if (isOk) {
@@ -1960,44 +1942,26 @@ export const processScrapingTargetWorker = onTaskDispatched({
                         const controller = new AbortController();
                         const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-                        let scrapingBeeApiKey = process.env.SCRAPINGBEE_API_KEY;
-                        if (!scrapingBeeApiKey) {
-                            try { scrapingBeeApiKey = scrapingBeeApiKeyString.value(); } catch (e) { /* ignore */ }
-                        }
-
                         let html = '';
                         let contentType = '';
                         let isOk = false;
                         let statusText = '';
 
-                        if (scrapingBeeApiKey) {
-                            logger.info(`[Scraper] Using ScrapingBee for AUTO fetch: ${fetchUrl}`);
-                            const sbUrl = `https://app.scrapingbee.com/api/v1/?api_key=${scrapingBeeApiKey}&url=${encodeURIComponent(fetchUrl)}`;
-                            const response = await fetch(sbUrl, { signal: controller.signal });
-                            clearTimeout(timeoutId);
-                            isOk = response.ok;
-                            statusText = response.statusText;
-                            contentType = response.headers.get('content-type') || '';
-                            if (isOk) {
-                                html = await response.text();
+                        logger.info(`[Scraper] Using native fetch for AUTO: ${fetchUrl}`);
+                        const response = await fetch(fetchUrl, {
+                            signal: controller.signal,
+                            headers: {
+                                'User-Agent': 'Mozilla/5.0',
+                                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                                'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
                             }
-                        } else {
-                            logger.info(`[Scraper] Using native fetch for AUTO (ScrapingBee key not found): ${fetchUrl}`);
-                            const response = await fetch(fetchUrl, {
-                                signal: controller.signal,
-                                headers: {
-                                    'User-Agent': 'Mozilla/5.0',
-                                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                                    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-                                }
-                            });
-                            clearTimeout(timeoutId);
-                            isOk = response.ok;
-                            statusText = response.statusText;
-                            contentType = response.headers.get('content-type') || '';
-                            if (isOk) {
-                                html = await response.text();
-                            }
+                        });
+                        clearTimeout(timeoutId);
+                        isOk = response.ok;
+                        statusText = response.statusText;
+                        contentType = response.headers.get('content-type') || '';
+                        if (isOk) {
+                            html = await response.text();
                         }
 
                         if (isOk) {
