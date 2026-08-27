@@ -542,11 +542,25 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         const searchedLinks = new Set();
         for (const query of queries) {
             try {
-                const googleApiKey = googleApiKeyString.value();
-                const searchEngineId = searchEngineIdString.value();
+                let googleApiKey = process.env.GOOGLE_SEARCH_API_KEY;
+                if (!googleApiKey) {
+                    try {
+                        googleApiKey = googleApiKeyString.value();
+                    }
+                    catch (e) { /* ignore */ }
+                }
+                let searchEngineId = process.env.GOOGLE_SEARCH_ENGINE_ID;
+                if (!searchEngineId) {
+                    try {
+                        searchEngineId = searchEngineIdString.value();
+                    }
+                    catch (e) { /* ignore */ }
+                }
                 if (!googleApiKey || !searchEngineId) {
                     throw new Error("GOOGLE_SEARCH_API_KEY or GOOGLE_SEARCH_ENGINE_ID environment variable is not set.");
                 }
+                const maskedKey = googleApiKey.length > 8 ? `${googleApiKey.substring(0, 4)}***${googleApiKey.substring(googleApiKey.length - 4)}` : '***';
+                console.log(`[Agentic Search] Using API Key (length: ${googleApiKey.length}): ${maskedKey}`);
                 const url = `https://www.googleapis.com/customsearch/v1?q=${encodeURIComponent(query)}&key=${googleApiKey}&cx=${searchEngineId}`;
                 const searchResponse = await fetch(url);
                 if (!searchResponse.ok) {
