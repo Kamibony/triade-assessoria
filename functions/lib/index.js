@@ -55,8 +55,8 @@ const logger = __importStar(require("firebase-functions/logger"));
 const schemas_js_1 = require("./shared/schemas.js");
 const cheerio = __importStar(require("cheerio"));
 const rss_parser_1 = __importDefault(require("rss-parser"));
-const googleApiKeyString = (0, params_1.defineString)('GOOGLE_SEARCH_API_KEY');
-const searchEngineIdString = (0, params_1.defineString)('GOOGLE_SEARCH_ENGINE_ID');
+const braveApiKeyString = (0, params_1.defineString)('BRAVE_SEARCH_API_KEY');
+const scrapingBeeApiKeyString = (0, params_1.defineString)('SCRAPINGBEE_API_KEY');
 function removeAccents(str) {
     return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
@@ -542,54 +542,55 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         const searchedLinks = new Set();
         for (const query of queries) {
             try {
-                let googleApiKey = process.env.GOOGLE_SEARCH_API_KEY;
-                if (!googleApiKey) {
+                let braveApiKey = process.env.BRAVE_SEARCH_API_KEY;
+                if (!braveApiKey) {
                     try {
-                        googleApiKey = googleApiKeyString.value();
+                        braveApiKey = braveApiKeyString.value();
                     }
                     catch (e) { /* ignore */ }
                 }
-                let searchEngineId = process.env.GOOGLE_SEARCH_ENGINE_ID;
-                if (!searchEngineId) {
-                    try {
-                        searchEngineId = searchEngineIdString.value();
+                if (!braveApiKey) {
+                    throw new Error("BRAVE_SEARCH_API_KEY environment variable is not set.");
+                }
+                const maskedKey = braveApiKey.length > 8 ? `${braveApiKey.substring(0, 4)}***${braveApiKey.substring(braveApiKey.length - 4)}` : '***';
+                console.log(`[Agentic Search] Using Brave API Key (length: ${braveApiKey.length}): ${maskedKey}`);
+                const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=3`;
+                const searchResponse = await fetch(url, {
+                    headers: {
+                        'Accept': 'application/json',
+                        'Accept-Encoding': 'gzip',
+                        'X-Subscription-Token': braveApiKey
                     }
-                    catch (e) { /* ignore */ }
-                }
-                if (!googleApiKey || !searchEngineId) {
-                    throw new Error("GOOGLE_SEARCH_API_KEY or GOOGLE_SEARCH_ENGINE_ID environment variable is not set.");
-                }
-                const maskedKey = googleApiKey.length > 8 ? `${googleApiKey.substring(0, 4)}***${googleApiKey.substring(googleApiKey.length - 4)}` : '***';
-                console.log(`[Agentic Search] Using API Key (length: ${googleApiKey.length}): ${maskedKey}`);
-                const url = `https://www.googleapis.com/customsearch/v1?q=${encodeURIComponent(query)}&key=${googleApiKey}&cx=${searchEngineId}`;
-                const searchResponse = await fetch(url);
+                });
                 if (!searchResponse.ok) {
-                    throw new Error(`Google Custom Search API request failed with status: ${searchResponse.status}`);
+                    throw new Error(`Brave Search API request failed with status: ${searchResponse.status}`);
                 }
-                const googleData = await searchResponse.json();
-                const searchResults = googleData.items || [];
+                const braveData = await searchResponse.json();
+                const searchResults = braveData.web?.results || [];
                 let processedResults = 0;
                 for (const r of searchResults) {
                     if (processedResults >= 3)
                         break;
-                    const link = r.link;
+                    const link = r.url;
                     if (!link || searchedLinks.has(link))
                         continue;
                     searchedLinks.add(link);
                     const existingRef = await db.collection('editais').where('sourceUrl', '==', link).limit(1).get();
                     if (!existingRef.empty)
                         continue;
-                    const text = await fetchAndExtractText(link);
-                    if (!text || text.length < 500)
-                        continue;
-                    const textEmbedding = await generateTextEmbedding(text.substring(0, 5000));
+                    const cleanJsonSnippet = JSON.stringify({
+                        title: r.title,
+                        url: r.url,
+                        snippet: r.description
+                    });
+                    const textEmbedding = await generateTextEmbedding(cleanJsonSnippet);
                     const similarityScore = cosineSimilarity(oscEmbedding, textEmbedding);
-                    console.log(`Vector similarity for ${link} is ${similarityScore}`);
+                    console.log(`Vector similarity for ${link} (Snippet) is ${similarityScore}`);
                     if (similarityScore > 0.60) {
-                        const triageResult = await triageEditalWebpage({ text, searchQuery: query });
+                        const triageResult = await triageEditalWebpage({ text: cleanJsonSnippet, searchQuery: query });
                         if (triageResult.isValidEdital) {
-                            await enqueueEditalExtraction(link, text, triageResult.reason, "AGENTIC_SEARCH");
-                            console.log(`Successfully enqueued agentic extraction for ${link}`);
+                            await enqueueEditalExtraction(link, cleanJsonSnippet, triageResult.reason, "AGENTIC_SEARCH");
+                            console.log(`Successfully enqueued agentic extraction for ${link} based on snippet`);
                         }
                     }
                     processedResults++;
@@ -1642,17 +1643,58 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                 else if (target.strategy === 'HTML') {
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 15000);
-                    const response = await fetch(fetchUrl, {
-                        signal: controller.signal,
-                        headers: {
-                            'User-Agent': 'Mozilla/5.0',
-                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+                    let scrapingBeeApiKey = process.env.SCRAPINGBEE_API_KEY;
+                    if (!scrapingBeeApiKey) {
+                        try {
+                            scrapingBeeApiKey = scrapingBeeApiKeyString.value();
                         }
-                    });
-                    clearTimeout(timeoutId);
-                    if (response.ok) {
-                        const html = await response.text();
+                        catch (e) { /* ignore */ }
+                    }
+                    let html = '';
+                    let isOk = false;
+                    let statusText = '';
+                    if (scrapingBeeApiKey) {
+                        logger.info(`[Scraper] Using ScrapingBee for HTML fetch: ${fetchUrl}`);
+                        const sbUrl = `https://app.scrapingbee.com/api/v1/?api_key=${scrapingBeeApiKey}&url=${encodeURIComponent(fetchUrl)}`;
+                        const response = await fetch(sbUrl, { signal: controller.signal });
+                        clearTimeout(timeoutId);
+                        isOk = response.ok;
+                        statusText = response.statusText;
+                        if (isOk) {
+                            html = await response.text();
+                        }
+                    }
+                    else {
+                        logger.info(`[Scraper] Using native fetch for HTML (ScrapingBee key not found): ${fetchUrl}`);
+                        const response = await fetch(fetchUrl, {
+                            signal: controller.signal,
+                            headers: {
+                                'User-Agent': 'Mozilla/5.0',
+                                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                                'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+                            }
+                        });
+                        clearTimeout(timeoutId);
+                        isOk = response.ok;
+                        statusText = response.statusText;
+                        if (isOk) {
+                            html = await response.text();
+                        }
+                    }
+                    if (isOk) {
+                        try {
+                            await db.collection('scraping_contents').add({
+                                url: fetchUrl,
+                                text: html,
+                                source: 'data_lake_html',
+                                targetId: target.id,
+                                createdAt: firestore_1.FieldValue.serverTimestamp()
+                            });
+                            logger.info(`[Data Lake] Raw HTML dumped to scraping_contents for: ${fetchUrl}`);
+                        }
+                        catch (err) {
+                            logger.error(`[Data Lake] Error dumping raw HTML to scraping_contents for: ${fetchUrl}`, err);
+                        }
                         const $ = cheerio.load(html);
                         const selector = target.cssSelector || 'a';
                         $(selector).each((_, el) => {
@@ -1670,8 +1712,8 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                         candidateLinks = [...new Set(candidateLinks)];
                     }
                     else {
-                        logger.warn(`HTML fetch failed for ${target.name}: ${response.statusText}`);
-                        await handleScraperFailure(db, target.id, `HTML fetch failed: ${response.statusText}`);
+                        logger.warn(`HTML fetch failed for ${target.name}: ${statusText}`);
+                        await handleScraperFailure(db, target.id, `HTML fetch failed: ${statusText}`);
                     }
                 }
                 else if (target.strategy === 'AUTO') {
@@ -1689,18 +1731,61 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                     if (candidateLinks.length === 0) {
                         const controller = new AbortController();
                         const timeoutId = setTimeout(() => controller.abort(), 15000);
-                        const response = await fetch(fetchUrl, {
-                            signal: controller.signal,
-                            headers: {
-                                'User-Agent': 'Mozilla/5.0',
-                                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                                'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+                        let scrapingBeeApiKey = process.env.SCRAPINGBEE_API_KEY;
+                        if (!scrapingBeeApiKey) {
+                            try {
+                                scrapingBeeApiKey = scrapingBeeApiKeyString.value();
                             }
-                        });
-                        clearTimeout(timeoutId);
-                        if (response.ok) {
-                            const contentType = response.headers.get('content-type') || '';
-                            const html = await response.text();
+                            catch (e) { /* ignore */ }
+                        }
+                        let html = '';
+                        let contentType = '';
+                        let isOk = false;
+                        let statusText = '';
+                        if (scrapingBeeApiKey) {
+                            logger.info(`[Scraper] Using ScrapingBee for AUTO fetch: ${fetchUrl}`);
+                            const sbUrl = `https://app.scrapingbee.com/api/v1/?api_key=${scrapingBeeApiKey}&url=${encodeURIComponent(fetchUrl)}`;
+                            const response = await fetch(sbUrl, { signal: controller.signal });
+                            clearTimeout(timeoutId);
+                            isOk = response.ok;
+                            statusText = response.statusText;
+                            contentType = response.headers.get('content-type') || '';
+                            if (isOk) {
+                                html = await response.text();
+                            }
+                        }
+                        else {
+                            logger.info(`[Scraper] Using native fetch for AUTO (ScrapingBee key not found): ${fetchUrl}`);
+                            const response = await fetch(fetchUrl, {
+                                signal: controller.signal,
+                                headers: {
+                                    'User-Agent': 'Mozilla/5.0',
+                                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                                    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+                                }
+                            });
+                            clearTimeout(timeoutId);
+                            isOk = response.ok;
+                            statusText = response.statusText;
+                            contentType = response.headers.get('content-type') || '';
+                            if (isOk) {
+                                html = await response.text();
+                            }
+                        }
+                        if (isOk) {
+                            try {
+                                await db.collection('scraping_contents').add({
+                                    url: fetchUrl,
+                                    text: html,
+                                    source: 'data_lake_auto',
+                                    targetId: target.id,
+                                    createdAt: firestore_1.FieldValue.serverTimestamp()
+                                });
+                                logger.info(`[Data Lake] Raw Content dumped to scraping_contents for: ${fetchUrl}`);
+                            }
+                            catch (err) {
+                                logger.error(`[Data Lake] Error dumping raw content to scraping_contents for: ${fetchUrl}`, err);
+                            }
                             if (contentType.includes('xml') || contentType.includes('rss')) {
                                 try {
                                     const parser = new rss_parser_1.default();
@@ -1748,8 +1833,8 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                             }
                         }
                         else {
-                            logger.warn(`AUTO fetch failed for ${target.name}: ${response.statusText}`);
-                            await handleScraperFailure(db, target.id, `AUTO fetch failed: ${response.statusText}`);
+                            logger.warn(`AUTO fetch failed for ${target.name}: ${statusText}`);
+                            await handleScraperFailure(db, target.id, `AUTO fetch failed: ${statusText}`);
                         }
                     }
                 }
