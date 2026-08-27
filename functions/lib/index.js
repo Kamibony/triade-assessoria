@@ -585,11 +585,23 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                     const textEmbedding = await generateTextEmbedding(cleanJsonSnippet);
                     const similarityScore = cosineSimilarity(oscEmbedding, textEmbedding);
                     console.log(`Vector similarity for ${link} (Snippet) is ${similarityScore}`);
-                    if (similarityScore > 0.60) {
-                        const triageResult = await triageEditalWebpage({ text: cleanJsonSnippet, searchQuery: query });
+                    // Use snippet as a very loose pre-filter (e.g. > 0.30 instead of 0.60)
+                    if (similarityScore > 0.30) {
+                        console.log(`Fetching full content for promising link: ${link}`);
+                        let fullTextToAnalyze = cleanJsonSnippet;
+                        try {
+                            const fetchedText = await fetchAndExtractText(link);
+                            if (fetchedText && fetchedText.length >= 500) {
+                                fullTextToAnalyze = fetchedText;
+                            }
+                        }
+                        catch (fetchErr) {
+                            console.warn(`Failed to fetch full text for ${link}, falling back to snippet`, fetchErr);
+                        }
+                        const triageResult = await triageEditalWebpage({ text: fullTextToAnalyze, searchQuery: query });
                         if (triageResult.isValidEdital) {
-                            await enqueueEditalExtraction(link, cleanJsonSnippet, triageResult.reason, "AGENTIC_SEARCH");
-                            console.log(`Successfully enqueued agentic extraction for ${link} based on snippet`);
+                            await enqueueEditalExtraction(link, fullTextToAnalyze, triageResult.reason, "AGENTIC_SEARCH");
+                            console.log(`Successfully enqueued agentic extraction for ${link}`);
                         }
                     }
                     processedResults++;
@@ -821,25 +833,50 @@ exports.onEditalCreated = (0, firestore_2.onDocumentCreated)('editais/{editalId}
         console.log("No data associated with the event.");
         return;
     }
+    const editalData = editalSnapshot.data();
     const editalId = event.params.editalId;
     const db = (0, firestore_1.getFirestore)();
+    // 1. Retrieve the Edital embedding
+    const editalEmbedding = editalData.embedding || null;
     const oscsSnapshot = await db.collection('oscs').get();
     const queue = (0, functions_1.getFunctions)().taskQueue('matchEvaluatorWorker');
-    const enqueuePromises = oscsSnapshot.docs.map(oscDoc => {
-        return queue.enqueue({
-            oscId: oscDoc.id,
-            editalId: editalId
-        });
-    });
+    const enqueuePromises = [];
+    let enqueuedCount = 0;
+    for (const oscDoc of oscsSnapshot.docs) {
+        const oscData = oscDoc.data();
+        const oscEmbedding = oscData.embedding || null;
+        let shouldEnqueue = false;
+        // 2. Vector Pre-filtering: Only enqueue if we lack embeddings OR if similarity > 0.60
+        if (!editalEmbedding || !oscEmbedding) {
+            shouldEnqueue = true; // Needs embedding generation inside the worker
+        }
+        else {
+            const similarity = cosineSimilarity(oscEmbedding, editalEmbedding);
+            if (similarity > 0.60) {
+                shouldEnqueue = true;
+            }
+        }
+        if (shouldEnqueue) {
+            enqueuePromises.push(queue.enqueue({
+                oscId: oscDoc.id,
+                editalId: editalId
+            }));
+            enqueuedCount++;
+        }
+    }
     await Promise.all(enqueuePromises);
-    console.log(`Enqueued ${oscsSnapshot.docs.length} match tasks for new Edital ${editalId}.`);
+    console.log(`Enqueued ${enqueuedCount} match tasks (filtered from ${oscsSnapshot.docs.length} total OSCs) for new Edital ${editalId}.`);
 });
 async function enqueueEditalExtraction(link, text, reason, searchId) {
     const db = (0, firestore_1.getFirestore)();
     const tempContentRef = db.collection('scraping_contents').doc();
+    // Set TTL for 24 hours from now
+    const expireAt = new Date();
+    expireAt.setHours(expireAt.getHours() + 24);
     await tempContentRef.set({
         text: text,
-        createdAt: firestore_1.FieldValue.serverTimestamp()
+        createdAt: firestore_1.FieldValue.serverTimestamp(),
+        expireAt: expireAt
     });
     const queue = (0, functions_1.getFunctions)().taskQueue('extractionWorker');
     await queue.enqueue({
@@ -1662,12 +1699,15 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                     }
                     if (isOk) {
                         try {
+                            const expireAt = new Date();
+                            expireAt.setHours(expireAt.getHours() + 24);
                             await db.collection('scraping_contents').add({
                                 url: fetchUrl,
                                 text: html,
                                 source: 'data_lake_html',
                                 targetId: target.id,
-                                createdAt: firestore_1.FieldValue.serverTimestamp()
+                                createdAt: firestore_1.FieldValue.serverTimestamp(),
+                                expireAt: expireAt
                             });
                             logger.info(`[Data Lake] Raw HTML dumped to scraping_contents for: ${fetchUrl}`);
                         }
@@ -1732,12 +1772,15 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                         }
                         if (isOk) {
                             try {
+                                const expireAt = new Date();
+                                expireAt.setHours(expireAt.getHours() + 24);
                                 await db.collection('scraping_contents').add({
                                     url: fetchUrl,
                                     text: html,
                                     source: 'data_lake_auto',
                                     targetId: target.id,
-                                    createdAt: firestore_1.FieldValue.serverTimestamp()
+                                    createdAt: firestore_1.FieldValue.serverTimestamp(),
+                                    expireAt: expireAt
                                 });
                                 logger.info(`[Data Lake] Raw Content dumped to scraping_contents for: ${fetchUrl}`);
                             }
@@ -1823,6 +1866,17 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                 if (!text || text.length < 500) {
                     await searchRef.update({
                         logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Ignorado', reason: 'Texto ausente ou muito curto.' })
+                    });
+                    totalProcessed++;
+                    continue;
+                }
+                // Heuristic Pre-filter: Check for essential keywords before calling the LLM
+                const textLower = text.toLowerCase();
+                const essentialKeywords = ['edital', 'inscrição', 'inscrições', 'prazo', 'fomento', 'chamada pública', 'financiamento'];
+                const hasKeyword = essentialKeywords.some(kw => textLower.includes(kw));
+                if (!hasKeyword) {
+                    await searchRef.update({
+                        logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Ignorado', reason: 'Rejeitado pelo filtro heurístico pré-LLM (palavras-chave ausentes).' })
                     });
                     totalProcessed++;
                     continue;
