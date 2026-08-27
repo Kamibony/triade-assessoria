@@ -39,9 +39,6 @@ export declare const ingestOscDataFunction: import("firebase-functions/v2/https"
     totalDiscovered: number;
     enqueuedTasks: number;
 }>, unknown>;
-export declare const onEditalCreated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").QueryDocumentSnapshot | undefined, {
-    editalId: string;
-}>>;
 export declare const triggerMatchOrchestrator: import("firebase-functions/v2/https").CallableFunction<any, Promise<Record<string, unknown> | {
     id: string;
     createdAt: FieldValue;

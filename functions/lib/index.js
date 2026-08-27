@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onSearchCreated = exports.processScrapingTargetWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.onEditalCreated = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = void 0;
+exports.onSearchCreated = exports.processScrapingTargetWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = void 0;
 process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const playwright_extra_1 = require("playwright-extra");
@@ -509,7 +509,8 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
     rateLimits: {
         maxConcurrentDispatches: 2,
     },
-    timeoutSeconds: 540
+    timeoutSeconds: 540,
+    memory: '2GiB'
 }, async (request) => {
     const { oscId } = request.data;
     if (!oscId) {
@@ -826,46 +827,6 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
         totalDiscovered: oscList.length,
         enqueuedTasks: enqueuedTasks
     };
-});
-exports.onEditalCreated = (0, firestore_2.onDocumentCreated)('editais/{editalId}', async (event) => {
-    const editalSnapshot = event.data;
-    if (!editalSnapshot) {
-        console.log("No data associated with the event.");
-        return;
-    }
-    const editalData = editalSnapshot.data();
-    const editalId = event.params.editalId;
-    const db = (0, firestore_1.getFirestore)();
-    // 1. Retrieve the Edital embedding
-    const editalEmbedding = editalData.embedding || null;
-    const oscsSnapshot = await db.collection('oscs').get();
-    const queue = (0, functions_1.getFunctions)().taskQueue('matchEvaluatorWorker');
-    const enqueuePromises = [];
-    let enqueuedCount = 0;
-    for (const oscDoc of oscsSnapshot.docs) {
-        const oscData = oscDoc.data();
-        const oscEmbedding = oscData.embedding || null;
-        let shouldEnqueue = false;
-        // 2. Vector Pre-filtering: Only enqueue if we lack embeddings OR if similarity > 0.60
-        if (!editalEmbedding || !oscEmbedding) {
-            shouldEnqueue = true; // Needs embedding generation inside the worker
-        }
-        else {
-            const similarity = cosineSimilarity(oscEmbedding, editalEmbedding);
-            if (similarity > 0.60) {
-                shouldEnqueue = true;
-            }
-        }
-        if (shouldEnqueue) {
-            enqueuePromises.push(queue.enqueue({
-                oscId: oscDoc.id,
-                editalId: editalId
-            }));
-            enqueuedCount++;
-        }
-    }
-    await Promise.all(enqueuePromises);
-    console.log(`Enqueued ${enqueuedCount} match tasks (filtered from ${oscsSnapshot.docs.length} total OSCs) for new Edital ${editalId}.`);
 });
 async function enqueueEditalExtraction(link, text, reason, searchId) {
     const db = (0, firestore_1.getFirestore)();
