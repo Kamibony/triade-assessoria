@@ -545,7 +545,8 @@ export const agenticSearchWorker = onTaskDispatched({
     rateLimits: {
         maxConcurrentDispatches: 2,
     },
-    timeoutSeconds: 540
+    timeoutSeconds: 540,
+    memory: '2GiB'
 }, async (request) => {
     const { oscId } = request.data as { oscId: string };
 
@@ -926,56 +927,6 @@ export const ingestOscDataFunction = onCall({
     };
 });
 
-export const onEditalCreated = onDocumentCreated('editais/{editalId}', async (event) => {
-    const editalSnapshot = event.data;
-    if (!editalSnapshot) {
-        console.log("No data associated with the event.");
-        return;
-    }
-
-    const editalData = editalSnapshot.data();
-    const editalId = event.params.editalId;
-    const db = getFirestore();
-
-    // 1. Retrieve the Edital embedding
-    const editalEmbedding = editalData.embedding || null;
-
-    const oscsSnapshot = await db.collection('oscs').get();
-    const queue = getFunctions().taskQueue('matchEvaluatorWorker');
-
-    const enqueuePromises: Promise<void>[] = [];
-    let enqueuedCount = 0;
-
-    for (const oscDoc of oscsSnapshot.docs) {
-        const oscData = oscDoc.data();
-        const oscEmbedding = oscData.embedding || null;
-
-        let shouldEnqueue = false;
-
-        // 2. Vector Pre-filtering: Only enqueue if we lack embeddings OR if similarity > 0.60
-        if (!editalEmbedding || !oscEmbedding) {
-            shouldEnqueue = true; // Needs embedding generation inside the worker
-        } else {
-            const similarity = cosineSimilarity(oscEmbedding, editalEmbedding);
-            if (similarity > 0.60) {
-                shouldEnqueue = true;
-            }
-        }
-
-        if (shouldEnqueue) {
-            enqueuePromises.push(
-                queue.enqueue({
-                    oscId: oscDoc.id,
-                    editalId: editalId
-                })
-            );
-            enqueuedCount++;
-        }
-    }
-
-    await Promise.all(enqueuePromises);
-    console.log(`Enqueued ${enqueuedCount} match tasks (filtered from ${oscsSnapshot.docs.length} total OSCs) for new Edital ${editalId}.`);
-});
 
 
 
