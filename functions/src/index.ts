@@ -130,6 +130,8 @@ Avalie os critérios cruzando a ONG com o Edital.
 Gere um 'matchScore' de 0 a 100 indicando o grau de compatibilidade.
 Determine 'eligibility' (true ou false).
 Forneça um 'reasoning' (justificativa detalhada para a nota e elegibilidade).
+Forneça um 'aiSummary' (um resumo de 1-2 frases destacando os pontos fortes ou fracos).
+Forneça um 'badges' (2 a 3 tags curtas que categorizam o match, ex: 'Alta Aderência', 'Desafio Financeiro', 'Foco Regional').
 Se a ONG for INELEGÍVEL ou tiver nota baixa, você DEVE gerar um 'actionPlan' (Plano de Ação) estruturado.
 Responda estritamente em português do Brasil (pt-BR).
 `;
@@ -548,18 +550,29 @@ export const agenticSearchWorker = onTaskDispatched({
     timeoutSeconds: 540,
     memory: '2GiB'
 }, async (request) => {
-    const { oscId } = request.data as { oscId: string };
+    const { oscId, jobId } = request.data as { oscId: string, jobId?: string };
 
     if (!oscId) {
         console.error("Invalid task payload: missing oscId.");
         return;
     }
 
+    const db = getFirestore();
+    const jobRef = jobId ? db.collection('agentic_search_jobs').doc(jobId) : null;
+
     try {
-        const db = getFirestore();
+        if (jobRef) {
+            await jobRef.update({
+                status: 'generating_queries',
+                logs: FieldValue.arrayUnion('Iniciando geração de queries de busca...'),
+                updatedAt: FieldValue.serverTimestamp()
+            });
+        }
+
         const oscDoc = await db.collection('oscs').doc(oscId).get();
         if (!oscDoc.exists) {
             console.error(`OSC ${oscId} not found.`);
+            if (jobRef) await jobRef.update({ status: 'failed', error: 'OSC não encontrada.', updatedAt: FieldValue.serverTimestamp() });
             return;
         }
 
@@ -567,6 +580,7 @@ export const agenticSearchWorker = onTaskDispatched({
         const parseResult = ngoProfileSchema.safeParse(rawOscData);
         if (!parseResult.success) {
             console.warn(`Invalid OSC data for ${oscId}`);
+            if (jobRef) await jobRef.update({ status: 'failed', error: 'Dados da OSC inválidos.', updatedAt: FieldValue.serverTimestamp() });
             return;
         }
 
@@ -581,10 +595,29 @@ export const agenticSearchWorker = onTaskDispatched({
         const { queries } = await generateSearchQueries({ osc: oscData });
         console.log(`Generated queries for OSC ${oscId}:`, queries);
 
+        if (jobRef) {
+            await jobRef.update({
+                'progress.queriesGenerated': queries.length,
+                status: 'scraping_web',
+                logs: FieldValue.arrayUnion(`Geradas ${queries.length} queries. Iniciando busca na web...`),
+                updatedAt: FieldValue.serverTimestamp()
+            });
+        }
+
         const searchedLinks = new Set<string>();
+        let totalLinksFound = 0;
+        let totalLinksEvaluated = 0;
+        let totalValidEditaisEnqueued = 0;
 
         for (const query of queries) {
             try {
+                if (jobRef) {
+                    await jobRef.update({
+                        logs: FieldValue.arrayUnion(`Buscando: "${query}"...`),
+                        updatedAt: FieldValue.serverTimestamp()
+                    });
+                }
+
                 let braveApiKey = process.env.BRAVE_SEARCH_API_KEY;
                 if (!braveApiKey) {
                     try { braveApiKey = braveApiKeyString.value(); } catch (e) { /* ignore */ }
@@ -614,15 +647,22 @@ export const agenticSearchWorker = onTaskDispatched({
                 const searchResults = braveData.web?.results || [];
 
                 let processedResults = 0;
+                let batchLinksFound = 0;
+                let batchLinksEvaluated = 0;
+                let batchValidEditaisEnqueued = 0;
+
                 for (const r of searchResults) {
                     if (processedResults >= 3) break;
 
                     const link = r.url;
                     if (!link || searchedLinks.has(link)) continue;
                     searchedLinks.add(link);
+                    batchLinksFound++;
 
                     const existingRef = await db.collection('editais').where('sourceUrl', '==', link).limit(1).get();
                     if (!existingRef.empty) continue;
+
+                    batchLinksEvaluated++;
 
                     const cleanJsonSnippet = JSON.stringify({
                         title: r.title,
@@ -648,23 +688,58 @@ export const agenticSearchWorker = onTaskDispatched({
                             console.warn(`Failed to fetch full text for ${link}, falling back to snippet`, fetchErr);
                         }
 
+                        if (jobRef && processedResults === 0) { // Update status to scoring on the first valid link of the batch
+                             await jobRef.update({ status: 'scoring_triage', updatedAt: FieldValue.serverTimestamp() });
+                        }
+
                         const triageResult = await triageEditalWebpage({ text: fullTextToAnalyze, searchQuery: query });
                         if (triageResult.isValidEdital) {
                             await enqueueEditalExtraction(link, fullTextToAnalyze, triageResult.reason, "AGENTIC_SEARCH");
                             console.log(`Successfully enqueued agentic extraction for ${link}`);
+                            batchValidEditaisEnqueued++;
                         }
                     }
 
                     processedResults++;
                 }
+
+                totalLinksFound += batchLinksFound;
+                totalLinksEvaluated += batchLinksEvaluated;
+                totalValidEditaisEnqueued += batchValidEditaisEnqueued;
+
+                // Debounce progress updates after each query
+                if (jobRef) {
+                    await jobRef.update({
+                        'progress.linksFound': totalLinksFound,
+                        'progress.linksEvaluated': totalLinksEvaluated,
+                        'progress.validEditaisEnqueued': totalValidEditaisEnqueued,
+                        updatedAt: FieldValue.serverTimestamp()
+                    });
+                }
+
             } catch (err) {
                 console.error(`Error searching for query ${query}:`, err);
             }
         }
 
         console.log(`Successfully finished agentic search for OSC ${oscId}`);
+        if (jobRef) {
+            await jobRef.update({
+                status: 'completed',
+                logs: FieldValue.arrayUnion('Busca finalizada com sucesso.'),
+                completedAt: FieldValue.serverTimestamp(),
+                updatedAt: FieldValue.serverTimestamp()
+            });
+        }
     } catch (error) {
         console.error(`Agentic search failed for OSC ${oscId}`, error);
+        if (jobRef) {
+            await jobRef.update({
+                status: 'failed',
+                error: error instanceof Error ? error.message : 'Erro interno desconhecido.',
+                updatedAt: FieldValue.serverTimestamp()
+            });
+        }
         throw error;
     }
 });
@@ -1453,12 +1528,31 @@ export const triggerAgenticSearch = onCall({
             throw new HttpsError('invalid-argument', 'oscId is required');
         }
 
-        const agenticQueue = getFunctions().taskQueue('agenticSearchWorker');
-        await agenticQueue.enqueue({
-            oscId: oscId
+        const db = getFirestore();
+        const jobRef = db.collection('agentic_search_jobs').doc();
+
+        await jobRef.set({
+            id: jobRef.id,
+            oscId: oscId,
+            status: 'queued',
+            progress: {
+                queriesGenerated: 0,
+                linksFound: 0,
+                linksEvaluated: 0,
+                validEditaisEnqueued: 0,
+            },
+            logs: ['Busca enfileirada.'],
+            startedAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
         });
 
-        return { success: true, message: `Busca agêntica enfileirada para OSC ${oscId}` };
+        const agenticQueue = getFunctions().taskQueue('agenticSearchWorker');
+        await agenticQueue.enqueue({
+            oscId: oscId,
+            jobId: jobRef.id
+        });
+
+        return { success: true, message: `Busca agêntica enfileirada para OSC ${oscId}`, jobId: jobRef.id };
     } catch (error: unknown) {
         console.error("Error triggering agentic search:", error);
         throw new HttpsError('internal', 'Falha ao iniciar a busca agêntica.');

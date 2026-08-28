@@ -34,6 +34,8 @@ exports.matchSchema = zod_1.z.object({
     matchScore: zod_1.z.number().min(0).max(100).describe("Score de match entre a ONG e o Edital (0 a 100)"),
     eligibility: zod_1.z.boolean().describe("Se a ONG é elegível (true) ou não (false)"),
     reasoning: zod_1.z.string().describe("Justificativa detalhada do AI para o score e elegibilidade"),
+    aiSummary: zod_1.z.string().optional().describe("Um resumo conciso de 1-2 frases sobre a compatibilidade"),
+    badges: zod_1.z.array(zod_1.z.string()).optional().describe("Lista de tags ou selos (ex: 'Alto Alinhamento', 'Prazo Curto', 'Regional')"),
     actionPlan: zod_1.z.array(zod_1.z.string()).optional().describe("Plano de Ação sugerido caso a ONG não seja elegível ou tenha score baixo")
 });
 exports.triageSchema = zod_1.z.object({

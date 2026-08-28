@@ -89,6 +89,8 @@ export declare const matchSchema: z.ZodObject<{
     matchScore: z.ZodNumber;
     eligibility: z.ZodBoolean;
     reasoning: z.ZodString;
+    aiSummary: z.ZodOptional<z.ZodString>;
+    badges: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     actionPlan: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
 }, "strip", z.ZodTypeAny, {
     editalId: string;
@@ -96,6 +98,8 @@ export declare const matchSchema: z.ZodObject<{
     matchScore: number;
     eligibility: boolean;
     reasoning: string;
+    aiSummary?: string | undefined;
+    badges?: string[] | undefined;
     actionPlan?: string[] | undefined;
 }, {
     editalId: string;
@@ -103,6 +107,8 @@ export declare const matchSchema: z.ZodObject<{
     matchScore: number;
     eligibility: boolean;
     reasoning: string;
+    aiSummary?: string | undefined;
+    badges?: string[] | undefined;
     actionPlan?: string[] | undefined;
 }>;
 export declare const triageSchema: z.ZodObject<{

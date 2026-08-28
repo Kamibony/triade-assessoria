@@ -136,8 +136,28 @@ export function NgoMatchView() {
                              </h3>
                          </div>
 
+                         {match.aiSummary && (
+                            <div className="mb-8">
+                                <div className="p-4 bg-primary/5 border border-primary/20 rounded-xl">
+                                    <p className="text-primary-800 dark:text-primary-200 leading-relaxed font-medium text-lg text-center">
+                                        ✨ {match.aiSummary}
+                                    </p>
+                                </div>
+                            </div>
+                         )}
+
+                         {match.badges && match.badges.length > 0 && (
+                            <div className="flex flex-wrap justify-center gap-2 mb-8 -mt-4">
+                                {match.badges.map((badge, idx) => (
+                                    <span key={idx} className="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-primary/10 text-primary border border-primary/20">
+                                        {badge}
+                                    </span>
+                                ))}
+                            </div>
+                         )}
+
                          <div className="mb-8">
-                             <h4 className="text-lg font-bold mb-2">Justificativa da Inteligência Artificial</h4>
+                             <h4 className="text-lg font-bold mb-2">Justificativa Detalhada da IA</h4>
                              <p className="text-muted-foreground leading-relaxed bg-muted/30 p-4 rounded-lg">{match.reasoning}</p>
                          </div>
 
