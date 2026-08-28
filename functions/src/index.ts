@@ -338,17 +338,19 @@ const generateSearchQueries = ai.defineFlow(
         const currentYear = new Date().getFullYear();
         const nextYear = currentYear + 1;
         const prompt = `Você é um agente especialista em captação de recursos para ONGs no Brasil.
-Baseado no perfil da ONG abaixo, gere EXATAMENTE 7 queries (termos de busca) de linguagem natural ou lógica booleana flexível (agrupamentos com OR) para motores de busca.
-Seu objetivo é maximizar o volume de resultados (recall) sobre editais abertos, financiamentos ou chamadas públicas que sejam compatíveis com a missão e atividades da ONG.
+Baseado no perfil da ONG abaixo, gere EXATAMENTE 7 queries (termos de busca) simples e diretas para motores de busca.
+Seu objetivo é descobrir editais abertos, financiamentos ou chamadas públicas compatíveis com a ONG.
 
-Siga rigorosamente estas regras para evitar restrições excessivas:
-- NÃO force o uso exclusivo de "AND". Use sinônimos e grupos "OR" para termos semelhantes.
-- INCLUA de forma flexível o ano atual ou próximo (${currentYear} ou ${nextYear}).
-- Exemplo de formato relaxado: (edital OR "chamada pública" OR financiamento) AND ("sua_area" OR "sinonimo") AND ("seu_estado" OR "sua_região") AND ${currentYear}
+Siga RIGOROSAMENTE estas regras para a formatação das queries:
+- Mantenha simples e plano: É ESTRITAMENTE PROIBIDO usar parênteses aninhados ou complexos (ex: evite (A OR B) AND (C OR D)).
+- Foco em palavras-chave: Gere sequências simples e diretas de palavras-chave (ex: edital financiamento quilombola nordeste).
+- Comprimento máximo: Limite cada query a um MÁXIMO de 5 a 7 termos essenciais.
+- Operadores mínimos: Evite lógica booleana pesada (AND, OR). Use termos simples que a API JSON do Google possa analisar facilmente.
+- Inclua o ano de forma simples: Adicione o ano atual ou próximo (${currentYear} ou ${nextYear}) como apenas mais um termo.
 
 Estratégia OBRIGATÓRIA para as 7 queries:
 - Gere 7 queries diversas explorando o local, estado, região, área de atuação e recortes demográficos/temáticos da ONG.
-- OBRIGATORIAMENTE, em pelo menos 2 das 7 queries, use explicitamente o operador "site:" para focar em domínios governamentais ou institucionais (ex: site:gov.br "chamada pública" quilombola ${currentYear}).
+- OBRIGATORIAMENTE, em pelo menos 2 das 7 queries, use explicitamente o operador "site:" para focar em domínios governamentais ou institucionais. (ex: site:gov.br edital cultura ${currentYear}).
 
 Perfil da ONG:
 Nome: ${input.osc.name}
