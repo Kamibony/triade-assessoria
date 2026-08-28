@@ -153,6 +153,8 @@ Avalie os critérios cruzando a ONG com o Edital.
 Gere um 'matchScore' de 0 a 100 indicando o grau de compatibilidade.
 Determine 'eligibility' (true ou false).
 Forneça um 'reasoning' (justificativa detalhada para a nota e elegibilidade).
+Forneça um 'aiSummary' (um resumo de 1-2 frases destacando os pontos fortes ou fracos).
+Forneça um 'badges' (2 a 3 tags curtas que categorizam o match, ex: 'Alta Aderência', 'Desafio Financeiro', 'Foco Regional').
 Se a ONG for INELEGÍVEL ou tiver nota baixa, você DEVE gerar um 'actionPlan' (Plano de Ação) estruturado.
 Responda estritamente em português do Brasil (pt-BR).
 `;
@@ -512,22 +514,34 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
     timeoutSeconds: 540,
     memory: '2GiB'
 }, async (request) => {
-    const { oscId } = request.data;
+    const { oscId, jobId } = request.data;
     if (!oscId) {
         console.error("Invalid task payload: missing oscId.");
         return;
     }
+    const db = (0, firestore_1.getFirestore)();
+    const jobRef = jobId ? db.collection('agentic_search_jobs').doc(jobId) : null;
     try {
-        const db = (0, firestore_1.getFirestore)();
+        if (jobRef) {
+            await jobRef.update({
+                status: 'generating_queries',
+                logs: firestore_1.FieldValue.arrayUnion('Iniciando geração de queries de busca...'),
+                updatedAt: firestore_1.FieldValue.serverTimestamp()
+            });
+        }
         const oscDoc = await db.collection('oscs').doc(oscId).get();
         if (!oscDoc.exists) {
             console.error(`OSC ${oscId} not found.`);
+            if (jobRef)
+                await jobRef.update({ status: 'failed', error: 'OSC não encontrada.', updatedAt: firestore_1.FieldValue.serverTimestamp() });
             return;
         }
         const rawOscData = oscDoc.data();
         const parseResult = schemas_js_1.ngoProfileSchema.safeParse(rawOscData);
         if (!parseResult.success) {
             console.warn(`Invalid OSC data for ${oscId}`);
+            if (jobRef)
+                await jobRef.update({ status: 'failed', error: 'Dados da OSC inválidos.', updatedAt: firestore_1.FieldValue.serverTimestamp() });
             return;
         }
         const oscData = parseResult.data;
@@ -539,9 +553,26 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         }
         const { queries } = await generateSearchQueries({ osc: oscData });
         console.log(`Generated queries for OSC ${oscId}:`, queries);
+        if (jobRef) {
+            await jobRef.update({
+                'progress.queriesGenerated': queries.length,
+                status: 'scraping_web',
+                logs: firestore_1.FieldValue.arrayUnion(`Geradas ${queries.length} queries. Iniciando busca na web...`),
+                updatedAt: firestore_1.FieldValue.serverTimestamp()
+            });
+        }
         const searchedLinks = new Set();
+        let totalLinksFound = 0;
+        let totalLinksEvaluated = 0;
+        let totalValidEditaisEnqueued = 0;
         for (const query of queries) {
             try {
+                if (jobRef) {
+                    await jobRef.update({
+                        logs: firestore_1.FieldValue.arrayUnion(`Buscando: "${query}"...`),
+                        updatedAt: firestore_1.FieldValue.serverTimestamp()
+                    });
+                }
                 let braveApiKey = process.env.BRAVE_SEARCH_API_KEY;
                 if (!braveApiKey) {
                     try {
@@ -568,6 +599,9 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                 const braveData = await searchResponse.json();
                 const searchResults = braveData.web?.results || [];
                 let processedResults = 0;
+                let batchLinksFound = 0;
+                let batchLinksEvaluated = 0;
+                let batchValidEditaisEnqueued = 0;
                 for (const r of searchResults) {
                     if (processedResults >= 3)
                         break;
@@ -575,9 +609,11 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                     if (!link || searchedLinks.has(link))
                         continue;
                     searchedLinks.add(link);
+                    batchLinksFound++;
                     const existingRef = await db.collection('editais').where('sourceUrl', '==', link).limit(1).get();
                     if (!existingRef.empty)
                         continue;
+                    batchLinksEvaluated++;
                     const cleanJsonSnippet = JSON.stringify({
                         title: r.title,
                         url: r.url,
@@ -599,13 +635,29 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                         catch (fetchErr) {
                             console.warn(`Failed to fetch full text for ${link}, falling back to snippet`, fetchErr);
                         }
+                        if (jobRef && processedResults === 0) { // Update status to scoring on the first valid link of the batch
+                            await jobRef.update({ status: 'scoring_triage', updatedAt: firestore_1.FieldValue.serverTimestamp() });
+                        }
                         const triageResult = await triageEditalWebpage({ text: fullTextToAnalyze, searchQuery: query });
                         if (triageResult.isValidEdital) {
                             await enqueueEditalExtraction(link, fullTextToAnalyze, triageResult.reason, "AGENTIC_SEARCH");
                             console.log(`Successfully enqueued agentic extraction for ${link}`);
+                            batchValidEditaisEnqueued++;
                         }
                     }
                     processedResults++;
+                }
+                totalLinksFound += batchLinksFound;
+                totalLinksEvaluated += batchLinksEvaluated;
+                totalValidEditaisEnqueued += batchValidEditaisEnqueued;
+                // Debounce progress updates after each query
+                if (jobRef) {
+                    await jobRef.update({
+                        'progress.linksFound': totalLinksFound,
+                        'progress.linksEvaluated': totalLinksEvaluated,
+                        'progress.validEditaisEnqueued': totalValidEditaisEnqueued,
+                        updatedAt: firestore_1.FieldValue.serverTimestamp()
+                    });
                 }
             }
             catch (err) {
@@ -613,9 +665,24 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
             }
         }
         console.log(`Successfully finished agentic search for OSC ${oscId}`);
+        if (jobRef) {
+            await jobRef.update({
+                status: 'completed',
+                logs: firestore_1.FieldValue.arrayUnion('Busca finalizada com sucesso.'),
+                completedAt: firestore_1.FieldValue.serverTimestamp(),
+                updatedAt: firestore_1.FieldValue.serverTimestamp()
+            });
+        }
     }
     catch (error) {
         console.error(`Agentic search failed for OSC ${oscId}`, error);
+        if (jobRef) {
+            await jobRef.update({
+                status: 'failed',
+                error: error instanceof Error ? error.message : 'Erro interno desconhecido.',
+                updatedAt: firestore_1.FieldValue.serverTimestamp()
+            });
+        }
         throw error;
     }
 });
@@ -1262,11 +1329,28 @@ exports.triggerAgenticSearch = (0, https_1.onCall)({
         if (!oscId) {
             throw new https_1.HttpsError('invalid-argument', 'oscId is required');
         }
+        const db = (0, firestore_1.getFirestore)();
+        const jobRef = db.collection('agentic_search_jobs').doc();
+        await jobRef.set({
+            id: jobRef.id,
+            oscId: oscId,
+            status: 'queued',
+            progress: {
+                queriesGenerated: 0,
+                linksFound: 0,
+                linksEvaluated: 0,
+                validEditaisEnqueued: 0,
+            },
+            logs: ['Busca enfileirada.'],
+            startedAt: firestore_1.FieldValue.serverTimestamp(),
+            updatedAt: firestore_1.FieldValue.serverTimestamp(),
+        });
         const agenticQueue = (0, functions_1.getFunctions)().taskQueue('agenticSearchWorker');
         await agenticQueue.enqueue({
-            oscId: oscId
+            oscId: oscId,
+            jobId: jobRef.id
         });
-        return { success: true, message: `Busca agêntica enfileirada para OSC ${oscId}` };
+        return { success: true, message: `Busca agêntica enfileirada para OSC ${oscId}`, jobId: jobRef.id };
     }
     catch (error) {
         console.error("Error triggering agentic search:", error);

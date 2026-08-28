@@ -12,7 +12,10 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:1234567890:web:abcdef"
 };
 
+import { getFirestore } from "firebase/firestore";
+
 const app = initializeApp(firebaseConfig);
 export const functions = getFunctions(app, 'us-central1');
 export const storage = getStorage(app);
 export const auth = getAuth(app);
+export const db = getFirestore(app);

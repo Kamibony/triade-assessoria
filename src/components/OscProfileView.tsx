@@ -5,6 +5,8 @@ import { httpsCallable } from 'firebase/functions';
 import { functions } from '../lib/firebase';
 import { Button } from './ui/Button';
 import { Loader2, Search, ArrowLeft, Building2, CheckCircle2, AlertCircle, CheckCircle, XCircle, ChevronDown, ChevronUp, FileText } from 'lucide-react';
+import { useAgenticSearchTracker } from '../lib/useAgenticSearchTracker';
+import { ProgressRadar } from './ui/ProgressRadar';
 import toast from 'react-hot-toast';
 import type { NgoProfile, MatchResult, Edital } from '../lib/types';
 
@@ -15,6 +17,15 @@ export function OscProfileView() {
   const [loading, setLoading] = useState(true);
   const [isAgenticRunning, setIsAgenticRunning] = useState(false);
   const [agenticResult, setAgenticResult] = useState<{type: 'success' | 'error', message: string} | null>(null);
+
+  const { activeJob } = useAgenticSearchTracker(oscId);
+  const [showRadar, setShowRadar] = useState(false);
+
+  useEffect(() => {
+     if (activeJob && !showRadar) {
+         setShowRadar(true);
+     }
+  }, [activeJob]);
 
   // Matches states
   const [matches, setMatches] = useState<MatchResult[]>([]);
@@ -128,6 +139,14 @@ export function OscProfileView() {
         </div>
       </div>
 
+      {showRadar && activeJob && (
+        <ProgressRadar
+           job={activeJob}
+           onRetry={handleRunAgenticSearch}
+           onDismiss={() => setShowRadar(false)}
+        />
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         <div className="md:col-span-2 space-y-6">
             <div className="bg-card text-card-foreground rounded-lg border shadow-sm p-6">
@@ -240,7 +259,12 @@ export function OscProfileView() {
                                             <span className="font-semibold text-sm truncate" title={edital?.title || match.editalId}>
                                                 {edital?.title || match.editalId}
                                             </span>
-                                            <div className="flex items-center gap-3 mt-1.5">
+                                            {match.aiSummary && (
+                                                <p className="text-xs text-muted-foreground mt-1 truncate" title={match.aiSummary}>
+                                                    {match.aiSummary}
+                                                </p>
+                                            )}
+                                            <div className="flex items-center gap-2 mt-2 flex-wrap">
                                                 <div className={`inline-flex items-center gap-1 font-medium px-2 py-0.5 rounded-full text-[10px] ${match.eligibility ? 'bg-emerald-100 text-emerald-800' : 'bg-destructive/10 text-destructive'}`}>
                                                     {match.eligibility ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
                                                     {match.eligibility ? 'Elegível' : 'Inelegível'}
@@ -248,6 +272,11 @@ export function OscProfileView() {
                                                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${scoreColorClass}`}>
                                                     {match.matchScore}%
                                                 </span>
+                                                {match.badges && match.badges.slice(0, 2).map((badge, idx) => (
+                                                    <span key={idx} className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-primary/10 text-primary">
+                                                        {badge}
+                                                    </span>
+                                                ))}
                                             </div>
                                         </div>
                                         <div className="text-muted-foreground flex-shrink-0">

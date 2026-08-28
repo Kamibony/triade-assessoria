@@ -95,6 +95,7 @@ export declare const onMatchGenerated: import("firebase-functions/core").CloudFu
 export declare const triggerAgenticSearch: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
     message: string;
+    jobId: string;
 }>, unknown>;
 export declare const autonomousSearchWorker: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
