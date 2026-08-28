@@ -333,15 +333,21 @@ const generateSearchQueries = ai.defineFlow(
         }),
     },
     async (input) => {
+        const currentYear = new Date().getFullYear();
+        const nextYear = currentYear + 1;
         const prompt = `Você é um agente especialista em captação de recursos para ONGs no Brasil.
-Baseado no perfil da ONG abaixo, gere EXATAMENTE 3 queries (termos de busca) curtas e diretas para o Google, focadas em encontrar editais abertos, financiamentos ou chamadas públicas que sejam compatíveis com a missão e atividades da ONG.
+Baseado no perfil da ONG abaixo, gere EXATAMENTE 3 queries (termos de busca) curtas, diretas e precisas para motores de busca, focadas em encontrar editais abertos, financiamentos ou chamadas públicas compatíveis com a missão e atividades da ONG.
+
+Você DEVE utilizar lógica booleana e terminologia oficial. Siga rigorosamente estas regras:
+- FORCE a inclusão do ano atual ou próximo (${currentYear} ou ${nextYear}) em TODAS as queries.
+- FORCE a inclusão de termos específicos como "chamada pública", "edital" ou "inscrições abertas".
+- Utilize operadores booleanos (AND, OR) se necessário, ou aspas duplas para termos exatos.
+Exemplo esperado de formato: "chamada pública" AND "quilombola" AND ${currentYear}
 
 Estratégia OBRIGATÓRIA para as 3 queries:
-1. Uma query LOCAL focada especificamente no Município ou Estado da ONG (ex: "edital cultura [Cidade/Estado]").
-2. Uma query REGIONAL focada na macrorregião da ONG (ex: "edital cultura [Nordeste/Sul/etc]").
-3. Uma query NACIONAL ou TEMÁTICA ampla, SEM NENHUMA RESTRIÇÃO GEOGRÁFICA, focada apenas na missão e atividades principais.
-
-Inclua sempre termos como "edital", "financiamento", "inscrições abertas", ou "chamada pública".
+1. Uma query LOCAL focada especificamente no Município ou Estado da ONG (ex: "edital" AND "cultura" AND "[Cidade/Estado]" AND ${currentYear}).
+2. Uma query REGIONAL focada na macrorregião da ONG (ex: "chamada pública" AND "cultura" AND "[Nordeste/Sul/etc]" AND ${currentYear}).
+3. Uma query NACIONAL ou TEMÁTICA ampla, SEM restrição geográfica, focada apenas na missão e atividades (ex: "inscrições abertas" AND "[Foco de Atuação]" AND ${currentYear}).
 
 Perfil da ONG:
 Nome: ${input.osc.name}
@@ -349,7 +355,7 @@ Localização: ${input.osc.location}
 Atividades Principais: ${input.osc.coreActivities.join(', ')}
 Missão: ${input.osc.mission || 'Não especificada'}
 
-Retorne apenas as queries.`;
+Retorne apenas as queries geradas no array.`;
 
         const response = await ai.generate({
             model: 'vertexai/gemini-2.5-flash',

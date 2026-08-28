@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { collection, query, onSnapshot, getDocs, getFirestore } from 'firebase/firestore';
-import { Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp, FileText, Search } from 'lucide-react';
-import type { MatchResult, Edital } from '../lib/types';
+import { Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp, FileText, Search, ExternalLink } from 'lucide-react';
+import type { MatchResult, Edital, NgoProfile } from '../lib/types';
 import { useSearchParams } from 'react-router-dom';
 
 export function MatchesDashboard() {
@@ -10,6 +10,7 @@ export function MatchesDashboard() {
 
   const [matches, setMatches] = useState<MatchResult[]>([]);
   const [editais, setEditais] = useState<Record<string, Edital>>({});
+  const [oscs, setOscs] = useState<Record<string, NgoProfile>>({});
   const [loading, setLoading] = useState(true);
   const [expandedMatch, setExpandedMatch] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -50,6 +51,29 @@ export function MatchesDashboard() {
               console.error("Error fetching editais", e);
           }
       }
+
+      // Fetch corresponding oscs
+      const oscIds = [...new Set(matchesData.map(m => m.oscId))];
+      if (oscIds.length > 0) {
+          try {
+              const { documentId, where } = await import("firebase/firestore");
+              const oscsMap: Record<string, NgoProfile> = {};
+              const chunkSize = 10;
+              for (let i = 0; i < oscIds.length; i += chunkSize) {
+                  const chunk = oscIds.slice(i, i + chunkSize);
+                  const validChunk = chunk.filter(id => !!id);
+                  if (validChunk.length > 0) {
+                      const q = query(collection(db, "oscs"), where(documentId(), "in", validChunk));
+                      const oscsSnap = await getDocs(q);
+                      oscsSnap.forEach(doc => { oscsMap[doc.id] = { id: doc.id, ...doc.data() } as NgoProfile; });
+                  }
+              }
+              setOscs(oscsMap);
+          } catch (e) {
+              console.error("Error fetching oscs", e);
+          }
+      }
+
       setLoading(false);
     }, (error) => {
       console.error("Error listening to matches:", error);
@@ -63,12 +87,15 @@ export function MatchesDashboard() {
      return <div className="p-8 text-center flex justify-center items-center h-64"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
   }
 
-  let filteredMatches = matches.filter(m =>
-    m.oscId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (m.oscName || '')?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    m.editalId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (editais[m.editalId]?.title || '')?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  let filteredMatches = matches.filter(m => {
+    const oscName = oscs[m.oscId]?.name || m.oscName || '';
+    return (
+      m.oscId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      oscName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      m.editalId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (editais[m.editalId]?.title || '')?.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  });
 
   if (filterOscId) {
     filteredMatches = filteredMatches.filter(m => m.oscId === filterOscId);
@@ -176,13 +203,14 @@ export function MatchesDashboard() {
                                  <td colSpan={5} className="px-6 py-3 font-semibold text-sm">
                                      {groupBy === 'edital'
                                          ? `Edital: ${editais[groupKey]?.title || groupKey}`
-                                         : `OSC: ${groupMatches[0]?.oscName || groupKey}`}
+                                         : `OSC: ${oscs[groupKey]?.name || groupMatches[0]?.oscName || groupKey}`}
                                      <span className="ml-2 text-xs font-normal text-muted-foreground">({groupMatches.length} matches)</span>
                                  </td>
                              </tr>
                          )}
                          {groupMatches.map(match => {
                            const edital = editais[match.editalId];
+                           const osc = oscs[match.oscId];
                            const isExpanded = expandedMatch === match.id;
 
                            // Determine color coding
@@ -193,7 +221,7 @@ export function MatchesDashboard() {
                            return (
                              <React.Fragment key={match.id}>
                          <tr className="hover:bg-muted/50 transition-colors">
-                           <td className="px-6 py-4 font-medium" title={match.oscId}>{match.oscName || match.oscId}</td>
+                           <td className="px-6 py-4 font-medium" title={match.oscId}>{osc?.name || match.oscName || match.oscId}</td>
                            <td className="px-6 py-4">
                              <div className="font-medium line-clamp-1" title={edital?.title}>{edital?.title || match.editalId}</div>
                            </td>
@@ -230,6 +258,19 @@ export function MatchesDashboard() {
                                       <p className="text-sm text-foreground/80 leading-relaxed bg-background p-4 rounded-lg border">
                                           {match.reasoning}
                                       </p>
+                                      {(edital as any)?.sourceUrl && (
+                                        <div className="mt-4">
+                                            <a
+                                                href={(edital as any).sourceUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
+                                            >
+                                                <ExternalLink className="w-4 h-4 mr-2" />
+                                                Acessar Edital Original
+                                            </a>
+                                        </div>
+                                      )}
                                   </div>
                                   {match.actionPlan && match.actionPlan.length > 0 && (
                                       <div>
