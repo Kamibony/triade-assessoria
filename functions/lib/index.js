@@ -511,7 +511,7 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
     rateLimits: {
         maxConcurrentDispatches: 2,
     },
-    timeoutSeconds: 3600,
+    timeoutSeconds: 1800,
     memory: '4GiB'
 }, async (request) => {
     const { oscId, jobId } = request.data;
