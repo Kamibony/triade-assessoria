@@ -5,7 +5,7 @@
   "main": "lib/index.js",
   "scripts": {
     "build": "npx playwright install chromium --with-deps && tsc",
-    "gcp-build": "PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium --with-deps",
+    "gcp-build": "test -d node_modules/playwright-core/.local-browsers || (PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium --with-deps)",
     "start": "npm run build && firebase emulators:start --only functions",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -27,6 +27,7 @@
     "genkit": "^1.41.0",
     "google-sr": "^6.0.0",
     "node-fetch": "^3.3.2",
+    "playwright": "^1.62.1",
     "playwright-core": "^1.62.1",
     "playwright-extra": "^4.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
