@@ -317,7 +317,13 @@ const generateSearchQueries = ai.defineFlow({
     }),
 }, async (input) => {
     const prompt = `Você é um agente especialista em captação de recursos para ONGs no Brasil.
-Baseado no perfil da ONG abaixo, gere 3 queries (termos de busca) curtas e diretas para o Google, focadas em encontrar editais abertos, financiamentos ou chamadas públicas que sejam compatíveis com a missão, atividades e localização da ONG.
+Baseado no perfil da ONG abaixo, gere EXATAMENTE 3 queries (termos de busca) curtas e diretas para o Google, focadas em encontrar editais abertos, financiamentos ou chamadas públicas que sejam compatíveis com a missão e atividades da ONG.
+
+Estratégia OBRIGATÓRIA para as 3 queries:
+1. Uma query LOCAL focada especificamente no Município ou Estado da ONG (ex: "edital cultura [Cidade/Estado]").
+2. Uma query REGIONAL focada na macrorregião da ONG (ex: "edital cultura [Nordeste/Sul/etc]").
+3. Uma query NACIONAL ou TEMÁTICA ampla, SEM NENHUMA RESTRIÇÃO GEOGRÁFICA, focada apenas na missão e atividades principais.
+
 Inclua sempre termos como "edital", "financiamento", "inscrições abertas", ou "chamada pública".
 
 Perfil da ONG:
@@ -498,6 +504,7 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
     const matchDocData = {
         ...matchResult,
         id: matchRef.id,
+        oscName: oscData.name,
         createdAt: firestore_1.FieldValue.serverTimestamp()
     };
     await matchRef.set(matchDocData, { merge: true });

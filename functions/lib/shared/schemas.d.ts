@@ -86,6 +86,7 @@ export declare const editalSchema: z.ZodObject<{
 export declare const matchSchema: z.ZodObject<{
     editalId: z.ZodString;
     oscId: z.ZodString;
+    oscName: z.ZodOptional<z.ZodString>;
     matchScore: z.ZodNumber;
     eligibility: z.ZodBoolean;
     reasoning: z.ZodString;
@@ -95,6 +96,7 @@ export declare const matchSchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     editalId: string;
     oscId: string;
+    oscName?: string | undefined;
     matchScore: number;
     eligibility: boolean;
     reasoning: string;
@@ -104,6 +106,7 @@ export declare const matchSchema: z.ZodObject<{
 }, {
     editalId: string;
     oscId: string;
+    oscName?: string | undefined;
     matchScore: number;
     eligibility: boolean;
     reasoning: string;

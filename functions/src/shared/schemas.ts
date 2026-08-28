@@ -31,6 +31,7 @@ export const editalSchema = z.object({
 export const matchSchema = z.object({
     editalId: z.string().describe("ID do edital analisado"),
     oscId: z.string().describe("ID da ONG analisada"),
+    oscName: z.string().optional().describe("Nome da ONG analisada"),
     matchScore: z.number().min(0).max(100).describe("Score de match entre a ONG e o Edital (0 a 100)"),
     eligibility: z.boolean().describe("Se a ONG é elegível (true) ou não (false)"),
     reasoning: z.string().describe("Justificativa detalhada do AI para o score e elegibilidade"),
