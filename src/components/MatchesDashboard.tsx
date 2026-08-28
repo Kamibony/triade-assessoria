@@ -27,48 +27,50 @@ export function MatchesDashboard() {
       // Default Sort by Match Score Descending
       matchesData.sort((a, b) => b.matchScore - a.matchScore);
 
+      // Optimistically set matches first
       setMatches(matchesData);
+
+      const { documentId, where } = await import("firebase/firestore");
 
       // Fetch corresponding editais
       const editalIds = [...new Set(matchesData.map(m => m.editalId))];
       if (editalIds.length > 0) {
           try {
-              // Fetch corresponding editais in chunks
-              const { documentId, where } = await import("firebase/firestore");
-              const editaisMap: Record<string, Edital> = {};
+              let hasNewEditais = false;
+              const editaisMap: Record<string, Edital> = { ...editais };
               const chunkSize = 10;
               for (let i = 0; i < editalIds.length; i += chunkSize) {
                   const chunk = editalIds.slice(i, i + chunkSize);
-                  const validChunk = chunk.filter(id => !!id);
+                  const validChunk = chunk.filter(id => !!id && !editaisMap[id]);
                   if (validChunk.length > 0) {
                       const q = query(collection(db, "editais"), where(documentId(), "in", validChunk));
                       const editaisSnap = await getDocs(q);
-                      editaisSnap.forEach(doc => { editaisMap[doc.id] = { id: doc.id, ...doc.data() } as Edital; });
+                      editaisSnap.forEach(doc => { editaisMap[doc.id] = { id: doc.id, ...doc.data() } as Edital; hasNewEditais = true; });
                   }
               }
-              setEditais(editaisMap);
+              if (hasNewEditais) setEditais(editaisMap);
           } catch (e) {
               console.error("Error fetching editais", e);
           }
       }
 
-      // Fetch corresponding oscs
+      // Fetch corresponding oscs (crucial for fallback name resolution)
       const oscIds = [...new Set(matchesData.map(m => m.oscId))];
       if (oscIds.length > 0) {
           try {
-              const { documentId, where } = await import("firebase/firestore");
-              const oscsMap: Record<string, NgoProfile> = {};
+              let hasNewOscs = false;
+              const oscsMap: Record<string, NgoProfile> = { ...oscs };
               const chunkSize = 10;
               for (let i = 0; i < oscIds.length; i += chunkSize) {
                   const chunk = oscIds.slice(i, i + chunkSize);
-                  const validChunk = chunk.filter(id => !!id);
+                  const validChunk = chunk.filter(id => !!id && !oscsMap[id]); // Only fetch if we don't have it
                   if (validChunk.length > 0) {
                       const q = query(collection(db, "oscs"), where(documentId(), "in", validChunk));
                       const oscsSnap = await getDocs(q);
-                      oscsSnap.forEach(doc => { oscsMap[doc.id] = { id: doc.id, ...doc.data() } as NgoProfile; });
+                      oscsSnap.forEach(doc => { oscsMap[doc.id] = { id: doc.id, ...doc.data() } as NgoProfile; hasNewOscs = true; });
                   }
               }
-              setOscs(oscsMap);
+              if (hasNewOscs) setOscs(oscsMap);
           } catch (e) {
               console.error("Error fetching oscs", e);
           }

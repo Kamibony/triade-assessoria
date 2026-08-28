@@ -336,18 +336,18 @@ const generateSearchQueries = ai.defineFlow(
         const currentYear = new Date().getFullYear();
         const nextYear = currentYear + 1;
         const prompt = `Você é um agente especialista em captação de recursos para ONGs no Brasil.
-Baseado no perfil da ONG abaixo, gere EXATAMENTE 3 queries (termos de busca) curtas, diretas e precisas para motores de busca, focadas em encontrar editais abertos, financiamentos ou chamadas públicas compatíveis com a missão e atividades da ONG.
+Baseado no perfil da ONG abaixo, gere EXATAMENTE 3 queries (termos de busca) de linguagem natural ou lógica booleana flexível (agrupamentos com OR) para motores de busca.
+Seu objetivo é maximizar o volume de resultados (recall) sobre editais abertos, financiamentos ou chamadas públicas que sejam compatíveis com a missão e atividades da ONG.
 
-Você DEVE utilizar lógica booleana e terminologia oficial. Siga rigorosamente estas regras:
-- FORCE a inclusão do ano atual ou próximo (${currentYear} ou ${nextYear}) em TODAS as queries.
-- FORCE a inclusão de termos específicos como "chamada pública", "edital" ou "inscrições abertas".
-- Utilize operadores booleanos (AND, OR) se necessário, ou aspas duplas para termos exatos.
-Exemplo esperado de formato: "chamada pública" AND "quilombola" AND ${currentYear}
+Siga rigorosamente estas regras para evitar restrições excessivas:
+- NÃO force o uso exclusivo de "AND". Use sinônimos e grupos "OR" para termos semelhantes.
+- INCLUA de forma flexível o ano atual ou próximo (${currentYear} ou ${nextYear}).
+- Exemplo de formato relaxado: (edital OR "chamada pública" OR financiamento) AND ("sua_area" OR "sinonimo") AND ("seu_estado" OR "sua_região") AND ${currentYear}
 
 Estratégia OBRIGATÓRIA para as 3 queries:
-1. Uma query LOCAL focada especificamente no Município ou Estado da ONG (ex: "edital" AND "cultura" AND "[Cidade/Estado]" AND ${currentYear}).
-2. Uma query REGIONAL focada na macrorregião da ONG (ex: "chamada pública" AND "cultura" AND "[Nordeste/Sul/etc]" AND ${currentYear}).
-3. Uma query NACIONAL ou TEMÁTICA ampla, SEM restrição geográfica, focada apenas na missão e atividades (ex: "inscrições abertas" AND "[Foco de Atuação]" AND ${currentYear}).
+1. Uma query LOCAL focada no Município ou Estado da ONG de forma flexível (ex: (edital OR apoio) AND "cultura" AND "[Cidade/Estado]").
+2. Uma query REGIONAL focada na macrorregião da ONG (ex: ("chamada pública" OR fomento) AND "cultura" AND "[Nordeste/Sul/etc]").
+3. Uma query NACIONAL ou TEMÁTICA ampla, SEM restrição geográfica (ex: (edital OR "inscrições abertas") AND "[Foco de Atuação]").
 
 Perfil da ONG:
 Nome: ${input.osc.name}
@@ -707,7 +707,7 @@ export const agenticSearchWorker = onTaskDispatched({
 
                         const triageResult = await triageEditalWebpage({ text: fullTextToAnalyze, searchQuery: query });
                         if (triageResult.isValidEdital) {
-                            await enqueueEditalExtraction(link, fullTextToAnalyze, triageResult.reason, "AGENTIC_SEARCH");
+                            await enqueueEditalExtraction(link, fullTextToAnalyze, triageResult.reason, oscId);
                             console.log(`Successfully enqueued agentic extraction for ${link}`);
                             batchValidEditaisEnqueued++;
                         }
@@ -1814,12 +1814,28 @@ export const extractionWorker = onTaskDispatched({
                 createdAt: FieldValue.serverTimestamp(),
             };
 
-            await db.collection('editais').add(editalDocData);
+            const docRef = await db.collection('editais').add(editalDocData);
+
             if (searchRef) {
                 await searchRef.update({
                     logs: FieldValue.arrayUnion({ link, status: 'Importado', reason: reason }),
                     savedCount: FieldValue.increment(1)
                 });
+            }
+
+            // Handoff: Trigger Match Evaluator for agentic search if searchId contains an oscId pattern
+            // Note: In agentic search, we passed oscId in place of searchId in enqueueEditalExtraction
+            if (searchId && searchId !== "MANUAL" && searchId !== "RSS" && searchId.length > 15) {
+                try {
+                    const matchQueue = getFunctions().taskQueue('matchEvaluatorWorker');
+                    await matchQueue.enqueue({
+                        oscId: searchId,
+                        editalId: docRef.id
+                    });
+                    console.log(`Enqueued match evaluation for new edital ${docRef.id} and OSC ${searchId}`);
+                } catch (matchErr) {
+                    console.error("Failed to enqueue match evaluator:", matchErr);
+                }
             }
         } else {
             if (searchRef) {
