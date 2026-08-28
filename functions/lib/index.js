@@ -46,6 +46,7 @@ const storage_1 = require("firebase-admin/storage");
 const functions_1 = require("firebase-admin/functions");
 const admin = __importStar(require("firebase-admin"));
 const params_1 = require("firebase-functions/params");
+const google_auth_library_1 = require("google-auth-library");
 const genkit_1 = require("genkit");
 const zod_1 = require("zod");
 const google_genai_1 = require("@genkit-ai/google-genai");
@@ -56,8 +57,9 @@ const schemas_js_1 = require("./shared/schemas.js");
 const cheerio = __importStar(require("cheerio"));
 const rss_parser_1 = __importDefault(require("rss-parser"));
 const braveApiKeyString = (0, params_1.defineString)('BRAVE_SEARCH_API_KEY');
-const googleApiKeyString = (0, params_1.defineString)('GOOGLE_SEARCH_API_KEY');
-const googleEngineIdString = (0, params_1.defineString)('GOOGLE_SEARCH_ENGINE_ID');
+const vertexAiSearchDataStoreIdString = (0, params_1.defineString)('VERTEX_AI_SEARCH_DATA_STORE_ID');
+const vertexAiSearchLocationString = (0, params_1.defineString)('VERTEX_AI_SEARCH_LOCATION');
+const vertexAiSearchProjectIdString = (0, params_1.defineString)('VERTEX_AI_SEARCH_PROJECT_ID');
 function removeAccents(str) {
     return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
@@ -591,60 +593,80 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                 }
                 let allSearchResults = [];
                 let googleSearchFailed = false;
-                // Try Primary Search: Google Custom Search API
-                let googleApiKey = process.env.GOOGLE_SEARCH_API_KEY;
-                if (!googleApiKey) {
+                // Try Primary Search: Google Vertex AI Search
+                let vertexDataStoreId = process.env.VERTEX_AI_SEARCH_DATA_STORE_ID;
+                if (!vertexDataStoreId) {
                     try {
-                        googleApiKey = googleApiKeyString.value();
+                        vertexDataStoreId = vertexAiSearchDataStoreIdString.value();
                     }
                     catch (e) { /* ignore */ }
                 }
-                let googleEngineId = process.env.GOOGLE_SEARCH_ENGINE_ID;
-                if (!googleEngineId) {
+                let vertexLocation = process.env.VERTEX_AI_SEARCH_LOCATION;
+                if (!vertexLocation) {
                     try {
-                        googleEngineId = googleEngineIdString.value();
+                        vertexLocation = vertexAiSearchLocationString.value();
                     }
                     catch (e) { /* ignore */ }
                 }
-                if (!googleEngineId) {
-                    googleEngineId = '82611de35b22b48dd'; // Default "Triade Sniper" ID
-                }
-                if (googleApiKey && googleEngineId) {
+                let vertexProjectId = process.env.VERTEX_AI_SEARCH_PROJECT_ID;
+                if (!vertexProjectId) {
                     try {
-                        console.log(`[Agentic Search] Executing Google Custom Search for query: "${query}"`);
-                        // Google Custom Search returns max 10 per page. Start at 1, 11, 21, 31 to get up to 40.
-                        for (let start = 1; start <= 31; start += 10) {
-                            const googleUrl = `https://customsearch.googleapis.com/customsearch/v1?key=${googleApiKey}&cx=${googleEngineId}&q=${encodeURIComponent(query)}&start=${start}`;
-                            const googleResponse = await fetch(googleUrl);
-                            if (!googleResponse.ok) {
-                                console.warn(`Google Custom Search API failed for start ${start} with status: ${googleResponse.status}`);
-                                googleSearchFailed = true;
-                                break;
-                            }
-                            const googleData = await googleResponse.json();
-                            const items = googleData.items || [];
-                            for (const item of items) {
-                                if (item.link) {
+                        vertexProjectId = vertexAiSearchProjectIdString.value();
+                    }
+                    catch (e) { /* ignore */ }
+                }
+                if (vertexDataStoreId && vertexLocation && vertexProjectId) {
+                    try {
+                        console.log(`[Agentic Search] Executing Vertex AI Search for query: "${query}"`);
+                        const auth = new google_auth_library_1.GoogleAuth({
+                            scopes: 'https://www.googleapis.com/auth/cloud-platform'
+                        });
+                        const client = await auth.getClient();
+                        const accessToken = await client.getAccessToken();
+                        const vertexUrl = `https://discoveryengine.googleapis.com/v1alpha/projects/${vertexProjectId}/locations/${vertexLocation}/collections/default_collection/dataStores/${vertexDataStoreId}/servingConfigs/default_search:search`;
+                        const vertexResponse = await fetch(vertexUrl, {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${accessToken.token}`,
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                query: query,
+                                pageSize: 40
+                            })
+                        });
+                        if (!vertexResponse.ok) {
+                            console.warn(`Vertex AI Search API failed with status: ${vertexResponse.status}`);
+                            googleSearchFailed = true;
+                        }
+                        else {
+                            const vertexData = await vertexResponse.json();
+                            const results = vertexData.results || [];
+                            for (const result of results) {
+                                const derivedStructData = result.document?.derivedStructData;
+                                if (derivedStructData && derivedStructData.link) {
+                                    let snippet = '';
+                                    if (derivedStructData.snippets && derivedStructData.snippets.length > 0) {
+                                        snippet = derivedStructData.snippets[0].snippet || '';
+                                        // Clean HTML tags from snippet
+                                        snippet = snippet.replace(/<\/?[^>]+(>|$)/g, "");
+                                    }
                                     allSearchResults.push({
-                                        link: item.link,
-                                        title: item.title || '',
-                                        snippet: item.snippet || ''
+                                        link: derivedStructData.link,
+                                        title: derivedStructData.title || '',
+                                        snippet: snippet
                                     });
                                 }
-                            }
-                            // If we received fewer than 10 items, there are no more pages
-                            if (items.length < 10) {
-                                break;
                             }
                         }
                     }
                     catch (e) {
-                        console.warn(`[Agentic Search] Exception during Google Custom Search:`, e);
+                        console.warn(`[Agentic Search] Exception during Vertex AI Search:`, e);
                         googleSearchFailed = true;
                     }
                 }
                 else {
-                    console.warn(`[Agentic Search] Missing Google Custom Search credentials. Falling back to Brave Search.`);
+                    console.warn(`[Agentic Search] Missing Vertex AI Search credentials. Falling back to Brave Search.`);
                     googleSearchFailed = true;
                 }
                 // Secondary Fallback: Brave Search API
