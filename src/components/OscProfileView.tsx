@@ -4,7 +4,7 @@ import { getFirestore, doc, onSnapshot, collection, query, where, getDocs } from
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../lib/firebase';
 import { Button } from './ui/Button';
-import { Loader2, Search, ArrowLeft, Building2, CheckCircle2, AlertCircle, CheckCircle, XCircle, ChevronDown, ChevronUp, FileText } from 'lucide-react';
+import { Loader2, Search, ArrowLeft, Building2, CheckCircle2, AlertCircle, CheckCircle, XCircle, ChevronDown, ChevronUp, FileText, ExternalLink } from 'lucide-react';
 import { useAgenticSearchTracker } from '../lib/useAgenticSearchTracker';
 import { ProgressRadar } from './ui/ProgressRadar';
 import toast from 'react-hot-toast';
@@ -220,117 +220,135 @@ export function OscProfileView() {
                   </div>
                 )}
             </div>
-
-            <div className="bg-card text-card-foreground rounded-lg border shadow-sm p-6">
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-bold text-lg">Matches Encontrados</h3>
-                    <div className="flex items-center gap-2">
-                        <span className="text-xs font-medium whitespace-nowrap text-muted-foreground">Ocultar &lt; 40%</span>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                            <input
-                              id="hideLow"
-                              type="checkbox"
-                              className="sr-only peer"
-                              checked={hideLowScores}
-                              onChange={e => setHideLowScores(e.target.checked)}
-                            />
-                            <div className="w-7 h-4 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
-                        </label>
-                    </div>
-                </div>
-
-                {loadingMatches ? (
-                    <div className="flex justify-center items-center py-8"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
-                ) : matches.filter(m => !hideLowScores || m.matchScore >= 40).length === 0 ? (
-                    <div className="text-center py-8 text-sm text-muted-foreground bg-muted/30 rounded-lg">
-                        Nenhum match encontrado.
-                    </div>
-                ) : (
-                    <div className="space-y-4">
-                        {matches.filter(m => !hideLowScores || m.matchScore >= 40).map(match => {
-                            const edital = editais[match.editalId];
-                            const isExpanded = expandedMatch === match.id;
-
-                            let scoreColorClass = 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
-                            if (match.matchScore >= 70) scoreColorClass = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
-                            else if (match.matchScore >= 40) scoreColorClass = 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
-
-                            const matchTime = match.createdAt?.toMillis?.() || (typeof match.createdAt === 'number' ? match.createdAt : 0);
-                            const isNew = matchTime > Date.now() - 24 * 60 * 60 * 1000; // 24 hours
-
-                            return (
-                                <div key={match.id} className="border rounded-lg overflow-hidden">
-                                    <div
-                                        className="p-3 bg-card hover:bg-muted/50 cursor-pointer flex justify-between items-center"
-                                        onClick={() => setExpandedMatch(isExpanded ? null : (match.id || null))}
-                                    >
-                                        <div className="flex flex-col flex-1 min-w-0 pr-4">
-                                            <div className="flex items-center gap-2">
-                                                <span className="font-semibold text-sm truncate" title={edital?.title || match.editalId}>
-                                                    {edital?.title || match.editalId}
-                                                </span>
-                                                {isNew && (
-                                                    <span className="bg-blue-500 text-white text-[10px] px-1.5 py-0.5 rounded-sm font-bold shrink-0">NOVO</span>
-                                                )}
-                                            </div>
-                                            {match.aiSummary && (
-                                                <p className="text-xs text-muted-foreground mt-1 truncate" title={match.aiSummary}>
-                                                    {match.aiSummary}
-                                                </p>
-                                            )}
-                                            <div className="flex items-center gap-2 mt-2 flex-wrap">
-                                                <div className={`inline-flex items-center gap-1 font-medium px-2 py-0.5 rounded-full text-[10px] ${match.eligibility ? 'bg-emerald-100 text-emerald-800' : 'bg-destructive/10 text-destructive'}`}>
-                                                    {match.eligibility ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
-                                                    {match.eligibility ? 'Elegível' : 'Inelegível'}
-                                                </div>
-                                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${scoreColorClass}`}>
-                                                    {match.matchScore}%
-                                                </span>
-                                                {match.badges && match.badges.slice(0, 2).map((badge, idx) => (
-                                                    <span key={idx} className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-primary/10 text-primary">
-                                                        {badge}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        </div>
-                                        <div className="text-muted-foreground flex-shrink-0">
-                                            {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                                        </div>
-                                    </div>
-
-                                    {isExpanded && (
-                                        <div className="p-4 bg-muted/20 border-t text-sm">
-                                            <h4 className="font-bold mb-2 text-xs flex items-center gap-2">
-                                                <FileText className="w-3 h-3" /> Justificativa
-                                            </h4>
-                                            <p className="text-muted-foreground leading-relaxed mb-4">
-                                                {match.reasoning}
-                                            </p>
-
-                                            {match.actionPlan && match.actionPlan.length > 0 && (
-                                                <div>
-                                                    <h4 className="font-bold mb-2 text-xs text-destructive flex items-center gap-2">
-                                                        Plano de Ação
-                                                    </h4>
-                                                    <ul className="space-y-1">
-                                                        {match.actionPlan.map((step, idx) => (
-                                                            <li key={idx} className="flex gap-2 text-xs items-start bg-destructive/5 p-2 rounded border border-destructive/10 text-foreground/90">
-                                                                <span className="font-bold text-destructive shrink-0">{idx + 1}.</span>
-                                                                <span>{step.replace(/^\d+\.\s*/, '')}</span>
-                                                            </li>
-                                                        ))}
-                                                    </ul>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
-                )}
-            </div>
         </div>
+      </div>
+
+      <div className="bg-card text-card-foreground rounded-lg border shadow-sm p-6 w-full">
+          <div className="flex justify-between items-center mb-6">
+              <h3 className="font-bold text-xl">Matches Encontrados</h3>
+              <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium whitespace-nowrap text-muted-foreground">Ocultar &lt; 40%</span>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        id="hideLow"
+                        type="checkbox"
+                        className="sr-only peer"
+                        checked={hideLowScores}
+                        onChange={e => setHideLowScores(e.target.checked)}
+                      />
+                      <div className="w-9 h-5 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                  </label>
+              </div>
+          </div>
+
+          {loadingMatches ? (
+              <div className="flex justify-center items-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
+          ) : matches.filter(m => !hideLowScores || m.matchScore >= 40).length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground bg-muted/30 rounded-lg">
+                  Nenhum match encontrado para esta OSC.
+              </div>
+          ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {matches.filter(m => !hideLowScores || m.matchScore >= 40).map(match => {
+                      const edital = editais[match.editalId];
+                      const isExpanded = expandedMatch === match.id;
+
+                      let scoreColorClass = 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
+                      if (match.matchScore >= 70) scoreColorClass = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
+                      else if (match.matchScore >= 40) scoreColorClass = 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
+
+                      const matchTime = match.createdAt?.toMillis?.() || (typeof match.createdAt === 'number' ? match.createdAt : 0);
+                      const isNew = matchTime > Date.now() - 24 * 60 * 60 * 1000; // 24 hours
+
+                      return (
+                          <div key={match.id} className={`border rounded-lg overflow-hidden transition-all duration-200 ${isExpanded ? 'md:col-span-2 shadow-md' : 'hover:shadow-sm'}`}>
+                              <div
+                                  className="p-4 bg-card hover:bg-muted/50 cursor-pointer flex justify-between items-center"
+                                  onClick={() => setExpandedMatch(isExpanded ? null : (match.id || null))}
+                              >
+                                  <div className="flex flex-col flex-1 min-w-0 pr-4">
+                                      <div className="flex items-center gap-2">
+                                          <span className="font-bold text-base truncate" title={edital?.title || match.editalId}>
+                                              {edital?.title || match.editalId}
+                                          </span>
+                                          {isNew && (
+                                              <span className="bg-blue-500 text-white text-xs px-2 py-0.5 rounded-md font-bold shrink-0">NOVO</span>
+                                          )}
+                                      </div>
+                                      {match.aiSummary && (
+                                          <p className="text-sm text-muted-foreground mt-1.5 truncate" title={match.aiSummary}>
+                                              {match.aiSummary}
+                                          </p>
+                                      )}
+                                      <div className="flex items-center gap-2 mt-3 flex-wrap">
+                                          <div className={`inline-flex items-center gap-1 font-medium px-2.5 py-1 rounded-full text-xs ${match.eligibility ? 'bg-emerald-100 text-emerald-800' : 'bg-destructive/10 text-destructive'}`}>
+                                              {match.eligibility ? <CheckCircle className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+                                              {match.eligibility ? 'Elegível' : 'Inelegível'}
+                                          </div>
+                                          <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${scoreColorClass}`}>
+                                              Score: {match.matchScore}%
+                                          </span>
+                                          {match.badges && match.badges.slice(0, 3).map((badge, idx) => (
+                                              <span key={idx} className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-primary/10 text-primary">
+                                                  {badge}
+                                              </span>
+                                          ))}
+                                      </div>
+                                  </div>
+                                  <div className="text-muted-foreground flex-shrink-0 bg-muted/50 p-2 rounded-full">
+                                      {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                                  </div>
+                              </div>
+
+                              {isExpanded && (
+                                  <div className="p-6 bg-muted/10 border-t">
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                          <div>
+                                              <h4 className="font-bold mb-3 text-sm flex items-center gap-2">
+                                                  <FileText className="w-4 h-4" /> Justificativa
+                                              </h4>
+                                              <p className="text-sm text-foreground/80 leading-relaxed bg-background p-4 rounded-lg border">
+                                                  {match.reasoning}
+                                              </p>
+
+                                              {(edital as any)?.sourceUrl && (
+                                                <div className="mt-4">
+                                                    <a
+                                                        href={(edital as any).sourceUrl}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2 w-full sm:w-auto"
+                                                    >
+                                                        <ExternalLink className="w-4 h-4 mr-2" />
+                                                        Acessar Edital Original
+                                                    </a>
+                                                </div>
+                                              )}
+                                          </div>
+
+                                          {match.actionPlan && match.actionPlan.length > 0 && (
+                                              <div>
+                                                  <h4 className="font-bold mb-3 text-sm text-destructive flex items-center gap-2">
+                                                      Plano de Ação
+                                                  </h4>
+                                                  <ul className="space-y-2">
+                                                      {match.actionPlan.map((step, idx) => (
+                                                          <li key={idx} className="flex gap-3 text-sm items-start bg-destructive/5 p-3 rounded-lg border border-destructive/10 text-foreground/90">
+                                                              <span className="font-bold text-destructive min-w-[20px] mt-0.5">{idx + 1}.</span>
+                                                              <span className="leading-relaxed">{step.replace(/^\d+\.\s*/, '')}</span>
+                                                          </li>
+                                                      ))}
+                                                  </ul>
+                                              </div>
+                                          )}
+                                      </div>
+                                  </div>
+                              )}
+                          </div>
+                      );
+                  })}
+              </div>
+          )}
       </div>
     </div>
   );
