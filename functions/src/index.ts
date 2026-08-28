@@ -336,7 +336,7 @@ const generateSearchQueries = ai.defineFlow(
         const currentYear = new Date().getFullYear();
         const nextYear = currentYear + 1;
         const prompt = `Você é um agente especialista em captação de recursos para ONGs no Brasil.
-Baseado no perfil da ONG abaixo, gere EXATAMENTE 3 queries (termos de busca) de linguagem natural ou lógica booleana flexível (agrupamentos com OR) para motores de busca.
+Baseado no perfil da ONG abaixo, gere EXATAMENTE 7 queries (termos de busca) de linguagem natural ou lógica booleana flexível (agrupamentos com OR) para motores de busca.
 Seu objetivo é maximizar o volume de resultados (recall) sobre editais abertos, financiamentos ou chamadas públicas que sejam compatíveis com a missão e atividades da ONG.
 
 Siga rigorosamente estas regras para evitar restrições excessivas:
@@ -344,10 +344,9 @@ Siga rigorosamente estas regras para evitar restrições excessivas:
 - INCLUA de forma flexível o ano atual ou próximo (${currentYear} ou ${nextYear}).
 - Exemplo de formato relaxado: (edital OR "chamada pública" OR financiamento) AND ("sua_area" OR "sinonimo") AND ("seu_estado" OR "sua_região") AND ${currentYear}
 
-Estratégia OBRIGATÓRIA para as 3 queries:
-1. Uma query LOCAL focada no Município ou Estado da ONG de forma flexível (ex: (edital OR apoio) AND "cultura" AND "[Cidade/Estado]").
-2. Uma query REGIONAL focada na macrorregião da ONG (ex: ("chamada pública" OR fomento) AND "cultura" AND "[Nordeste/Sul/etc]").
-3. Uma query NACIONAL ou TEMÁTICA ampla, SEM restrição geográfica (ex: (edital OR "inscrições abertas") AND "[Foco de Atuação]").
+Estratégia OBRIGATÓRIA para as 7 queries:
+- Gere 7 queries diversas explorando o local, estado, região, área de atuação e recortes demográficos/temáticos da ONG.
+- OBRIGATORIAMENTE, em pelo menos 2 das 7 queries, use explicitamente o operador "site:" para focar em domínios governamentais ou institucionais (ex: site:gov.br "chamada pública" quilombola ${currentYear}).
 
 Perfil da ONG:
 Nome: ${input.osc.name}
@@ -643,77 +642,92 @@ export const agenticSearchWorker = onTaskDispatched({
                 const maskedKey = braveApiKey.length > 8 ? `${braveApiKey.substring(0, 4)}***${braveApiKey.substring(braveApiKey.length - 4)}` : '***';
                 console.log(`[Agentic Search] Using Brave API Key (length: ${braveApiKey.length}): ${maskedKey}`);
 
-                const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=20`;
-                const searchResponse = await fetch(url, {
-                    headers: {
-                        'Accept': 'application/json',
-                        'Accept-Encoding': 'gzip',
-                        'X-Subscription-Token': braveApiKey
+                let allSearchResults: any[] = [];
+
+                // Pagination loop for 2 pages (offset 0 and 1)
+                for (let offset = 0; offset <= 1; offset++) {
+                    const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=20&offset=${offset}`;
+                    const searchResponse = await fetch(url, {
+                        headers: {
+                            'Accept': 'application/json',
+                            'Accept-Encoding': 'gzip',
+                            'X-Subscription-Token': braveApiKey
+                        }
+                    });
+
+                    if (!searchResponse.ok) {
+                        console.warn(`Brave Search API request failed for page ${offset} with status: ${searchResponse.status}`);
+                        continue; // Try next page if one fails
                     }
-                });
 
-                if (!searchResponse.ok) {
-                    throw new Error(`Brave Search API request failed with status: ${searchResponse.status}`);
+                    const braveData = await searchResponse.json() as any;
+                    const results = braveData.web?.results || [];
+                    allSearchResults.push(...results);
                 }
-
-                const braveData = await searchResponse.json() as any;
-                const searchResults = braveData.web?.results || [];
 
                 let processedResults = 0;
                 let batchLinksFound = 0;
                 let batchLinksEvaluated = 0;
                 let batchValidEditaisEnqueued = 0;
+                let hasUpdatedStatus = false;
 
-                for (const r of searchResults) {
-                    if (processedResults >= 20) break;
+                // Process in chunks of 5 to control concurrency
+                const chunkSize = 5;
+                for (let i = 0; i < allSearchResults.length; i += chunkSize) {
+                    const chunk = allSearchResults.slice(i, i + chunkSize);
 
-                    const link = r.url;
-                    if (!link || searchedLinks.has(link)) continue;
-                    searchedLinks.add(link);
-                    batchLinksFound++;
+                    await Promise.all(chunk.map(async (r) => {
+                        // Limit to 40 items total across both pages
+                        if (processedResults >= 40) return;
+                        processedResults++;
 
-                    const existingRef = await db.collection('editais').where('sourceUrl', '==', link).limit(1).get();
-                    if (!existingRef.empty) continue;
+                        const link = r.url;
+                        if (!link || searchedLinks.has(link)) return;
+                        searchedLinks.add(link);
+                        batchLinksFound++;
 
-                    batchLinksEvaluated++;
+                        const existingRef = await db.collection('editais').where('sourceUrl', '==', link).limit(1).get();
+                        if (!existingRef.empty) return;
 
-                    const cleanJsonSnippet = JSON.stringify({
-                        title: r.title,
-                        url: r.url,
-                        snippet: r.description
-                    });
+                        batchLinksEvaluated++;
 
-                    const textEmbedding = await generateTextEmbedding(cleanJsonSnippet);
-                    const similarityScore = cosineSimilarity(oscEmbedding, textEmbedding);
-                    console.log(`Vector similarity for ${link} (Snippet) is ${similarityScore}`);
+                        const cleanJsonSnippet = JSON.stringify({
+                            title: r.title,
+                            url: r.url,
+                            snippet: r.description
+                        });
 
-                    // Use snippet as a very loose pre-filter (e.g. > 0.30 instead of 0.60)
-                    if (similarityScore > 0.30) {
-                        console.log(`Fetching full content for promising link: ${link}`);
-                        let fullTextToAnalyze = cleanJsonSnippet;
+                        const textEmbedding = await generateTextEmbedding(cleanJsonSnippet);
+                        const similarityScore = cosineSimilarity(oscEmbedding, textEmbedding);
+                        console.log(`Vector similarity for ${link} (Snippet) is ${similarityScore}`);
 
-                        try {
-                            const fetchedText = await fetchAndExtractText(link);
-                            if (fetchedText && fetchedText.length >= 500) {
-                                fullTextToAnalyze = fetchedText;
+                        // Use snippet as a very loose pre-filter (e.g. > 0.30 instead of 0.60)
+                        if (similarityScore > 0.30) {
+                            console.log(`Fetching full content for promising link: ${link}`);
+                            let fullTextToAnalyze = cleanJsonSnippet;
+
+                            try {
+                                const fetchedText = await fetchAndExtractText(link);
+                                if (fetchedText && fetchedText.length >= 500) {
+                                    fullTextToAnalyze = fetchedText;
+                                }
+                            } catch (fetchErr) {
+                                console.warn(`Failed to fetch full text for ${link}, falling back to snippet`, fetchErr);
                             }
-                        } catch (fetchErr) {
-                            console.warn(`Failed to fetch full text for ${link}, falling back to snippet`, fetchErr);
-                        }
 
-                        if (jobRef && processedResults === 0) { // Update status to scoring on the first valid link of the batch
-                             await jobRef.update({ status: 'scoring_triage', updatedAt: FieldValue.serverTimestamp() });
-                        }
+                            if (jobRef && !hasUpdatedStatus) { // Update status to scoring on the first valid link of the batch
+                                 hasUpdatedStatus = true;
+                                 await jobRef.update({ status: 'scoring_triage', updatedAt: FieldValue.serverTimestamp() });
+                            }
 
-                        const triageResult = await triageEditalWebpage({ text: fullTextToAnalyze, searchQuery: query });
-                        if (triageResult.isValidEdital) {
-                            await enqueueEditalExtraction(link, fullTextToAnalyze, triageResult.reason, oscId);
-                            console.log(`Successfully enqueued agentic extraction for ${link}`);
-                            batchValidEditaisEnqueued++;
+                            const triageResult = await triageEditalWebpage({ text: fullTextToAnalyze, searchQuery: query });
+                            if (triageResult.isValidEdital) {
+                                await enqueueEditalExtraction(link, fullTextToAnalyze, triageResult.reason, oscId);
+                                console.log(`Successfully enqueued agentic extraction for ${link}`);
+                                batchValidEditaisEnqueued++;
+                            }
                         }
-                    }
-
-                    processedResults++;
+                    }));
                 }
 
                 totalLinksFound += batchLinksFound;
