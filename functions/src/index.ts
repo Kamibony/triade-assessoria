@@ -547,8 +547,8 @@ export const agenticSearchWorker = onTaskDispatched({
     rateLimits: {
         maxConcurrentDispatches: 2,
     },
-    timeoutSeconds: 540,
-    memory: '2GiB'
+    timeoutSeconds: 3600,
+    memory: '4GiB'
 }, async (request) => {
     const { oscId, jobId } = request.data as { oscId: string, jobId?: string };
 
@@ -630,7 +630,7 @@ export const agenticSearchWorker = onTaskDispatched({
                 const maskedKey = braveApiKey.length > 8 ? `${braveApiKey.substring(0, 4)}***${braveApiKey.substring(braveApiKey.length - 4)}` : '***';
                 console.log(`[Agentic Search] Using Brave API Key (length: ${braveApiKey.length}): ${maskedKey}`);
 
-                const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=3`;
+                const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=20`;
                 const searchResponse = await fetch(url, {
                     headers: {
                         'Accept': 'application/json',
@@ -652,7 +652,7 @@ export const agenticSearchWorker = onTaskDispatched({
                 let batchValidEditaisEnqueued = 0;
 
                 for (const r of searchResults) {
-                    if (processedResults >= 3) break;
+                    if (processedResults >= 20) break;
 
                     const link = r.url;
                     if (!link || searchedLinks.has(link)) continue;
