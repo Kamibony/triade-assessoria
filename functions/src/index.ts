@@ -18,6 +18,8 @@ import * as cheerio from 'cheerio';
 import Parser from 'rss-parser';
 
 const braveApiKeyString = defineString('BRAVE_SEARCH_API_KEY');
+const googleApiKeyString = defineString('GOOGLE_SEARCH_API_KEY');
+const googleEngineIdString = defineString('GOOGLE_SEARCH_ENGINE_ID');
 
 function removeAccents(str: string): string {
     return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -630,39 +632,107 @@ export const agenticSearchWorker = onTaskDispatched({
                     });
                 }
 
-                let braveApiKey = process.env.BRAVE_SEARCH_API_KEY;
-                if (!braveApiKey) {
-                    try { braveApiKey = braveApiKeyString.value(); } catch (e) { /* ignore */ }
+                let allSearchResults: { link: string, title: string, snippet: string }[] = [];
+                let googleSearchFailed = false;
+
+                // Try Primary Search: Google Custom Search API
+                let googleApiKey = process.env.GOOGLE_SEARCH_API_KEY;
+                if (!googleApiKey) {
+                    try { googleApiKey = googleApiKeyString.value(); } catch (e) { /* ignore */ }
                 }
 
-                if (!braveApiKey) {
-                    throw new Error("BRAVE_SEARCH_API_KEY environment variable is not set.");
+                let googleEngineId = process.env.GOOGLE_SEARCH_ENGINE_ID;
+                if (!googleEngineId) {
+                    try { googleEngineId = googleEngineIdString.value(); } catch (e) { /* ignore */ }
+                }
+                if (!googleEngineId) {
+                    googleEngineId = '82611de35b22b48dd'; // Default "Triade Sniper" ID
                 }
 
-                const maskedKey = braveApiKey.length > 8 ? `${braveApiKey.substring(0, 4)}***${braveApiKey.substring(braveApiKey.length - 4)}` : '***';
-                console.log(`[Agentic Search] Using Brave API Key (length: ${braveApiKey.length}): ${maskedKey}`);
+                if (googleApiKey && googleEngineId) {
+                    try {
+                        console.log(`[Agentic Search] Executing Google Custom Search for query: "${query}"`);
+                        // Google Custom Search returns max 10 per page. Start at 1, 11, 21, 31 to get up to 40.
+                        for (let start = 1; start <= 31; start += 10) {
+                            const googleUrl = `https://customsearch.googleapis.com/customsearch/v1?key=${googleApiKey}&cx=${googleEngineId}&q=${encodeURIComponent(query)}&start=${start}`;
+                            const googleResponse = await fetch(googleUrl);
 
-                let allSearchResults: any[] = [];
+                            if (!googleResponse.ok) {
+                                console.warn(`Google Custom Search API failed for start ${start} with status: ${googleResponse.status}`);
+                                googleSearchFailed = true;
+                                break;
+                            }
 
-                // Pagination loop for 2 pages (offset 0 and 1)
-                for (let offset = 0; offset <= 1; offset++) {
-                    const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=20&offset=${offset}`;
-                    const searchResponse = await fetch(url, {
-                        headers: {
-                            'Accept': 'application/json',
-                            'Accept-Encoding': 'gzip',
-                            'X-Subscription-Token': braveApiKey
+                            const googleData = await googleResponse.json() as any;
+                            const items = googleData.items || [];
+                            for (const item of items) {
+                                if (item.link) {
+                                    allSearchResults.push({
+                                        link: item.link,
+                                        title: item.title || '',
+                                        snippet: item.snippet || ''
+                                    });
+                                }
+                            }
+
+                            // If we received fewer than 10 items, there are no more pages
+                            if (items.length < 10) {
+                                break;
+                            }
                         }
-                    });
+                    } catch (e) {
+                        console.warn(`[Agentic Search] Exception during Google Custom Search:`, e);
+                        googleSearchFailed = true;
+                    }
+                } else {
+                    console.warn(`[Agentic Search] Missing Google Custom Search credentials. Falling back to Brave Search.`);
+                    googleSearchFailed = true;
+                }
 
-                    if (!searchResponse.ok) {
-                        console.warn(`Brave Search API request failed for page ${offset} with status: ${searchResponse.status}`);
-                        continue; // Try next page if one fails
+                // Secondary Fallback: Brave Search API
+                if (googleSearchFailed || allSearchResults.length === 0) {
+                    allSearchResults = []; // Clear any partial results from Google
+
+                    let braveApiKey = process.env.BRAVE_SEARCH_API_KEY;
+                    if (!braveApiKey) {
+                        try { braveApiKey = braveApiKeyString.value(); } catch (e) { /* ignore */ }
                     }
 
-                    const braveData = await searchResponse.json() as any;
-                    const results = braveData.web?.results || [];
-                    allSearchResults.push(...results);
+                    if (!braveApiKey) {
+                        throw new Error("BRAVE_SEARCH_API_KEY environment variable is not set.");
+                    }
+
+                    const maskedKey = braveApiKey.length > 8 ? `${braveApiKey.substring(0, 4)}***${braveApiKey.substring(braveApiKey.length - 4)}` : '***';
+                    console.log(`[Agentic Search] Falling back to Brave API Key (length: ${braveApiKey.length}): ${maskedKey}`);
+
+                    // Pagination loop for 2 pages (offset 0 and 1)
+                    for (let offset = 0; offset <= 1; offset++) {
+                        const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=20&offset=${offset}`;
+                        const searchResponse = await fetch(url, {
+                            headers: {
+                                'Accept': 'application/json',
+                                'Accept-Encoding': 'gzip',
+                                'X-Subscription-Token': braveApiKey
+                            }
+                        });
+
+                        if (!searchResponse.ok) {
+                            console.warn(`Brave Search API request failed for page ${offset} with status: ${searchResponse.status}`);
+                            continue; // Try next page if one fails
+                        }
+
+                        const braveData = await searchResponse.json() as any;
+                        const results = braveData.web?.results || [];
+                        for (const r of results) {
+                            if (r.url) {
+                                allSearchResults.push({
+                                    link: r.url,
+                                    title: r.title || '',
+                                    snippet: r.description || ''
+                                });
+                            }
+                        }
+                    }
                 }
 
                 let processedResults = 0;
@@ -681,7 +751,7 @@ export const agenticSearchWorker = onTaskDispatched({
                         if (processedResults >= 40) return;
                         processedResults++;
 
-                        const link = r.url;
+                        const link = r.link;
                         if (!link || searchedLinks.has(link)) return;
                         searchedLinks.add(link);
                         batchLinksFound++;
@@ -693,8 +763,8 @@ export const agenticSearchWorker = onTaskDispatched({
 
                         const cleanJsonSnippet = JSON.stringify({
                             title: r.title,
-                            url: r.url,
-                            snippet: r.description
+                            url: r.link,
+                            snippet: r.snippet
                         });
 
                         const textEmbedding = await generateTextEmbedding(cleanJsonSnippet);
