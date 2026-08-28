@@ -547,7 +547,7 @@ export const agenticSearchWorker = onTaskDispatched({
     rateLimits: {
         maxConcurrentDispatches: 2,
     },
-    timeoutSeconds: 3600,
+    timeoutSeconds: 1800,
     memory: '4GiB'
 }, async (request) => {
     const { oscId, jobId } = request.data as { oscId: string, jobId?: string };
