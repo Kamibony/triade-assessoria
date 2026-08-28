@@ -50,7 +50,13 @@ export function OscProfileView() {
     const matchesQuery = query(collection(db, 'matches'), where('oscId', '==', oscId));
     const unsubscribeMatches = onSnapshot(matchesQuery, async (snapshot) => {
         const matchesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MatchResult));
-        matchesData.sort((a, b) => b.matchScore - a.matchScore);
+
+        matchesData.sort((a, b) => {
+            const timeA = a.createdAt?.toMillis?.() || (typeof a.createdAt === 'number' ? a.createdAt : 0);
+            const timeB = b.createdAt?.toMillis?.() || (typeof b.createdAt === 'number' ? b.createdAt : 0);
+            return timeB - timeA;
+        });
+
         setMatches(matchesData);
 
         const editalIds = [...new Set(matchesData.map(m => m.editalId))];
@@ -249,6 +255,9 @@ export function OscProfileView() {
                             if (match.matchScore >= 70) scoreColorClass = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
                             else if (match.matchScore >= 40) scoreColorClass = 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
 
+                            const matchTime = match.createdAt?.toMillis?.() || (typeof match.createdAt === 'number' ? match.createdAt : 0);
+                            const isNew = matchTime > Date.now() - 24 * 60 * 60 * 1000; // 24 hours
+
                             return (
                                 <div key={match.id} className="border rounded-lg overflow-hidden">
                                     <div
@@ -256,9 +265,14 @@ export function OscProfileView() {
                                         onClick={() => setExpandedMatch(isExpanded ? null : (match.id || null))}
                                     >
                                         <div className="flex flex-col flex-1 min-w-0 pr-4">
-                                            <span className="font-semibold text-sm truncate" title={edital?.title || match.editalId}>
-                                                {edital?.title || match.editalId}
-                                            </span>
+                                            <div className="flex items-center gap-2">
+                                                <span className="font-semibold text-sm truncate" title={edital?.title || match.editalId}>
+                                                    {edital?.title || match.editalId}
+                                                </span>
+                                                {isNew && (
+                                                    <span className="bg-blue-500 text-white text-[10px] px-1.5 py-0.5 rounded-sm font-bold shrink-0">NOVO</span>
+                                                )}
+                                            </div>
                                             {match.aiSummary && (
                                                 <p className="text-xs text-muted-foreground mt-1 truncate" title={match.aiSummary}>
                                                     {match.aiSummary}

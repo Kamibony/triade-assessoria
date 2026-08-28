@@ -65,6 +65,7 @@ export function MatchesDashboard() {
 
   let filteredMatches = matches.filter(m =>
     m.oscId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (m.oscName || '')?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     m.editalId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (editais[m.editalId]?.title || '')?.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -141,7 +142,7 @@ export function MatchesDashboard() {
                 <input
                   type="text"
                   className="w-full rounded-md border border-input bg-background pl-10 pr-4 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  placeholder="Buscar por OSC ID ou Edital ID..."
+                  placeholder="Buscar por OSC, OSC ID ou Edital ID..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
@@ -159,7 +160,7 @@ export function MatchesDashboard() {
                <table className="w-full text-sm text-left">
                  <thead className="bg-muted text-muted-foreground uppercase text-xs">
                    <tr>
-                     <th className="px-6 py-4 font-medium">OSC ID</th>
+                     <th className="px-6 py-4 font-medium">OSC</th>
                      <th className="px-6 py-4 font-medium">Edital</th>
                      <th className="px-6 py-4 font-medium text-center">Elegibilidade</th>
                      <th className="px-6 py-4 font-medium text-center">Score</th>
@@ -175,7 +176,7 @@ export function MatchesDashboard() {
                                  <td colSpan={5} className="px-6 py-3 font-semibold text-sm">
                                      {groupBy === 'edital'
                                          ? `Edital: ${editais[groupKey]?.title || groupKey}`
-                                         : `OSC: ${groupKey}`}
+                                         : `OSC: ${groupMatches[0]?.oscName || groupKey}`}
                                      <span className="ml-2 text-xs font-normal text-muted-foreground">({groupMatches.length} matches)</span>
                                  </td>
                              </tr>
@@ -192,7 +193,7 @@ export function MatchesDashboard() {
                            return (
                              <React.Fragment key={match.id}>
                          <tr className="hover:bg-muted/50 transition-colors">
-                           <td className="px-6 py-4 font-medium">{match.oscId}</td>
+                           <td className="px-6 py-4 font-medium" title={match.oscId}>{match.oscName || match.oscId}</td>
                            <td className="px-6 py-4">
                              <div className="font-medium line-clamp-1" title={edital?.title}>{edital?.title || match.editalId}</div>
                            </td>
