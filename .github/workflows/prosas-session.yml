@@ -1,0 +1,53 @@
+name: Generate Prosas Session
+
+on:
+  workflow_dispatch:
+
+jobs:
+  generate_session:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Dependencies
+        run: |
+          cd functions
+          npm ci
+          npx playwright install chromium --with-deps
+
+      - name: Run Session Generator
+        env:
+          PROSAS_USERNAME: ${{ secrets.PROSAS_USERNAME }}
+          PROSAS_PASSWORD: ${{ secrets.PROSAS_PASSWORD }}
+        run: |
+          cd functions
+          node scripts/generate-prosas-session.js
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRIADE_ASSESSORIA }}
+
+      - name: Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: triade-assessoria
+
+      - name: Push Session to Secret Manager
+        run: |
+          cd functions
+          # Check if the secret exists. If not, create it.
+          if ! gcloud secrets describe PROSAS_SESSION_STATE > /dev/null 2>&1; then
+            gcloud secrets create PROSAS_SESSION_STATE --replication-policy="automatic"
+          fi
+
+          # Add the new version from the generated JSON file
+          gcloud secrets versions add PROSAS_SESSION_STATE --data-file=prosas_session.json
