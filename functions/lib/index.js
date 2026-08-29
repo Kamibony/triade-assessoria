@@ -594,20 +594,6 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                 let allSearchResults = [];
                 let googleSearchFailed = false;
                 // Try Primary Search: Google Vertex AI Search
-                let vertexDataStoreId = process.env.VERTEX_AI_SEARCH_DATA_STORE_ID;
-                if (!vertexDataStoreId) {
-                    try {
-                        vertexDataStoreId = vertexAiSearchDataStoreIdString.value();
-                    }
-                    catch (e) { /* ignore */ }
-                }
-                let vertexLocation = process.env.VERTEX_AI_SEARCH_LOCATION;
-                if (!vertexLocation) {
-                    try {
-                        vertexLocation = vertexAiSearchLocationString.value();
-                    }
-                    catch (e) { /* ignore */ }
-                }
                 let vertexProjectId = process.env.VERTEX_AI_SEARCH_PROJECT_ID;
                 if (!vertexProjectId) {
                     try {
@@ -615,7 +601,24 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                     }
                     catch (e) { /* ignore */ }
                 }
-                if (vertexDataStoreId && vertexLocation && vertexProjectId) {
+                vertexProjectId = vertexProjectId || "566889139686";
+                let vertexLocation = process.env.VERTEX_AI_SEARCH_LOCATION;
+                if (!vertexLocation) {
+                    try {
+                        vertexLocation = vertexAiSearchLocationString.value();
+                    }
+                    catch (e) { /* ignore */ }
+                }
+                vertexLocation = vertexLocation || "global";
+                let vertexEngineId = process.env.VERTEX_AI_SEARCH_ENGINE_ID || process.env.VERTEX_AI_SEARCH_DATA_STORE_ID;
+                if (!vertexEngineId) {
+                    try {
+                        vertexEngineId = vertexAiSearchDataStoreIdString.value();
+                    }
+                    catch (e) { /* ignore */ }
+                }
+                vertexEngineId = vertexEngineId || "triade-sniper-search_1787960465651";
+                if (vertexEngineId && vertexLocation && vertexProjectId) {
                     try {
                         console.log(`[Agentic Search] Executing Vertex AI Search for query: "${query}"`);
                         const auth = new google_auth_library_1.GoogleAuth({
@@ -623,7 +626,7 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                         });
                         const client = await auth.getClient();
                         const accessToken = await client.getAccessToken();
-                        const vertexUrl = `https://discoveryengine.googleapis.com/v1alpha/projects/${vertexProjectId}/locations/${vertexLocation}/collections/default_collection/dataStores/${vertexDataStoreId}/servingConfigs/default_search:search`;
+                        const vertexUrl = `https://discoveryengine.googleapis.com/v1alpha/projects/${vertexProjectId}/locations/${vertexLocation}/collections/default_collection/engines/${vertexEngineId}/servingConfigs/default_search:search`;
                         const vertexResponse = await fetch(vertexUrl, {
                             method: 'POST',
                             headers: {

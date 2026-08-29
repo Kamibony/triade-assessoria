@@ -640,22 +640,25 @@ export const agenticSearchWorker = onTaskDispatched({
                 let googleSearchFailed = false;
 
                 // Try Primary Search: Google Vertex AI Search
-                let vertexDataStoreId = process.env.VERTEX_AI_SEARCH_DATA_STORE_ID;
-                if (!vertexDataStoreId) {
-                    try { vertexDataStoreId = vertexAiSearchDataStoreIdString.value(); } catch (e) { /* ignore */ }
+                let vertexProjectId = process.env.VERTEX_AI_SEARCH_PROJECT_ID;
+                if (!vertexProjectId) {
+                    try { vertexProjectId = vertexAiSearchProjectIdString.value(); } catch (e) { /* ignore */ }
                 }
+                vertexProjectId = vertexProjectId || "566889139686";
 
                 let vertexLocation = process.env.VERTEX_AI_SEARCH_LOCATION;
                 if (!vertexLocation) {
                     try { vertexLocation = vertexAiSearchLocationString.value(); } catch (e) { /* ignore */ }
                 }
+                vertexLocation = vertexLocation || "global";
 
-                let vertexProjectId = process.env.VERTEX_AI_SEARCH_PROJECT_ID;
-                if (!vertexProjectId) {
-                    try { vertexProjectId = vertexAiSearchProjectIdString.value(); } catch (e) { /* ignore */ }
+                let vertexEngineId = process.env.VERTEX_AI_SEARCH_ENGINE_ID || process.env.VERTEX_AI_SEARCH_DATA_STORE_ID;
+                if (!vertexEngineId) {
+                    try { vertexEngineId = vertexAiSearchDataStoreIdString.value(); } catch (e) { /* ignore */ }
                 }
+                vertexEngineId = vertexEngineId || "triade-sniper-search_1787960465651";
 
-                if (vertexDataStoreId && vertexLocation && vertexProjectId) {
+                if (vertexEngineId && vertexLocation && vertexProjectId) {
                     try {
                         console.log(`[Agentic Search] Executing Vertex AI Search for query: "${query}"`);
 
@@ -665,7 +668,7 @@ export const agenticSearchWorker = onTaskDispatched({
                         const client = await auth.getClient();
                         const accessToken = await client.getAccessToken();
 
-                        const vertexUrl = `https://discoveryengine.googleapis.com/v1alpha/projects/${vertexProjectId}/locations/${vertexLocation}/collections/default_collection/dataStores/${vertexDataStoreId}/servingConfigs/default_search:search`;
+                        const vertexUrl = `https://discoveryengine.googleapis.com/v1alpha/projects/${vertexProjectId}/locations/${vertexLocation}/collections/default_collection/engines/${vertexEngineId}/servingConfigs/default_search:search`;
 
                         const vertexResponse = await fetch(vertexUrl, {
                             method: 'POST',
