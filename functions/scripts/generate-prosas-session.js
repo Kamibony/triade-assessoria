@@ -31,7 +31,7 @@ async function generateSession() {
     await page.locator('#user_password').last().fill(password);
 
     console.log('Submitting form...');
-    await page.locator('input[type="submit"][name="commit"]').click();
+    await page.locator('input[type="submit"][name="commit"]').last().click();
 
     console.log('Waiting for authentication to complete...');
     // Wait for a selector that appears only when authenticated
