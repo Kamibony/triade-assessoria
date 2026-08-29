@@ -24,11 +24,11 @@ async function generateSession() {
     await page.goto('https://prosas.com.br/users/sign_in', { waitUntil: 'networkidle' });
 
     console.log('Waiting for email input to be visible...');
-    await page.waitForSelector('#user_email', { state: 'visible', timeout: 30000 });
+    await page.locator('#user_email').last().waitFor({ state: 'visible', timeout: 30000 });
 
     console.log('Filling in credentials...');
-    await page.locator('#user_email').fill(username);
-    await page.locator('#user_password').fill(password);
+    await page.locator('#user_email').last().fill(username);
+    await page.locator('#user_password').last().fill(password);
 
     console.log('Submitting form...');
     await page.locator('input[type="submit"][name="commit"]').click();
