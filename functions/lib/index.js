@@ -626,7 +626,7 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                         });
                         const client = await auth.getClient();
                         const accessToken = await client.getAccessToken();
-                        const vertexUrl = `https://discoveryengine.googleapis.com/v1alpha/projects/${vertexProjectId}/locations/${vertexLocation}/collections/default_collection/engines/${vertexEngineId}/servingConfigs/default_search:search`;
+                        const vertexUrl = `https://discoveryengine.googleapis.com/v1/projects/${vertexProjectId}/locations/${vertexLocation}/collections/default_collection/engines/${vertexEngineId}/servingConfigs/default_search:search`;
                         const vertexResponse = await fetch(vertexUrl, {
                             method: 'POST',
                             headers: {
