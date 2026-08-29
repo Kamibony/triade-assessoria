@@ -21,8 +21,8 @@ try {
     const commitBefore = process.env.COMMIT_BEFORE;
     const commitSha = process.env.COMMIT_SHA;
 
-    // Construct the git diff command based on available environment variables or fallback to HEAD^ HEAD
-    let diffCommand = 'git diff HEAD^ HEAD';
+    // Construct the git diff command based on available environment variables or fallback to HEAD~1 HEAD
+    let diffCommand = 'git diff HEAD~1 HEAD';
     if (commitBefore && commitSha && commitBefore !== '0000000000000000000000000000000000000000') {
       diffCommand = `git diff ${commitBefore} ${commitSha}`;
     }
