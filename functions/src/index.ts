@@ -19,7 +19,7 @@ import * as cheerio from 'cheerio';
 import Parser from 'rss-parser';
 
 const braveApiKeyString = defineString('BRAVE_SEARCH_API_KEY');
-const vertexAiSearchDataStoreIdString = defineString('VERTEX_AI_SEARCH_DATA_STORE_ID');
+const vertexAiSearchEngineIdString = defineString('VERTEX_AI_SEARCH_ENGINE_ID');
 const vertexAiSearchLocationString = defineString('VERTEX_AI_SEARCH_LOCATION');
 const vertexAiSearchProjectIdString = defineString('VERTEX_AI_SEARCH_PROJECT_ID');
 
@@ -652,9 +652,9 @@ export const agenticSearchWorker = onTaskDispatched({
                 }
                 vertexLocation = vertexLocation || "global";
 
-                let vertexEngineId = process.env.VERTEX_AI_SEARCH_ENGINE_ID || process.env.VERTEX_AI_SEARCH_DATA_STORE_ID;
+                let vertexEngineId = process.env.VERTEX_AI_SEARCH_ENGINE_ID;
                 if (!vertexEngineId) {
-                    try { vertexEngineId = vertexAiSearchDataStoreIdString.value(); } catch (e) { /* ignore */ }
+                    try { vertexEngineId = vertexAiSearchEngineIdString.value(); } catch (e) { /* ignore */ }
                 }
                 vertexEngineId = vertexEngineId || "triade-sniper-search_1787960465651";
 
