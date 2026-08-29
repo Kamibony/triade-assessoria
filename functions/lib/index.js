@@ -57,7 +57,7 @@ const schemas_js_1 = require("./shared/schemas.js");
 const cheerio = __importStar(require("cheerio"));
 const rss_parser_1 = __importDefault(require("rss-parser"));
 const braveApiKeyString = (0, params_1.defineString)('BRAVE_SEARCH_API_KEY');
-const vertexAiSearchDataStoreIdString = (0, params_1.defineString)('VERTEX_AI_SEARCH_DATA_STORE_ID');
+const vertexAiSearchEngineIdString = (0, params_1.defineString)('VERTEX_AI_SEARCH_ENGINE_ID');
 const vertexAiSearchLocationString = (0, params_1.defineString)('VERTEX_AI_SEARCH_LOCATION');
 const vertexAiSearchProjectIdString = (0, params_1.defineString)('VERTEX_AI_SEARCH_PROJECT_ID');
 function removeAccents(str) {
@@ -610,10 +610,10 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                     catch (e) { /* ignore */ }
                 }
                 vertexLocation = vertexLocation || "global";
-                let vertexEngineId = process.env.VERTEX_AI_SEARCH_ENGINE_ID || process.env.VERTEX_AI_SEARCH_DATA_STORE_ID;
+                let vertexEngineId = process.env.VERTEX_AI_SEARCH_ENGINE_ID;
                 if (!vertexEngineId) {
                     try {
-                        vertexEngineId = vertexAiSearchDataStoreIdString.value();
+                        vertexEngineId = vertexAiSearchEngineIdString.value();
                     }
                     catch (e) { /* ignore */ }
                 }
@@ -626,7 +626,7 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                         });
                         const client = await auth.getClient();
                         const accessToken = await client.getAccessToken();
-                        const vertexUrl = `https://discoveryengine.googleapis.com/v1alpha/projects/${vertexProjectId}/locations/${vertexLocation}/collections/default_collection/engines/${vertexEngineId}/servingConfigs/default_search:search`;
+                        const vertexUrl = `https://discoveryengine.googleapis.com/v1/projects/${vertexProjectId}/locations/${vertexLocation}/collections/default_collection/engines/${vertexEngineId}/servingConfigs/default_search:search`;
                         const vertexResponse = await fetch(vertexUrl, {
                             method: 'POST',
                             headers: {
