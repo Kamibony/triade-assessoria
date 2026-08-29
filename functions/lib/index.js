@@ -36,9 +36,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onSearchCreated = exports.processScrapingTargetWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = void 0;
+exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = void 0;
 process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
 const scheduler_1 = require("firebase-functions/v2/scheduler");
+const fs = __importStar(require("fs"));
+const path = __importStar(require("path"));
 const playwright_extra_1 = require("playwright-extra");
 const puppeteer_extra_plugin_stealth_1 = __importDefault(require("puppeteer-extra-plugin-stealth"));
 const firestore_1 = require("firebase-admin/firestore");
@@ -1768,6 +1770,104 @@ async function handleScraperSuccess(db, targetId) {
     const targetRef = db.collection('scraping_targets').doc(targetId);
     await targetRef.update({ failureCount: 0 });
 }
+exports.prosasAuthenticatedWorker = (0, tasks_1.onTaskDispatched)({
+    retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
+    rateLimits: { maxConcurrentDispatches: 2 },
+    timeoutSeconds: 1800,
+    memory: '4GiB'
+}, async (request) => {
+    const { url, searchId } = request.data;
+    if (!url) {
+        logger.error("Invalid task payload: missing url.");
+        return;
+    }
+    logger.info(`[Prosas Auth Worker] Starting processing for URL: ${url}`);
+    try {
+        // 1. Fetch Session State from GCS
+        const storage = (0, storage_1.getStorage)();
+        const sessionBucketName = 'triade-prosas-session-state';
+        const sessionFileName = 'prosas_session.json';
+        const sessionFilePath = `/tmp/${sessionFileName}`;
+        logger.info(`[Prosas Auth Worker] Downloading session state from gs://${sessionBucketName}/${sessionFileName}`);
+        await storage.bucket(sessionBucketName).file(sessionFileName).download({ destination: sessionFilePath });
+        logger.info(`[Prosas Auth Worker] Session state downloaded to ${sessionFilePath}`);
+        // 2. Playwright Scraping
+        playwright_extra_1.chromium.use((0, puppeteer_extra_plugin_stealth_1.default)());
+        const browser = await playwright_extra_1.chromium.launch({ headless: true });
+        let combinedText = '';
+        const downloadedPdfPaths = [];
+        try {
+            const context = await browser.newContext({ storageState: sessionFilePath });
+            const page = await context.newPage();
+            logger.info(`[Prosas Auth Worker] Navigating to ${url}...`);
+            await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
+            // Wait an additional moment for dynamic content
+            await page.waitForTimeout(5000);
+            // Extract the main content text
+            const pageText = await page.evaluate(() => {
+                return document.body.innerText;
+            });
+            combinedText = pageText;
+            logger.info(`[Prosas Auth Worker] Extracted ${combinedText.length} characters of text from page.`);
+            // 3. PDF link discovery and upload
+            const pdfLinks = await page.evaluate(() => {
+                const links = Array.from(document.querySelectorAll('a'));
+                return links
+                    .map(a => a.href)
+                    .filter(href => href.toLowerCase().endsWith('.pdf'));
+            });
+            if (pdfLinks.length > 0) {
+                logger.info(`[Prosas Auth Worker] Found ${pdfLinks.length} PDF links.`);
+                const storage = (0, storage_1.getStorage)();
+                const bucket = storage.bucket(); // Default bucket
+                for (const pdfUrl of pdfLinks) {
+                    try {
+                        logger.info(`[Prosas Auth Worker] Processing PDF: ${pdfUrl}`);
+                        // Use page to navigate to PDF and save it. Wait for download event.
+                        // However, directly downloading via fetch might be easier since we have the URL and the session.
+                        // Or we can use page.request for authenticated fetch.
+                        const response = await page.request.get(pdfUrl);
+                        if (!response.ok()) {
+                            logger.error(`[Prosas Auth Worker] Failed to fetch PDF ${pdfUrl}, status: ${response.status()}`);
+                            continue;
+                        }
+                        const buffer = await response.body();
+                        const fileName = `prosas_pdfs/${Date.now()}_${path.basename(new URL(pdfUrl).pathname)}`;
+                        const file = bucket.file(fileName);
+                        await file.save(buffer, {
+                            metadata: { contentType: 'application/pdf' }
+                        });
+                        await file.makePublic();
+                        const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+                        downloadedPdfPaths.push(publicUrl);
+                        logger.info(`[Prosas Auth Worker] Uploaded PDF to ${publicUrl}`);
+                        combinedText += `\n[Anexo PDF: ${publicUrl}]`;
+                    }
+                    catch (pdfErr) {
+                        logger.error(`[Prosas Auth Worker] Error processing PDF ${pdfUrl}:`, pdfErr);
+                    }
+                }
+            }
+            else {
+                logger.info(`[Prosas Auth Worker] No PDF links found on page.`);
+            }
+            // 4. Push to Claim Check (Lake of Editais)
+            await enqueueEditalExtraction(url, combinedText, "Authenticated Prosas Scraping", searchId);
+            logger.info(`[Prosas Auth Worker] Enqueued extraction for ${url}`);
+        }
+        finally {
+            await browser.close();
+            // Clean up session file
+            if (fs.existsSync(sessionFilePath)) {
+                fs.unlinkSync(sessionFilePath);
+            }
+        }
+    }
+    catch (error) {
+        logger.error(`[Prosas Auth Worker] Fatal error processing ${url}`, error);
+        throw error;
+    }
+});
 exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
     retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
     rateLimits: { maxConcurrentDispatches: 5 },

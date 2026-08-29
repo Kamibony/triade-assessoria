@@ -10,7 +10,7 @@ const allFunctions = [
   'manualTriggerRssSyncFunction', 'scheduledMatchSweeper', 'onMatchGenerated',
   'triggerAgenticSearch', 'autonomousSearchWorker', 'triggerScrapingWorker',
   'seedScrapingTargets', 'extractionWorker', 'processScrapingTargetWorker',
-  'onSearchCreated'
+  'onSearchCreated', 'prosasAuthenticatedWorker'
 ];
 
 try {
@@ -31,6 +31,13 @@ try {
 
     // Get list of changed files between current commit and previous commit
     const changedFiles = execSync(`${diffCommand} --name-only`).toString().trim().split('\n');
+
+    // Optimize CI/CD by short-circuiting if no changes in functions/
+    const hasFunctionChanges = changedFiles.some(file => file.startsWith('functions/'));
+    if (!hasFunctionChanges && changedFiles.length > 0 && changedFiles[0] !== '') {
+      console.log('No relevant files in functions/ were modified. Skipping deployment.');
+      process.exit(0);
+    }
 
     if (changedFiles.includes('functions/src/index.ts')) {
       // If index.ts changed, check which function exports were modified.
