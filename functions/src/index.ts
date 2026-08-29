@@ -3,6 +3,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import * as fs from 'fs';
 import * as path from 'path';
 import { chromium } from 'playwright-extra';
+const pdfParse = require('pdf-parse');
 import stealth from 'puppeteer-extra-plugin-stealth';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
@@ -2096,7 +2097,15 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                         downloadedPdfPaths.push(publicUrl);
                         logger.info(`[Prosas Auth Worker] Uploaded PDF to ${publicUrl}`);
 
-                        combinedText += `\n[Anexo PDF: ${publicUrl}]`;
+                        let parsedText = '';
+                        try {
+                            const pdfData = await pdfParse(buffer, { max: 5 });
+                            parsedText = pdfData.text;
+                        } catch (parseErr) {
+                            logger.error(`[Prosas Auth Worker] Error parsing PDF text for ${pdfUrl}:`, parseErr);
+                        }
+
+                        combinedText += `\n[Anexo PDF: ${publicUrl}]\nConteúdo Extraído (Max 5 pags): ${parsedText.substring(0, 10000)}`;
 
                     } catch (pdfErr) {
                         logger.error(`[Prosas Auth Worker] Error processing PDF ${pdfUrl}:`, pdfErr);
@@ -2402,6 +2411,13 @@ export const processScrapingTargetWorker = onTaskDispatched({
         for (let i = 0; i < linksToProcess.length; i++) {
             const link = linksToProcess[i];
             if (!link) continue;
+
+            if (link.toLowerCase().includes('prosas.com.br')) {
+                logger.info(`[Scraper] Routing Prosas link to authenticated worker: ${link}`);
+                await getFunctions().taskQueue('prosasAuthenticatedWorker').enqueue({ url: link, searchId });
+                totalProcessed++;
+                continue;
+            }
 
             const existingRef = await db.collection('editais').where('sourceUrl', '==', link).limit(1).get();
             if (!existingRef.empty) {
