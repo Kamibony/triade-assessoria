@@ -43,13 +43,11 @@ jobs:
         with:
           project_id: triade-assessoria
 
-      - name: Push Session to Secret Manager
+      - name: Push Session to Google Cloud Storage
         run: |
           cd functions
-          # Check if the secret exists. If not, create it.
-          if ! gcloud secrets describe PROSAS_SESSION_STATE > /dev/null 2>&1; then
-            gcloud secrets create PROSAS_SESSION_STATE --replication-policy="automatic"
-          fi
+          # Check if the bucket exists. If not, create it.
+          gcloud storage buckets create gs://triade-prosas-session-state || true
 
-          # Add the new version from the generated JSON file
-          gcloud secrets versions add PROSAS_SESSION_STATE --data-file=prosas_session.json
+          # Upload the generated JSON file to the bucket
+          gcloud storage cp prosas_session.json gs://triade-prosas-session-state/prosas_session.json
