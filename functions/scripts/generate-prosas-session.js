@@ -21,17 +21,17 @@ async function generateSession() {
 
   try {
     console.log('Navigating to login page...');
-    await page.goto('https://prosas.com.br/login', { waitUntil: 'networkidle' });
+    await page.goto('https://prosas.com.br/users/sign_in', { waitUntil: 'networkidle' });
+
+    console.log('Waiting for email input to be visible...');
+    await page.waitForSelector('#user_email', { state: 'visible', timeout: 30000 });
 
     console.log('Filling in credentials...');
-    // Replace these selectors with the actual ones if they differ.
-    // Based on typical login forms:
-    await page.fill('input[type="email"], input[name="email"], input#user_email', username);
-    await page.fill('input[type="password"], input[name="password"], input#user_password', password);
+    await page.locator('#user_email').fill(username);
+    await page.locator('#user_password').fill(password);
 
     console.log('Submitting form...');
-    // Try to click the submit button
-    await page.click('button[type="submit"], input[type="submit"]');
+    await page.locator('input[type="submit"][name="commit"]').click();
 
     console.log('Waiting for authentication to complete...');
     // Wait for a selector that appears only when authenticated
