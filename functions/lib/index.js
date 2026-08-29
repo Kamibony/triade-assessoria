@@ -42,6 +42,7 @@ const scheduler_1 = require("firebase-functions/v2/scheduler");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const playwright_extra_1 = require("playwright-extra");
+const pdfParse = require('pdf-parse');
 const puppeteer_extra_plugin_stealth_1 = __importDefault(require("puppeteer-extra-plugin-stealth"));
 const firestore_1 = require("firebase-admin/firestore");
 const storage_1 = require("firebase-admin/storage");
@@ -1841,7 +1842,15 @@ exports.prosasAuthenticatedWorker = (0, tasks_1.onTaskDispatched)({
                         const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
                         downloadedPdfPaths.push(publicUrl);
                         logger.info(`[Prosas Auth Worker] Uploaded PDF to ${publicUrl}`);
-                        combinedText += `\n[Anexo PDF: ${publicUrl}]`;
+                        let parsedText = '';
+                        try {
+                            const pdfData = await pdfParse(buffer, { max: 5 });
+                            parsedText = pdfData.text;
+                        }
+                        catch (parseErr) {
+                            logger.error(`[Prosas Auth Worker] Error parsing PDF text for ${pdfUrl}:`, parseErr);
+                        }
+                        combinedText += `\n[Anexo PDF: ${publicUrl}]\nConteúdo Extraído (Max 5 pags): ${parsedText.substring(0, 10000)}`;
                     }
                     catch (pdfErr) {
                         logger.error(`[Prosas Auth Worker] Error processing PDF ${pdfUrl}:`, pdfErr);
@@ -2140,6 +2149,12 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
             const link = linksToProcess[i];
             if (!link)
                 continue;
+            if (link.toLowerCase().includes('prosas.com.br')) {
+                logger.info(`[Scraper] Routing Prosas link to authenticated worker: ${link}`);
+                await (0, functions_1.getFunctions)().taskQueue('prosasAuthenticatedWorker').enqueue({ url: link, searchId });
+                totalProcessed++;
+                continue;
+            }
             const existingRef = await db.collection('editais').where('sourceUrl', '==', link).limit(1).get();
             if (!existingRef.empty) {
                 totalProcessed++;
