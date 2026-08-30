@@ -2776,8 +2776,6 @@ export const prosasBulkDiscoveryWorker = onTaskDispatched({
 
     logger.info(`[Prosas Bulk Discovery] Starting processing for page ${page}`);
 
-    let fetchUrl = `https://prosas.com.br/selecao/api/v2/third_party/oportunidades/inscricoes_abertas?include=area_interesses%2Cincentivador&page%5Bpage%5D=${page}&page%5Bsize%5D=20&&sort=`;
-
     let browser: any = null;
     try {
         // Fetch Session State from GCS to bypass Cloudflare/auth wall
@@ -2796,52 +2794,42 @@ export const prosasBulkDiscoveryWorker = onTaskDispatched({
             executablePath: await chromiumSparticuz.executablePath(),
             headless: true,
         });
-        let data: any = null;
 
         const context = await browser.newContext({ storageState: sessionData });
-        const page = await context.newPage();
+        const playwrightPage = await context.newPage();
 
-        // Navigate to a standard page first to establish Cloudflare clearance
-        logger.info(`[Prosas Bulk Discovery] Navigating to homepage to bypass Cloudflare...`);
-        await page.goto('https://prosas.com.br/editais', { waitUntil: 'networkidle', timeout: 60000 });
+        // Navigate directly to the search UI page
+        const searchUrl = `https://prosas.com.br/editais?page=${page}`;
+        logger.info(`[Prosas Bulk Discovery] Navigating to search URL to extract DOM: ${searchUrl}`);
+        await playwrightPage.goto(searchUrl, { waitUntil: 'networkidle', timeout: 60000 });
 
-        // Simulate human behavior
-        logger.info(`[Prosas Bulk Discovery] Simulating human behavior (scrolling and waiting)...`);
-        await page.waitForTimeout(Math.floor(Math.random() * 3000) + 2000);
-        await page.evaluate(() => window.scrollBy(0, Math.floor(Math.random() * 500) + 200));
-        await page.waitForTimeout(Math.floor(Math.random() * 2000) + 1000);
+        // Simulate human behavior and wait for content to load
+        logger.info(`[Prosas Bulk Discovery] Simulating human behavior and waiting for DOM rendering...`);
+        await playwrightPage.waitForTimeout(Math.floor(Math.random() * 3000) + 2000);
+        await playwrightPage.evaluate(() => window.scrollBy(0, Math.floor(Math.random() * 500) + 200));
+        await playwrightPage.waitForTimeout(Math.floor(Math.random() * 2000) + 1000);
 
-        // Fetch the JSON API from within the browser context
-        logger.info(`[Prosas Bulk Discovery] Fetching API via page.evaluate...`);
-        const fetchResult = await page.evaluate(async (url: string) => {
-            const res = await fetch(url, {
-                headers: {
-                    'Accept': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest'
-                }
-            });
-            if (!res.ok) {
-                return { ok: false, status: res.status };
-            }
-            return { ok: true, data: await res.json() };
-        }, fetchUrl);
+        // Extract edital links directly from the rendered HTML DOM
+        logger.info(`[Prosas Bulk Discovery] Extracting edital links from DOM...`);
+        const links = await playwrightPage.evaluate(() => {
+            return Array.from(document.querySelectorAll('a[href*="/editais/"]')).map((a: any) => a.href);
+        });
 
-        if (!fetchResult.ok) {
-            throw new Error(`HTTP error! status: ${fetchResult.status}`);
-        }
-        data = fetchResult.data;
+        // Deduplicate the extracted links
+        let candidateLinks: string[] = [...new Set<string>(links)];
 
-        let candidateLinks: string[] = [];
-        if (data && data.data && Array.isArray(data.data)) {
-            candidateLinks = data.data.map((item: any) => `https://prosas.com.br/editais/${item.id}`);
-        }
+        // Filter out URLs that are exactly the list page itself or don't follow the ID pattern
+        candidateLinks = candidateLinks.filter(url => {
+             const match = url.match(/\/editais\/(\d+)$/);
+             return match !== null;
+        });
 
         if (candidateLinks.length === 0) {
-            logger.info(`[Prosas Bulk Discovery] No links found for Prosas on page ${page}. Stopping pagination.`);
+            logger.info(`[Prosas Bulk Discovery] No unique edital links found for Prosas on page ${page}. Stopping pagination.`);
             return;
         }
 
-        logger.info(`[Prosas Bulk Discovery] Discovered ${candidateLinks.length} total edital links on Page ${page}`);
+        logger.info(`[Prosas Bulk Discovery] Discovered ${candidateLinks.length} unique edital links on Page ${page}`);
 
         let newCount = 0;
         for (const link of candidateLinks) {
