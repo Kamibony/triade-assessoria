@@ -42,6 +42,7 @@ const scheduler_1 = require("firebase-functions/v2/scheduler");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const playwright_extra_1 = require("playwright-extra");
+const chromium_1 = __importDefault(require("@sparticuz/chromium"));
 const pdfParse = require('pdf-parse');
 const puppeteer_extra_plugin_stealth_1 = __importDefault(require("puppeteer-extra-plugin-stealth"));
 const firestore_1 = require("firebase-admin/firestore");
@@ -1815,7 +1816,11 @@ exports.prosasAuthenticatedWorker = (0, tasks_1.onTaskDispatched)({
         logger.info(`[Prosas Auth Worker] Session state downloaded to ${sessionFilePath}`);
         // 2. Playwright Scraping
         playwright_extra_1.chromium.use((0, puppeteer_extra_plugin_stealth_1.default)());
-        const browser = await playwright_extra_1.chromium.launch({ headless: true });
+        const browser = await playwright_extra_1.chromium.launch({
+            args: chromium_1.default.args,
+            executablePath: await chromium_1.default.executablePath(),
+            headless: true,
+        });
         let combinedText = '';
         const downloadedPdfPaths = [];
         try {
@@ -1990,8 +1995,9 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                 if (isProsas) {
                     playwright_extra_1.chromium.use((0, puppeteer_extra_plugin_stealth_1.default)());
                     const browser = await playwright_extra_1.chromium.launch({
+                        args: chromium_1.default.args,
+                        executablePath: await chromium_1.default.executablePath(),
                         headless: true,
-                        args: ['--no-sandbox', '--disable-setuid-sandbox']
                     });
                     try {
                         const pageContext = await browser.newPage();
@@ -2327,7 +2333,11 @@ exports.renewProsasSessionCron = (0, scheduler_1.onSchedule)({
         return;
     }
     playwright_extra_1.chromium.use((0, puppeteer_extra_plugin_stealth_1.default)());
-    const browser = await playwright_extra_1.chromium.launch({ headless: true });
+    const browser = await playwright_extra_1.chromium.launch({
+        args: chromium_1.default.args,
+        executablePath: await chromium_1.default.executablePath(),
+        headless: true,
+    });
     try {
         const context = await browser.newContext();
         const page = await context.newPage();
@@ -2382,18 +2392,36 @@ exports.prosasBulkDiscoveryWorker = (0, tasks_1.onTaskDispatched)({
         logger.info(`[Prosas Bulk Discovery] Downloading session state from gs://${sessionBucketName}/${sessionFileName} directly into memory`);
         const [fileContent] = await storage.bucket(sessionBucketName).file(sessionFileName).download();
         const sessionData = JSON.parse(fileContent.toString('utf-8'));
-        const cookies = sessionData.cookies || [];
-        const cookieString = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
-        const headers = {
-            'Cookie': cookieString,
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/json'
-        };
-        const response = await fetch(fetchUrl, { headers });
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+        playwright_extra_1.chromium.use((0, puppeteer_extra_plugin_stealth_1.default)());
+        const browser = await playwright_extra_1.chromium.launch({
+            args: chromium_1.default.args,
+            executablePath: await chromium_1.default.executablePath(),
+            headless: true,
+        });
+        let data = null;
+        try {
+            const context = await browser.newContext({ storageState: sessionData });
+            const page = await context.newPage();
+            // Navigate to a standard page first to establish Cloudflare clearance
+            logger.info(`[Prosas Bulk Discovery] Navigating to homepage to bypass Cloudflare...`);
+            await page.goto('https://prosas.com.br/editais', { waitUntil: 'networkidle', timeout: 60000 });
+            // Fetch the JSON API from within the browser context
+            logger.info(`[Prosas Bulk Discovery] Fetching API via page.evaluate...`);
+            const fetchResult = await page.evaluate(async (url) => {
+                const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+                if (!res.ok) {
+                    return { ok: false, status: res.status };
+                }
+                return { ok: true, data: await res.json() };
+            }, fetchUrl);
+            if (!fetchResult.ok) {
+                throw new Error(`HTTP error! status: ${fetchResult.status}`);
+            }
+            data = fetchResult.data;
         }
-        const data = await response.json();
+        finally {
+            await browser.close();
+        }
         let candidateLinks = [];
         if (data && data.data && Array.isArray(data.data)) {
             candidateLinks = data.data.map((item) => `https://prosas.com.br/editais/${item.id}`);
