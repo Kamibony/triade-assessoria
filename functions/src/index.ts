@@ -1841,7 +1841,7 @@ export const onMatchGenerated = onDocumentWritten('matches/{matchId}', async (ev
 });
 
 export const triggerAgenticSearch = onCall({
-    cors: true,
+    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
     timeoutSeconds: 300,
 }, async (request) => {
     try {
