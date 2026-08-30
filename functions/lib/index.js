@@ -584,20 +584,41 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         const internalEditaisSnapshot = await db.collection('editais').limit(100).get();
         let instantMatches = 0;
         // Find internal editais that have high vector similarity
+        const editaisMissingEmbeddings = [];
+        const validEditaisForSimilarity = [];
         for (const editalDoc of internalEditaisSnapshot.docs) {
             const editalData = editalDoc.data();
-            let editalEmbedding = editalData?.embedding || null;
-            if (!editalEmbedding && editalData.title) {
-                const editalText = `Objetivo e Título: ${editalData.title || ''}. Elegibilidade: Atividades permitidas: ${editalData.eligibilityCriteria?.allowedActivities?.join(', ') || ''}.`;
-                editalEmbedding = await generateTextEmbedding(editalText);
-                await db.collection('editais').doc(editalDoc.id).update({ embedding: editalEmbedding });
+            const editalEmbedding = editalData?.embedding || null;
+            if (editalEmbedding) {
+                validEditaisForSimilarity.push({ docId: editalDoc.id, embedding: editalEmbedding });
             }
-            if (editalEmbedding && oscEmbedding) {
-                const similarityScore = cosineSimilarity(oscEmbedding, editalEmbedding);
+            else if (editalData.title) {
+                const editalText = `Objetivo e Título: ${editalData.title || ''}. Elegibilidade: Atividades permitidas: ${editalData.eligibilityCriteria?.allowedActivities?.join(', ') || ''}.`;
+                editaisMissingEmbeddings.push({ docId: editalDoc.id, text: editalText });
+            }
+        }
+        // Process missing embeddings in chunks of 10 to avoid blocking the thread too long or hitting rate limits
+        const embedChunkSize = 10;
+        for (let i = 0; i < editaisMissingEmbeddings.length; i += embedChunkSize) {
+            const chunk = editaisMissingEmbeddings.slice(i, i + embedChunkSize);
+            await Promise.all(chunk.map(async (item) => {
+                try {
+                    const embedding = await generateTextEmbedding(item.text);
+                    await db.collection('editais').doc(item.docId).update({ embedding: embedding });
+                    validEditaisForSimilarity.push({ docId: item.docId, embedding: embedding });
+                }
+                catch (err) {
+                    console.warn(`Failed to generate embedding for internal edital ${item.docId}:`, err);
+                }
+            }));
+        }
+        for (const edital of validEditaisForSimilarity) {
+            if (oscEmbedding) {
+                const similarityScore = cosineSimilarity(oscEmbedding, edital.embedding);
                 if (similarityScore >= 0.60) { // Same threshold as the regular pre-filter
                     await matchEvaluatorQueue.enqueue({
                         oscId: oscId,
-                        editalId: editalDoc.id
+                        editalId: edital.docId
                     });
                     instantMatches++;
                 }
@@ -624,147 +645,172 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         let totalLinksEvaluated = 0;
         let totalValidEditaisEnqueued = 0;
         let allSearchResults = [];
-        for (const query of queries) {
-            try {
-                if (jobRef) {
-                    await jobRef.update({
-                        logs: firestore_1.FieldValue.arrayUnion(`Buscando: "${query}"...`),
-                        updatedAt: firestore_1.FieldValue.serverTimestamp()
-                    });
-                }
-                const searchPromises = [];
-                // Tier 2: Google Vertex AI Search
-                let vertexProjectId = process.env.VERTEX_AI_SEARCH_PROJECT_ID;
-                if (!vertexProjectId) {
-                    try {
-                        vertexProjectId = vertexAiSearchProjectIdString.value();
+        const QUERY_CHUNK_SIZE = 3;
+        for (let q = 0; q < queries.length; q += QUERY_CHUNK_SIZE) {
+            const queryChunk = queries.slice(q, q + QUERY_CHUNK_SIZE);
+            await Promise.all(queryChunk.map(async (query) => {
+                try {
+                    if (jobRef) {
+                        await jobRef.update({
+                            logs: firestore_1.FieldValue.arrayUnion(`Buscando: "${query}"...`),
+                            updatedAt: firestore_1.FieldValue.serverTimestamp()
+                        });
                     }
-                    catch (e) { /* ignore */ }
-                }
-                vertexProjectId = vertexProjectId || "566889139686";
-                let vertexLocation = process.env.VERTEX_AI_SEARCH_LOCATION;
-                if (!vertexLocation) {
-                    try {
-                        vertexLocation = vertexAiSearchLocationString.value();
-                    }
-                    catch (e) { /* ignore */ }
-                }
-                vertexLocation = vertexLocation || "global";
-                let vertexEngineId = process.env.VERTEX_AI_SEARCH_ENGINE_ID;
-                if (!vertexEngineId) {
-                    try {
-                        vertexEngineId = vertexAiSearchEngineIdString.value();
-                    }
-                    catch (e) { /* ignore */ }
-                }
-                vertexEngineId = vertexEngineId || "triade-sniper-search_1787960465651";
-                if (vertexEngineId && vertexLocation && vertexProjectId) {
-                    const vertexSearchPromise = (async () => {
+                    const searchPromises = [];
+                    // Tier 2: Google Vertex AI Search
+                    let vertexProjectId = process.env.VERTEX_AI_SEARCH_PROJECT_ID;
+                    if (!vertexProjectId) {
                         try {
-                            console.log(`[Agentic Search] Executing Vertex AI Search for query: "${query}"`);
-                            const auth = new google_auth_library_1.GoogleAuth({
-                                scopes: 'https://www.googleapis.com/auth/cloud-platform'
-                            });
-                            const client = await auth.getClient();
-                            const accessToken = await client.getAccessToken();
-                            const vertexUrl = `https://discoveryengine.googleapis.com/v1/projects/${vertexProjectId}/locations/${vertexLocation}/collections/default_collection/engines/${vertexEngineId}/servingConfigs/default_search:search`;
-                            const vertexResponse = await fetch(vertexUrl, {
-                                method: 'POST',
-                                headers: {
-                                    'Authorization': `Bearer ${accessToken.token}`,
-                                    'Content-Type': 'application/json',
-                                },
-                                body: JSON.stringify({
-                                    query: query,
-                                    pageSize: 40
-                                })
-                            });
-                            if (!vertexResponse.ok) {
-                                console.warn(`Vertex AI Search API failed with status: ${vertexResponse.status}`);
-                            }
-                            else {
-                                const vertexData = await vertexResponse.json();
-                                const results = vertexData.results || [];
-                                for (const result of results) {
-                                    const derivedStructData = result.document?.derivedStructData;
-                                    if (derivedStructData && derivedStructData.link) {
-                                        let snippet = '';
-                                        if (derivedStructData.snippets && derivedStructData.snippets.length > 0) {
-                                            snippet = derivedStructData.snippets[0].snippet || '';
-                                            // Clean HTML tags from snippet
-                                            snippet = snippet.replace(/<\/?[^>]+(>|$)/g, "");
-                                        }
-                                        allSearchResults.push({
-                                            link: derivedStructData.link,
-                                            title: derivedStructData.title || '',
-                                            snippet: snippet,
-                                            query: query
-                                        });
-                                    }
-                                }
-                            }
+                            vertexProjectId = vertexAiSearchProjectIdString.value();
                         }
-                        catch (e) {
-                            console.warn(`[Agentic Search] Exception during Vertex AI Search:`, e);
-                        }
-                    })();
-                    searchPromises.push(vertexSearchPromise);
-                }
-                // Tier 3: Brave Search API
-                let braveApiKey = process.env.BRAVE_SEARCH_API_KEY;
-                if (!braveApiKey) {
-                    try {
-                        braveApiKey = braveApiKeyString.value();
+                        catch (e) { /* ignore */ }
                     }
-                    catch (e) { /* ignore */ }
-                }
-                if (braveApiKey) {
-                    const braveSearchPromise = (async () => {
-                        const maskedKey = braveApiKey.length > 8 ? `${braveApiKey.substring(0, 4)}***${braveApiKey.substring(braveApiKey.length - 4)}` : '***';
-                        console.log(`[Agentic Search] Executing Brave Search API Key (length: ${braveApiKey.length}): ${maskedKey}`);
-                        // Pagination loop for 2 pages (offset 0 and 1)
-                        for (let offset = 0; offset <= 1; offset++) {
-                            const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=20&offset=${offset}`;
+                    vertexProjectId = vertexProjectId || "566889139686";
+                    let vertexLocation = process.env.VERTEX_AI_SEARCH_LOCATION;
+                    if (!vertexLocation) {
+                        try {
+                            vertexLocation = vertexAiSearchLocationString.value();
+                        }
+                        catch (e) { /* ignore */ }
+                    }
+                    vertexLocation = vertexLocation || "global";
+                    let vertexEngineId = process.env.VERTEX_AI_SEARCH_ENGINE_ID;
+                    if (!vertexEngineId) {
+                        try {
+                            vertexEngineId = vertexAiSearchEngineIdString.value();
+                        }
+                        catch (e) { /* ignore */ }
+                    }
+                    vertexEngineId = vertexEngineId || "triade-sniper-search_1787960465651";
+                    if (vertexEngineId && vertexLocation && vertexProjectId) {
+                        const vertexSearchPromise = (async () => {
                             try {
-                                const searchResponse = await fetch(url, {
-                                    headers: {
-                                        'Accept': 'application/json',
-                                        'Accept-Encoding': 'gzip',
-                                        'X-Subscription-Token': braveApiKey
-                                    }
+                                console.log(`[Agentic Search] Executing Vertex AI Search for query: "${query}"`);
+                                const auth = new google_auth_library_1.GoogleAuth({
+                                    scopes: 'https://www.googleapis.com/auth/cloud-platform'
                                 });
-                                if (!searchResponse.ok) {
-                                    console.warn(`Brave Search API request failed for page ${offset} with status: ${searchResponse.status}`);
-                                    continue; // Try next page if one fails
+                                const client = await auth.getClient();
+                                const accessToken = await client.getAccessToken();
+                                const vertexUrl = `https://discoveryengine.googleapis.com/v1/projects/${vertexProjectId}/locations/${vertexLocation}/collections/default_collection/engines/${vertexEngineId}/servingConfigs/default_search:search`;
+                                let vertexResponse;
+                                let attempt = 0;
+                                const maxAttempts = 3;
+                                while (attempt < maxAttempts) {
+                                    vertexResponse = await fetch(vertexUrl, {
+                                        method: 'POST',
+                                        headers: {
+                                            'Authorization': `Bearer ${accessToken.token}`,
+                                            'Content-Type': 'application/json',
+                                        },
+                                        body: JSON.stringify({
+                                            query: query,
+                                            pageSize: 40
+                                        })
+                                    });
+                                    if (vertexResponse.ok)
+                                        break;
+                                    if (vertexResponse.status === 429 || vertexResponse.status >= 500) {
+                                        attempt++;
+                                        console.warn(`Vertex AI Search API failed with status ${vertexResponse.status}. Retrying ${attempt}/${maxAttempts}...`);
+                                        await new Promise(res => setTimeout(res, 1000 * Math.pow(2, attempt)));
+                                    }
+                                    else {
+                                        break; // Non-retryable error
+                                    }
                                 }
-                                const braveData = await searchResponse.json();
-                                const results = braveData.web?.results || [];
-                                for (const r of results) {
-                                    if (r.url) {
-                                        allSearchResults.push({
-                                            link: r.url,
-                                            title: r.title || '',
-                                            snippet: r.description || '',
-                                            query: query
+                                if (!vertexResponse || !vertexResponse.ok) {
+                                    const status = vertexResponse ? vertexResponse.status : 'unknown';
+                                    console.error(`Vertex AI Search API failed permanently with status: ${status}`);
+                                    if (jobRef) {
+                                        await jobRef.update({
+                                            logs: firestore_1.FieldValue.arrayUnion(`Falha permanente no Vertex AI para query: "${query}" (Status: ${status})`),
                                         });
+                                    }
+                                }
+                                else {
+                                    const vertexData = await vertexResponse.json();
+                                    const results = vertexData.results || [];
+                                    for (const result of results) {
+                                        const derivedStructData = result.document?.derivedStructData;
+                                        if (derivedStructData && derivedStructData.link) {
+                                            let snippet = '';
+                                            if (derivedStructData.snippets && derivedStructData.snippets.length > 0) {
+                                                snippet = derivedStructData.snippets[0].snippet || '';
+                                                // Clean HTML tags from snippet
+                                                snippet = snippet.replace(/<\/?[^>]+(>|$)/g, "");
+                                            }
+                                            allSearchResults.push({
+                                                link: derivedStructData.link,
+                                                title: derivedStructData.title || '',
+                                                snippet: snippet,
+                                                query: query
+                                            });
+                                        }
                                     }
                                 }
                             }
                             catch (e) {
-                                console.warn(`Brave Search API request threw error for page ${offset}`, e);
+                                console.error(`[Agentic Search] Exception during Vertex AI Search:`, e);
                             }
+                        })();
+                        searchPromises.push(vertexSearchPromise);
+                    }
+                    // Tier 3: Brave Search API
+                    let braveApiKey = process.env.BRAVE_SEARCH_API_KEY;
+                    if (!braveApiKey) {
+                        try {
+                            braveApiKey = braveApiKeyString.value();
                         }
-                    })();
-                    searchPromises.push(braveSearchPromise);
+                        catch (e) { /* ignore */ }
+                    }
+                    if (braveApiKey) {
+                        const braveSearchPromise = (async () => {
+                            const maskedKey = braveApiKey.length > 8 ? `${braveApiKey.substring(0, 4)}***${braveApiKey.substring(braveApiKey.length - 4)}` : '***';
+                            console.log(`[Agentic Search] Executing Brave Search API Key (length: ${braveApiKey.length}): ${maskedKey}`);
+                            // Pagination loop for 2 pages (offset 0 and 1) running concurrently
+                            await Promise.all([0, 1].map(async (offset) => {
+                                const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=20&offset=${offset}`;
+                                try {
+                                    const searchResponse = await fetch(url, {
+                                        headers: {
+                                            'Accept': 'application/json',
+                                            'Accept-Encoding': 'gzip',
+                                            'X-Subscription-Token': braveApiKey
+                                        }
+                                    });
+                                    if (!searchResponse.ok) {
+                                        console.warn(`Brave Search API request failed for page ${offset} with status: ${searchResponse.status}`);
+                                        return;
+                                    }
+                                    const braveData = await searchResponse.json();
+                                    const results = braveData.web?.results || [];
+                                    for (const r of results) {
+                                        if (r.url) {
+                                            allSearchResults.push({
+                                                link: r.url,
+                                                title: r.title || '',
+                                                snippet: r.description || '',
+                                                query: query
+                                            });
+                                        }
+                                    }
+                                }
+                                catch (e) {
+                                    console.warn(`Brave Search API request threw error for page ${offset}`, e);
+                                }
+                            }));
+                        })();
+                        searchPromises.push(braveSearchPromise);
+                    }
+                    else {
+                        console.warn(`[Agentic Search] BRAVE_SEARCH_API_KEY not found. Skipping Brave search.`);
+                    }
+                    await Promise.all(searchPromises);
                 }
-                else {
-                    console.warn(`[Agentic Search] BRAVE_SEARCH_API_KEY not found. Skipping Brave search.`);
+                catch (err) {
+                    console.error(`Error searching for query ${query}:`, err);
                 }
-                await Promise.all(searchPromises);
-            }
-            catch (err) {
-                console.error(`Error searching for query ${query}:`, err);
-            }
+            }));
         }
         // Intra-job deduplication
         const uniqueSearchResults = [];
@@ -850,15 +896,21 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                         }
                         fullTextToAnalyze = fetchedText;
                     }
+                    else {
+                        console.warn(`Rejecting ${link}: full text fetch returned insufficient content.`);
+                        return; // Drop URL if fetch didn't yield enough content
+                    }
                 }
                 catch (fetchErr) {
-                    console.warn(`Failed to fetch full text for ${link}, falling back to snippet`, fetchErr);
+                    console.warn(`Failed to fetch full text for ${link}, dropping URL to prevent hallucinations`, fetchErr);
+                    return; // Explicitly drop URL on failure
                 }
                 if (jobRef && !hasUpdatedStatus) { // Update status to scoring on the first valid link of the batch
                     hasUpdatedStatus = true;
                     await jobRef.update({ status: 'scoring_triage', updatedAt: firestore_1.FieldValue.serverTimestamp() });
                 }
                 // Step D: LLM Triage (High Cost)
+                fullTextToAnalyze = fullTextToAnalyze.substring(0, 10000); // Truncate to reduce token cost
                 const triageResult = await triageEditalWebpage({ text: fullTextToAnalyze, searchQuery: r.query });
                 if (triageResult.isValidEdital) {
                     await enqueueEditalExtraction(link, fullTextToAnalyze, triageResult.reason, oscId);
