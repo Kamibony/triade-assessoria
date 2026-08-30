@@ -1620,7 +1620,7 @@ exports.onMatchGenerated = (0, firestore_2.onDocumentWritten)('matches/{matchId}
     }
 });
 exports.triggerAgenticSearch = (0, https_1.onCall)({
-    cors: true,
+    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
     timeoutSeconds: 300,
 }, async (request) => {
     try {
