@@ -614,6 +614,49 @@ export const agenticSearchWorker = onTaskDispatched({
             await db.collection('oscs').doc(oscId).update({ embedding: oscEmbedding });
         }
 
+        // Tier 1: Internal Database First
+        if (jobRef) {
+            await jobRef.update({
+                logs: FieldValue.arrayUnion('Executando Tier 1: Busca em base interna...'),
+                updatedAt: FieldValue.serverTimestamp()
+            });
+        }
+
+        const matchEvaluatorQueue = getFunctions().taskQueue('matchEvaluatorWorker');
+        const internalEditaisSnapshot = await db.collection('editais').limit(100).get();
+        let instantMatches = 0;
+
+        // Find internal editais that have high vector similarity
+        for (const editalDoc of internalEditaisSnapshot.docs) {
+            const editalData = editalDoc.data();
+            let editalEmbedding = editalData?.embedding || null;
+            if (!editalEmbedding && editalData.title) {
+                const editalText = `Objetivo e Título: ${editalData.title || ''}. Elegibilidade: Atividades permitidas: ${editalData.eligibilityCriteria?.allowedActivities?.join(', ') || ''}.`;
+                editalEmbedding = await generateTextEmbedding(editalText);
+                await db.collection('editais').doc(editalDoc.id).update({ embedding: editalEmbedding });
+            }
+
+            if (editalEmbedding && oscEmbedding) {
+                const similarityScore = cosineSimilarity(oscEmbedding, editalEmbedding);
+                if (similarityScore >= 0.60) { // Same threshold as the regular pre-filter
+                    await matchEvaluatorQueue.enqueue({
+                        oscId: oscId,
+                        editalId: editalDoc.id
+                    });
+                    instantMatches++;
+                }
+            }
+        }
+
+        console.log(`Found ${instantMatches} instant internal matches for OSC ${oscId}.`);
+
+        if (jobRef) {
+            await jobRef.update({
+                logs: FieldValue.arrayUnion(`Tier 1 Concluído: Encontrados ${instantMatches} editais promissores internos.`),
+                updatedAt: FieldValue.serverTimestamp()
+            });
+        }
+
         const { queries } = await generateSearchQueries({ osc: oscData });
         console.log(`Generated queries for OSC ${oscId}:`, queries);
 
@@ -626,10 +669,11 @@ export const agenticSearchWorker = onTaskDispatched({
             });
         }
 
-        const searchedLinks = new Set<string>();
         let totalLinksFound = 0;
         let totalLinksEvaluated = 0;
         let totalValidEditaisEnqueued = 0;
+
+        let allSearchResults: { link: string, title: string, snippet: string, query: string }[] = [];
 
         for (const query of queries) {
             try {
@@ -640,10 +684,9 @@ export const agenticSearchWorker = onTaskDispatched({
                     });
                 }
 
-                let allSearchResults: { link: string, title: string, snippet: string }[] = [];
-                let googleSearchFailed = false;
+                const searchPromises = [];
 
-                // Try Primary Search: Google Vertex AI Search
+                // Tier 2: Google Vertex AI Search
                 let vertexProjectId = process.env.VERTEX_AI_SEARCH_PROJECT_ID;
                 if (!vertexProjectId) {
                     try { vertexProjectId = vertexAiSearchProjectIdString.value(); } catch (e) { /* ignore */ }
@@ -663,189 +706,248 @@ export const agenticSearchWorker = onTaskDispatched({
                 vertexEngineId = vertexEngineId || "triade-sniper-search_1787960465651";
 
                 if (vertexEngineId && vertexLocation && vertexProjectId) {
-                    try {
-                        console.log(`[Agentic Search] Executing Vertex AI Search for query: "${query}"`);
+                    const vertexSearchPromise = (async () => {
+                        try {
+                            console.log(`[Agentic Search] Executing Vertex AI Search for query: "${query}"`);
 
-                        const auth = new GoogleAuth({
-                            scopes: 'https://www.googleapis.com/auth/cloud-platform'
-                        });
-                        const client = await auth.getClient();
-                        const accessToken = await client.getAccessToken();
+                            const auth = new GoogleAuth({
+                                scopes: 'https://www.googleapis.com/auth/cloud-platform'
+                            });
+                            const client = await auth.getClient();
+                            const accessToken = await client.getAccessToken();
 
-                        const vertexUrl = `https://discoveryengine.googleapis.com/v1/projects/${vertexProjectId}/locations/${vertexLocation}/collections/default_collection/engines/${vertexEngineId}/servingConfigs/default_search:search`;
+                            const vertexUrl = `https://discoveryengine.googleapis.com/v1/projects/${vertexProjectId}/locations/${vertexLocation}/collections/default_collection/engines/${vertexEngineId}/servingConfigs/default_search:search`;
 
-                        const vertexResponse = await fetch(vertexUrl, {
-                            method: 'POST',
-                            headers: {
-                                'Authorization': `Bearer ${accessToken.token}`,
-                                'Content-Type': 'application/json',
-                            },
-                            body: JSON.stringify({
-                                query: query,
-                                pageSize: 40
-                            })
-                        });
+                            const vertexResponse = await fetch(vertexUrl, {
+                                method: 'POST',
+                                headers: {
+                                    'Authorization': `Bearer ${accessToken.token}`,
+                                    'Content-Type': 'application/json',
+                                },
+                                body: JSON.stringify({
+                                    query: query,
+                                    pageSize: 40
+                                })
+                            });
 
-                        if (!vertexResponse.ok) {
-                            console.warn(`Vertex AI Search API failed with status: ${vertexResponse.status}`);
-                            googleSearchFailed = true;
-                        } else {
-                            const vertexData = await vertexResponse.json() as any;
-                            const results = vertexData.results || [];
-                            for (const result of results) {
-                                const derivedStructData = result.document?.derivedStructData;
-                                if (derivedStructData && derivedStructData.link) {
-                                    let snippet = '';
-                                    if (derivedStructData.snippets && derivedStructData.snippets.length > 0) {
-                                        snippet = derivedStructData.snippets[0].snippet || '';
-                                        // Clean HTML tags from snippet
-                                        snippet = snippet.replace(/<\/?[^>]+(>|$)/g, "");
+                            if (!vertexResponse.ok) {
+                                console.warn(`Vertex AI Search API failed with status: ${vertexResponse.status}`);
+                            } else {
+                                const vertexData = await vertexResponse.json() as any;
+                                const results = vertexData.results || [];
+                                for (const result of results) {
+                                    const derivedStructData = result.document?.derivedStructData;
+                                    if (derivedStructData && derivedStructData.link) {
+                                        let snippet = '';
+                                        if (derivedStructData.snippets && derivedStructData.snippets.length > 0) {
+                                            snippet = derivedStructData.snippets[0].snippet || '';
+                                            // Clean HTML tags from snippet
+                                            snippet = snippet.replace(/<\/?[^>]+(>|$)/g, "");
+                                        }
+
+                                        allSearchResults.push({
+                                            link: derivedStructData.link,
+                                            title: derivedStructData.title || '',
+                                            snippet: snippet,
+                                            query: query
+                                        });
                                     }
-
-                                    allSearchResults.push({
-                                        link: derivedStructData.link,
-                                        title: derivedStructData.title || '',
-                                        snippet: snippet
-                                    });
                                 }
                             }
+                        } catch (e) {
+                            console.warn(`[Agentic Search] Exception during Vertex AI Search:`, e);
                         }
-                    } catch (e) {
-                        console.warn(`[Agentic Search] Exception during Vertex AI Search:`, e);
-                        googleSearchFailed = true;
-                    }
-                } else {
-                    console.warn(`[Agentic Search] Missing Vertex AI Search credentials. Falling back to Brave Search.`);
-                    googleSearchFailed = true;
+                    })();
+                    searchPromises.push(vertexSearchPromise);
                 }
 
-                // Secondary Fallback: Brave Search API
-                if (googleSearchFailed || allSearchResults.length === 0) {
-                    allSearchResults = []; // Clear any partial results from Google
-
-                    let braveApiKey = process.env.BRAVE_SEARCH_API_KEY;
-                    if (!braveApiKey) {
-                        try { braveApiKey = braveApiKeyString.value(); } catch (e) { /* ignore */ }
-                    }
-
-                    if (!braveApiKey) {
-                        throw new Error("BRAVE_SEARCH_API_KEY environment variable is not set.");
-                    }
-
-                    const maskedKey = braveApiKey.length > 8 ? `${braveApiKey.substring(0, 4)}***${braveApiKey.substring(braveApiKey.length - 4)}` : '***';
-                    console.log(`[Agentic Search] Falling back to Brave API Key (length: ${braveApiKey.length}): ${maskedKey}`);
-
-                    // Pagination loop for 2 pages (offset 0 and 1)
-                    for (let offset = 0; offset <= 1; offset++) {
-                        const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=20&offset=${offset}`;
-                        const searchResponse = await fetch(url, {
-                            headers: {
-                                'Accept': 'application/json',
-                                'Accept-Encoding': 'gzip',
-                                'X-Subscription-Token': braveApiKey
-                            }
-                        });
-
-                        if (!searchResponse.ok) {
-                            console.warn(`Brave Search API request failed for page ${offset} with status: ${searchResponse.status}`);
-                            continue; // Try next page if one fails
-                        }
-
-                        const braveData = await searchResponse.json() as any;
-                        const results = braveData.web?.results || [];
-                        for (const r of results) {
-                            if (r.url) {
-                                allSearchResults.push({
-                                    link: r.url,
-                                    title: r.title || '',
-                                    snippet: r.description || ''
-                                });
-                            }
-                        }
-                    }
+                // Tier 3: Brave Search API
+                let braveApiKey = process.env.BRAVE_SEARCH_API_KEY;
+                if (!braveApiKey) {
+                    try { braveApiKey = braveApiKeyString.value(); } catch (e) { /* ignore */ }
                 }
 
-                let processedResults = 0;
-                let batchLinksFound = 0;
-                let batchLinksEvaluated = 0;
-                let batchValidEditaisEnqueued = 0;
-                let hasUpdatedStatus = false;
+                if (braveApiKey) {
+                    const braveSearchPromise = (async () => {
+                        const maskedKey = braveApiKey.length > 8 ? `${braveApiKey.substring(0, 4)}***${braveApiKey.substring(braveApiKey.length - 4)}` : '***';
+                        console.log(`[Agentic Search] Executing Brave Search API Key (length: ${braveApiKey.length}): ${maskedKey}`);
 
-                // Process in chunks of 5 to control concurrency
-                const chunkSize = 5;
-                for (let i = 0; i < allSearchResults.length; i += chunkSize) {
-                    const chunk = allSearchResults.slice(i, i + chunkSize);
-
-                    await Promise.all(chunk.map(async (r) => {
-                        // Limit to 40 items total across both pages
-                        if (processedResults >= 40) return;
-                        processedResults++;
-
-                        const link = r.link;
-                        if (!link || searchedLinks.has(link)) return;
-                        searchedLinks.add(link);
-                        batchLinksFound++;
-
-                        const existingRef = await db.collection('editais').where('sourceUrl', '==', link).limit(1).get();
-                        if (!existingRef.empty) return;
-
-                        batchLinksEvaluated++;
-
-                        const cleanJsonSnippet = JSON.stringify({
-                            title: r.title,
-                            url: r.link,
-                            snippet: r.snippet
-                        });
-
-                        const textEmbedding = await generateTextEmbedding(cleanJsonSnippet);
-                        const similarityScore = cosineSimilarity(oscEmbedding, textEmbedding);
-                        console.log(`Vector similarity for ${link} (Snippet) is ${similarityScore}`);
-
-                        // Use snippet as a very loose pre-filter (e.g. > 0.30 instead of 0.60)
-                        if (similarityScore > 0.30) {
-                            console.log(`Fetching full content for promising link: ${link}`);
-                            let fullTextToAnalyze = cleanJsonSnippet;
-
+                        // Pagination loop for 2 pages (offset 0 and 1)
+                        for (let offset = 0; offset <= 1; offset++) {
+                            const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=20&offset=${offset}`;
                             try {
-                                const fetchedText = await fetchAndExtractText(link);
-                                if (fetchedText && fetchedText.length >= 500) {
-                                    fullTextToAnalyze = fetchedText;
+                                const searchResponse = await fetch(url, {
+                                    headers: {
+                                        'Accept': 'application/json',
+                                        'Accept-Encoding': 'gzip',
+                                        'X-Subscription-Token': braveApiKey
+                                    }
+                                });
+
+                                if (!searchResponse.ok) {
+                                    console.warn(`Brave Search API request failed for page ${offset} with status: ${searchResponse.status}`);
+                                    continue; // Try next page if one fails
                                 }
-                            } catch (fetchErr) {
-                                console.warn(`Failed to fetch full text for ${link}, falling back to snippet`, fetchErr);
-                            }
 
-                            if (jobRef && !hasUpdatedStatus) { // Update status to scoring on the first valid link of the batch
-                                 hasUpdatedStatus = true;
-                                 await jobRef.update({ status: 'scoring_triage', updatedAt: FieldValue.serverTimestamp() });
-                            }
-
-                            const triageResult = await triageEditalWebpage({ text: fullTextToAnalyze, searchQuery: query });
-                            if (triageResult.isValidEdital) {
-                                await enqueueEditalExtraction(link, fullTextToAnalyze, triageResult.reason, oscId);
-                                console.log(`Successfully enqueued agentic extraction for ${link}`);
-                                batchValidEditaisEnqueued++;
+                                const braveData = await searchResponse.json() as any;
+                                const results = braveData.web?.results || [];
+                                for (const r of results) {
+                                    if (r.url) {
+                                        allSearchResults.push({
+                                            link: r.url,
+                                            title: r.title || '',
+                                            snippet: r.description || '',
+                                            query: query
+                                        });
+                                    }
+                                }
+                            } catch (e) {
+                                console.warn(`Brave Search API request threw error for page ${offset}`, e);
                             }
                         }
-                    }));
+                    })();
+                    searchPromises.push(braveSearchPromise);
+                } else {
+                     console.warn(`[Agentic Search] BRAVE_SEARCH_API_KEY not found. Skipping Brave search.`);
                 }
 
-                totalLinksFound += batchLinksFound;
-                totalLinksEvaluated += batchLinksEvaluated;
-                totalValidEditaisEnqueued += batchValidEditaisEnqueued;
-
-                // Debounce progress updates after each query
-                if (jobRef) {
-                    await jobRef.update({
-                        'progress.linksFound': totalLinksFound,
-                        'progress.linksEvaluated': totalLinksEvaluated,
-                        'progress.validEditaisEnqueued': totalValidEditaisEnqueued,
-                        updatedAt: FieldValue.serverTimestamp()
-                    });
-                }
+                await Promise.all(searchPromises);
 
             } catch (err) {
                 console.error(`Error searching for query ${query}:`, err);
+            }
+        }
+
+        // Intra-job deduplication
+        const uniqueSearchResults = [];
+        const seenLinks = new Set<string>();
+        for (const res of allSearchResults) {
+             if (!seenLinks.has(res.link)) {
+                 seenLinks.add(res.link);
+                 uniqueSearchResults.push(res);
+             }
+        }
+
+        console.log(`Aggregated ${uniqueSearchResults.length} unique links across all queries.`);
+
+        if (jobRef) {
+             await jobRef.update({
+                 logs: FieldValue.arrayUnion(`Agregados ${uniqueSearchResults.length} links únicos de todas as fontes.`),
+                 updatedAt: FieldValue.serverTimestamp()
+             });
+        }
+
+        // Database & Queue Deduplication Shield
+        const shieldedResults = [];
+        const BATCH_SIZE = 30; // Firestore "in" queries support max 30 items
+        for (let i = 0; i < uniqueSearchResults.length; i += BATCH_SIZE) {
+            const batch = uniqueSearchResults.slice(i, i + BATCH_SIZE);
+            const urls = batch.map(r => r.link);
+
+            // Check if already in 'editais'
+            const editaisSnapshot = await db.collection('editais').where('sourceUrl', 'in', urls).get();
+            const existingEditaisUrls = new Set(editaisSnapshot.docs.map(doc => doc.data().sourceUrl));
+
+            // Check if already pending in 'scraping_contents' queue
+            const queueSnapshot = await db.collection('scraping_contents').where('url', 'in', urls).get();
+            const pendingQueueUrls = new Set(queueSnapshot.docs.map(doc => doc.data().url));
+
+            for (const res of batch) {
+                if (!existingEditaisUrls.has(res.link) && !pendingQueueUrls.has(res.link)) {
+                    shieldedResults.push(res);
+                }
+            }
+        }
+
+        console.log(`Deduplication shield complete. ${shieldedResults.length} links remain out of ${uniqueSearchResults.length}.`);
+
+        if (jobRef) {
+            await jobRef.update({
+                 logs: FieldValue.arrayUnion(`Filtro de duplicatas concluído: ${shieldedResults.length} novos links identificados.`),
+                 updatedAt: FieldValue.serverTimestamp()
+            });
+        }
+
+        let hasUpdatedStatus = false;
+
+        // Process in chunks of 5 to control concurrency
+        const chunkSize = 5;
+        const essentialKeywords = ['edital', 'inscrição', 'inscrições', 'prazo', 'fomento', 'chamada pública', 'financiamento'];
+
+        for (let i = 0; i < shieldedResults.length; i += chunkSize) {
+            const chunk = shieldedResults.slice(i, i + chunkSize);
+
+            await Promise.all(chunk.map(async (r) => {
+                totalLinksFound++;
+                const link = r.link;
+                const titleAndSnippet = (r.title + " " + r.snippet).toLowerCase();
+
+                // 4-Step Filtering Funnel
+
+                // Step A: Keyword Heuristic Pre-filter on Snippet (Zero Cost)
+                const hasKeywordInSnippet = essentialKeywords.some(kw => titleAndSnippet.includes(kw));
+                if (!hasKeywordInSnippet) {
+                    return; // Skip if snippet completely lacks essential keywords
+                }
+
+                const cleanJsonSnippet = JSON.stringify({
+                    title: r.title,
+                    url: r.link,
+                    snippet: r.snippet
+                });
+
+                // Step B: Text Embedding Similarity Filter (Low Cost)
+                totalLinksEvaluated++;
+                const textEmbedding = await generateTextEmbedding(cleanJsonSnippet);
+                const similarityScore = cosineSimilarity(oscEmbedding, textEmbedding);
+                console.log(`Vector similarity for ${link} (Snippet) is ${similarityScore}`);
+
+                if (similarityScore <= 0.30) {
+                    return; // Skip if similarity is too low
+                }
+
+                console.log(`Fetching full content for promising link: ${link}`);
+                let fullTextToAnalyze = cleanJsonSnippet;
+
+                // Step C: Fetch Full HTML and Re-apply Heuristic (Medium Cost)
+                try {
+                    const fetchedText = await fetchAndExtractText(link);
+                    if (fetchedText && fetchedText.length >= 500) {
+                        const fetchedTextLower = fetchedText.toLowerCase();
+                        const hasKeywordInFullText = essentialKeywords.some(kw => fetchedTextLower.includes(kw));
+
+                        if (!hasKeywordInFullText) {
+                            console.log(`Rejecting ${link} post-fetch: missing essential keywords in full text.`);
+                            return; // Reject before LLM evaluation
+                        }
+                        fullTextToAnalyze = fetchedText;
+                    }
+                } catch (fetchErr) {
+                    console.warn(`Failed to fetch full text for ${link}, falling back to snippet`, fetchErr);
+                }
+
+                if (jobRef && !hasUpdatedStatus) { // Update status to scoring on the first valid link of the batch
+                     hasUpdatedStatus = true;
+                     await jobRef.update({ status: 'scoring_triage', updatedAt: FieldValue.serverTimestamp() });
+                }
+
+                // Step D: LLM Triage (High Cost)
+                const triageResult = await triageEditalWebpage({ text: fullTextToAnalyze, searchQuery: r.query });
+                if (triageResult.isValidEdital) {
+                    await enqueueEditalExtraction(link, fullTextToAnalyze, triageResult.reason, oscId);
+                    console.log(`Successfully enqueued agentic extraction for ${link}`);
+                    totalValidEditaisEnqueued++;
+                }
+            }));
+
+            // Debounce progress updates after each chunk
+            if (jobRef) {
+                await jobRef.update({
+                    'progress.linksFound': totalLinksFound,
+                    'progress.linksEvaluated': totalLinksEvaluated,
+                    'progress.validEditaisEnqueued': totalValidEditaisEnqueued,
+                    updatedAt: FieldValue.serverTimestamp()
+                });
             }
         }
 
@@ -1183,6 +1285,7 @@ async function enqueueEditalExtraction(link: string, text: string, reason: strin
     expireAt.setHours(expireAt.getHours() + 24);
 
     await tempContentRef.set({
+        url: link,
         text: text,
         createdAt: FieldValue.serverTimestamp(),
         expireAt: expireAt
