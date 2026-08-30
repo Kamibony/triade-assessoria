@@ -2666,7 +2666,25 @@ export const prosasBulkDiscoveryWorker = onTaskDispatched({
     let fetchUrl = `https://prosas.com.br/selecao/api/v2/third_party/oportunidades/inscricoes_abertas?include=area_interesses%2Cincentivador&page%5Bpage%5D=${page}&page%5Bsize%5D=20&&sort=`;
 
     try {
-        const response = await fetch(fetchUrl);
+        // Fetch Session State from GCS to bypass Cloudflare/auth wall
+        const storage = getStorage();
+        const sessionBucketName = 'triade-prosas-session-state';
+        const sessionFileName = 'prosas_session.json';
+
+        logger.info(`[Prosas Bulk Discovery] Downloading session state from gs://${sessionBucketName}/${sessionFileName} directly into memory`);
+        const [fileContent] = await storage.bucket(sessionBucketName).file(sessionFileName).download();
+
+        const sessionData = JSON.parse(fileContent.toString('utf-8'));
+        const cookies = sessionData.cookies || [];
+        const cookieString = cookies.map((c: any) => `${c.name}=${c.value}`).join('; ');
+
+        const headers = {
+            'Cookie': cookieString,
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json'
+        };
+
+        const response = await fetch(fetchUrl, { headers });
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
