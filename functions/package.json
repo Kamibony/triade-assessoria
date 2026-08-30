@@ -20,6 +20,7 @@
     "@genkit-ai/core": "^1.40.1",
     "@genkit-ai/firebase": "^1.40.1",
     "@genkit-ai/google-genai": "^1.41.0",
+    "@sparticuz/chromium": "^149.0.0",
     "cheerio": "^1.2.0",
     "duck-duck-scrape": "^2.2.7",
     "firebase-admin": "^14.3.0",
