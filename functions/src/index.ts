@@ -1170,6 +1170,11 @@ async function routeEditalUrl(url: string, sourceContext: string, searchId?: str
 
 async function enqueueEditalExtraction(link: string, text: string, reason: string, searchId?: string) {
     const db = getFirestore();
+    // Guardrail: Truncate text to 10000 characters to prevent LLM token exhaustion
+    if (text && text.length > 10000) {
+        logger.info(`[Guardrail] Truncating text for ${link} from ${text.length} to 10000 characters.`);
+        text = text.substring(0, 10000);
+    }
     const tempContentRef = db.collection('scraping_contents').doc();
 
     // Set TTL for 24 hours from now
@@ -2070,6 +2075,13 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
             // Wait an additional moment for dynamic content
             await page.waitForTimeout(5000);
 
+            // Check for session expiration
+            const currentUrl = page.url();
+            if (currentUrl.includes('/users/sign_in')) {
+                logger.error(`[Prosas Auth Worker] Session expired or invalid. Redirected to ${currentUrl}`);
+                throw new Error('Prosas session expired. Need to renew session.');
+            }
+
             // Extract the main content text
             const pageText = await page.evaluate(() => {
                 return document.body.innerText;
@@ -2149,7 +2161,49 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
 
     } catch (error) {
         logger.error(`[Prosas Auth Worker] Fatal error processing ${url}`, error);
-        throw error;
+
+        const db = getFirestore();
+        // Use a base64 encoded URL or a safe hash as document ID, but querying is simpler.
+        // We'll use a hash or just URL string if it's short, but Firestore doc IDs can't contain slashes.
+        // Safer to just query for the document to update it.
+        const failuresRef = db.collection('failed_ingestions');
+        const querySnapshot = await failuresRef.where('url', '==', url).limit(1).get();
+
+        const retryCount = (request as any).retryCount || 0;
+
+        if (retryCount >= 2) {
+            logger.error(`[Prosas Auth Worker] Circuit Breaker triggered for ${url} after ${retryCount + 1} attempts.`);
+            if (querySnapshot.empty) {
+                await failuresRef.add({
+                    url: url,
+                    reason: error instanceof Error ? error.message : 'Unknown error',
+                    failedAt: FieldValue.serverTimestamp(),
+                    isPermanent: true
+                });
+            } else {
+                await querySnapshot.docs[0]!.ref.update({
+                    failedAt: FieldValue.serverTimestamp(),
+                    isPermanent: true,
+                    reason: error instanceof Error ? error.message : 'Unknown error'
+                });
+            }
+            // Don't throw to stop retrying
+        } else {
+            if (querySnapshot.empty) {
+                await failuresRef.add({
+                    url: url,
+                    attempts: retryCount + 1,
+                    lastFailedAt: FieldValue.serverTimestamp(),
+                    isPermanent: false
+                });
+            } else {
+                await querySnapshot.docs[0]!.ref.update({
+                    attempts: retryCount + 1,
+                    lastFailedAt: FieldValue.serverTimestamp()
+                });
+            }
+            throw error;
+        }
     }
 });
 
@@ -2532,5 +2586,138 @@ export const onSearchCreated = onDocumentCreated({ document: 'searches/{searchId
             status: 'error',
             message: error instanceof Error ? error.message : 'Erro interno ao enfileirar tarefas de busca.',
         });
+    }
+});
+
+
+export const renewProsasSessionCron = onSchedule({
+    schedule: '0 3 * * *',
+    timeoutSeconds: 300,
+    memory: '2GiB'
+}, async (event) => {
+    logger.info('[Prosas Session Cron] Starting session renewal...');
+    const username = process.env.PROSAS_USERNAME;
+    const password = process.env.PROSAS_PASSWORD;
+
+    if (!username || !password) {
+        logger.error('[Prosas Session Cron] Missing PROSAS_USERNAME or PROSAS_PASSWORD.');
+        return;
+    }
+
+    chromium.use(stealth());
+    const browser = await chromium.launch({ headless: true });
+
+    try {
+        const context = await browser.newContext();
+        const page = await context.newPage();
+
+        logger.info('[Prosas Session Cron] Navigating to login page...');
+        await page.goto('https://prosas.com.br/users/sign_in', { waitUntil: 'networkidle' });
+
+        logger.info('[Prosas Session Cron] Filling credentials...');
+        await page.locator('#user_email').last().waitFor({ state: 'visible', timeout: 30000 });
+        await page.locator('#user_email').last().fill(username);
+        await page.locator('#user_password').last().fill(password);
+
+        logger.info('[Prosas Session Cron] Submitting form...');
+        await page.locator('input[type="submit"][name="commit"]').last().click();
+
+        await page.waitForLoadState('networkidle');
+        await page.waitForTimeout(5000);
+
+        const outputFile = '/tmp/prosas_session.json';
+        await context.storageState({ path: outputFile });
+
+        logger.info('[Prosas Session Cron] Session extracted. Uploading to GCS...');
+
+        const storage = getStorage();
+        const bucket = storage.bucket('triade-prosas-session-state');
+        await bucket.upload(outputFile, {
+            destination: 'prosas_session.json',
+            metadata: { contentType: 'application/json' }
+        });
+
+        logger.info('[Prosas Session Cron] Successfully uploaded session state to GCS.');
+
+        if (fs.existsSync(outputFile)) {
+            fs.unlinkSync(outputFile);
+        }
+    } catch (error) {
+        logger.error('[Prosas Session Cron] Failed to renew session:', error);
+        throw error;
+    } finally {
+        await browser.close();
+    }
+});
+
+
+export const prosasBulkDiscoveryWorker = onTaskDispatched({
+    retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
+    rateLimits: { maxConcurrentDispatches: 1 },
+    timeoutSeconds: 1800,
+    memory: '2GiB'
+}, async (request) => {
+    const { page = 1 } = request.data as { page?: number };
+    const db = getFirestore();
+    const queue = getFunctions().taskQueue('prosasAuthenticatedWorker');
+
+    logger.info(`[Prosas Bulk Discovery] Starting processing for page ${page}`);
+
+    let fetchUrl = `https://prosas.com.br/selecao/api/v2/third_party/oportunidades/inscricoes_abertas?include=area_interesses%2Cincentivador&page%5Bpage%5D=${page}&page%5Bsize%5D=20&&sort=`;
+
+    chromium.use(stealth());
+    const browser = await chromium.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+
+    try {
+        const pageContext = await browser.newPage();
+        await pageContext.goto(fetchUrl, { waitUntil: 'networkidle' });
+        const jsonContent = await pageContext.evaluate(() => document.body.innerText);
+        const data = JSON.parse(jsonContent);
+
+        let candidateLinks: string[] = [];
+        if (data && data.data && Array.isArray(data.data)) {
+            candidateLinks = data.data.map((item: any) => `https://prosas.com.br/editais/${item.id}`);
+        }
+
+        if (candidateLinks.length === 0) {
+            logger.info(`[Prosas Bulk Discovery] No links found for Prosas on page ${page}. Stopping pagination.`);
+            return;
+        }
+
+        logger.info(`[Prosas Bulk Discovery] Discovered ${candidateLinks.length} total edital links on Page ${page}`);
+
+        let newCount = 0;
+        for (const link of candidateLinks) {
+            const querySnapshot = await db.collection('editais').where('sourceUrl', '==', link).limit(1).get();
+            if (querySnapshot.empty) {
+                // Enqueue with a random delay between 20s and 60s
+                const randomDelaySec = Math.floor(Math.random() * (60 - 20 + 1)) + 20;
+                const scheduleTime = new Date(Date.now() + randomDelaySec * 1000);
+
+                await queue.enqueue({
+                    url: link,
+                    searchId: 'BULK_DISCOVERY'
+                }, {
+                    scheduleTime: scheduleTime
+                });
+                newCount++;
+            }
+        }
+
+        logger.info(`[Prosas Bulk Discovery] Enqueued ${newCount} new editais for authenticated scraping.`);
+
+        // Enqueue next page
+        const discoveryQueue = getFunctions().taskQueue('prosasBulkDiscoveryWorker');
+        await discoveryQueue.enqueue({ page: page + 1 });
+        logger.info(`[Prosas Bulk Discovery] Enqueued page ${page + 1} for discovery.`);
+
+    } catch (e: any) {
+        logger.error(`[Prosas Bulk Discovery] Prosas API fetch failed: ${e.message}`);
+        throw e;
+    } finally {
+        await browser.close();
     }
 });

@@ -118,4 +118,6 @@ export declare const processScrapingTargetWorker: import("firebase-functions/v2/
 export declare const onSearchCreated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").QueryDocumentSnapshot | undefined, {
     searchId: string;
 }>>;
+export declare const renewProsasSessionCron: import("firebase-functions/v2/scheduler").ScheduleFunction;
+export declare const prosasBulkDiscoveryWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
 //# sourceMappingURL=index.d.ts.map
