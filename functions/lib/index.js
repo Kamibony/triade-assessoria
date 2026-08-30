@@ -361,8 +361,10 @@ Retorne apenas as queries geradas no array.`;
     return response.output;
 });
 function cosineSimilarity(vecA, vecB) {
-    if (!vecA || !vecB || vecA.length !== vecB.length)
+    if (!vecA || !vecB || vecA.length !== vecB.length) {
+        console.warn(`cosineSimilarity returning 0 due to missing vectors or dimension mismatch. vecA.length: ${vecA?.length}, vecB.length: ${vecB?.length}`);
         return 0;
+    }
     let dotProduct = 0;
     let normA = 0;
     let normB = 0;
@@ -371,7 +373,11 @@ function cosineSimilarity(vecA, vecB) {
         normA += (vecA[i] || 0) * (vecA[i] || 0);
         normB += (vecB[i] || 0) * (vecB[i] || 0);
     }
-    return (normA === 0 || normB === 0) ? 0 : dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+    if (normA === 0 || normB === 0) {
+        console.warn(`cosineSimilarity returning 0 due to zero norm. normA: ${normA}, normB: ${normB}`);
+        return 0;
+    }
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 async function generateTextEmbedding(text) {
     try {
@@ -854,8 +860,8 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
             });
         }
         let hasUpdatedStatus = false;
-        // Process in chunks of 5 to control concurrency
-        const chunkSize = 5;
+        // Process in chunks of 3 to control concurrency and adhere to Vertex AI rate limits
+        const chunkSize = 3;
         const essentialKeywords = ['edital', 'inscrição', 'inscrições', 'prazo', 'fomento', 'chamada pública', 'financiamento'];
         for (let i = 0; i < shieldedResults.length; i += chunkSize) {
             const chunk = shieldedResults.slice(i, i + chunkSize);
@@ -876,9 +882,16 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                 });
                 // Step B: Text Embedding Similarity Filter (Low Cost)
                 totalLinksEvaluated++;
-                const textEmbedding = await generateTextEmbedding(cleanJsonSnippet);
-                const similarityScore = cosineSimilarity(oscEmbedding, textEmbedding);
-                console.log(`Vector similarity for ${link} (Snippet) is ${similarityScore}`);
+                let similarityScore = 0;
+                try {
+                    const textEmbedding = await generateTextEmbedding(cleanJsonSnippet);
+                    similarityScore = cosineSimilarity(oscEmbedding, textEmbedding);
+                    console.log(`Vector similarity for ${link} (Snippet) is ${similarityScore}`);
+                }
+                catch (embedErr) {
+                    console.warn(`Failed to generate embedding for snippet of ${link}, bypassing snippet filter:`, embedErr);
+                    similarityScore = 1; // Bypass filter on failure to prevent silent rejections
+                }
                 if (similarityScore <= 0.30) {
                     return; // Skip if similarity is too low
                 }
