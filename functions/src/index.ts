@@ -2778,6 +2778,7 @@ export const prosasBulkDiscoveryWorker = onTaskDispatched({
 
     let fetchUrl = `https://prosas.com.br/selecao/api/v2/third_party/oportunidades/inscricoes_abertas?include=area_interesses%2Cincentivador&page%5Bpage%5D=${page}&page%5Bsize%5D=20&&sort=`;
 
+    let browser: any = null;
     try {
         // Fetch Session State from GCS to bypass Cloudflare/auth wall
         const storage = getStorage();
@@ -2790,38 +2791,45 @@ export const prosasBulkDiscoveryWorker = onTaskDispatched({
         const sessionData = JSON.parse(fileContent.toString('utf-8'));
 
         chromium.use(stealth());
-        const browser = await chromium.launch({
+        browser = await chromium.launch({
             args: chromiumSparticuz.args,
             executablePath: await chromiumSparticuz.executablePath(),
             headless: true,
         });
         let data: any = null;
 
-        try {
-            const context = await browser.newContext({ storageState: sessionData });
-            const page = await context.newPage();
+        const context = await browser.newContext({ storageState: sessionData });
+        const page = await context.newPage();
 
-            // Navigate to a standard page first to establish Cloudflare clearance
-            logger.info(`[Prosas Bulk Discovery] Navigating to homepage to bypass Cloudflare...`);
-            await page.goto('https://prosas.com.br/editais', { waitUntil: 'networkidle', timeout: 60000 });
+        // Navigate to a standard page first to establish Cloudflare clearance
+        logger.info(`[Prosas Bulk Discovery] Navigating to homepage to bypass Cloudflare...`);
+        await page.goto('https://prosas.com.br/editais', { waitUntil: 'networkidle', timeout: 60000 });
 
-            // Fetch the JSON API from within the browser context
-            logger.info(`[Prosas Bulk Discovery] Fetching API via page.evaluate...`);
-            const fetchResult = await page.evaluate(async (url) => {
-                const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
-                if (!res.ok) {
-                    return { ok: false, status: res.status };
+        // Simulate human behavior
+        logger.info(`[Prosas Bulk Discovery] Simulating human behavior (scrolling and waiting)...`);
+        await page.waitForTimeout(Math.floor(Math.random() * 3000) + 2000);
+        await page.evaluate(() => window.scrollBy(0, Math.floor(Math.random() * 500) + 200));
+        await page.waitForTimeout(Math.floor(Math.random() * 2000) + 1000);
+
+        // Fetch the JSON API from within the browser context
+        logger.info(`[Prosas Bulk Discovery] Fetching API via page.evaluate...`);
+        const fetchResult = await page.evaluate(async (url: string) => {
+            const res = await fetch(url, {
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
                 }
-                return { ok: true, data: await res.json() };
-            }, fetchUrl);
-
-            if (!fetchResult.ok) {
-                throw new Error(`HTTP error! status: ${fetchResult.status}`);
+            });
+            if (!res.ok) {
+                return { ok: false, status: res.status };
             }
-            data = fetchResult.data;
-        } finally {
-            await browser.close();
+            return { ok: true, data: await res.json() };
+        }, fetchUrl);
+
+        if (!fetchResult.ok) {
+            throw new Error(`HTTP error! status: ${fetchResult.status}`);
         }
+        data = fetchResult.data;
 
         let candidateLinks: string[] = [];
         if (data && data.data && Array.isArray(data.data)) {
@@ -2863,5 +2871,9 @@ export const prosasBulkDiscoveryWorker = onTaskDispatched({
     } catch (e: any) {
         logger.error(`[Prosas Bulk Discovery] Prosas API fetch failed: ${e.message}`);
         throw e;
+    } finally {
+        if (browser) {
+            await browser.close();
+        }
     }
 });

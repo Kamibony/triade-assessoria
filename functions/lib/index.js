@@ -2469,6 +2469,7 @@ exports.prosasBulkDiscoveryWorker = (0, tasks_1.onTaskDispatched)({
     const queue = (0, functions_1.getFunctions)().taskQueue('prosasAuthenticatedWorker');
     logger.info(`[Prosas Bulk Discovery] Starting processing for page ${page}`);
     let fetchUrl = `https://prosas.com.br/selecao/api/v2/third_party/oportunidades/inscricoes_abertas?include=area_interesses%2Cincentivador&page%5Bpage%5D=${page}&page%5Bsize%5D=20&&sort=`;
+    let browser = null;
     try {
         // Fetch Session State from GCS to bypass Cloudflare/auth wall
         const storage = (0, storage_1.getStorage)();
@@ -2478,35 +2479,40 @@ exports.prosasBulkDiscoveryWorker = (0, tasks_1.onTaskDispatched)({
         const [fileContent] = await storage.bucket(sessionBucketName).file(sessionFileName).download();
         const sessionData = JSON.parse(fileContent.toString('utf-8'));
         playwright_extra_1.chromium.use((0, puppeteer_extra_plugin_stealth_1.default)());
-        const browser = await playwright_extra_1.chromium.launch({
+        browser = await playwright_extra_1.chromium.launch({
             args: chromium_1.default.args,
             executablePath: await chromium_1.default.executablePath(),
             headless: true,
         });
         let data = null;
-        try {
-            const context = await browser.newContext({ storageState: sessionData });
-            const page = await context.newPage();
-            // Navigate to a standard page first to establish Cloudflare clearance
-            logger.info(`[Prosas Bulk Discovery] Navigating to homepage to bypass Cloudflare...`);
-            await page.goto('https://prosas.com.br/editais', { waitUntil: 'networkidle', timeout: 60000 });
-            // Fetch the JSON API from within the browser context
-            logger.info(`[Prosas Bulk Discovery] Fetching API via page.evaluate...`);
-            const fetchResult = await page.evaluate(async (url) => {
-                const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
-                if (!res.ok) {
-                    return { ok: false, status: res.status };
+        const context = await browser.newContext({ storageState: sessionData });
+        const page = await context.newPage();
+        // Navigate to a standard page first to establish Cloudflare clearance
+        logger.info(`[Prosas Bulk Discovery] Navigating to homepage to bypass Cloudflare...`);
+        await page.goto('https://prosas.com.br/editais', { waitUntil: 'networkidle', timeout: 60000 });
+        // Simulate human behavior
+        logger.info(`[Prosas Bulk Discovery] Simulating human behavior (scrolling and waiting)...`);
+        await page.waitForTimeout(Math.floor(Math.random() * 3000) + 2000);
+        await page.evaluate(() => window.scrollBy(0, Math.floor(Math.random() * 500) + 200));
+        await page.waitForTimeout(Math.floor(Math.random() * 2000) + 1000);
+        // Fetch the JSON API from within the browser context
+        logger.info(`[Prosas Bulk Discovery] Fetching API via page.evaluate...`);
+        const fetchResult = await page.evaluate(async (url) => {
+            const res = await fetch(url, {
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
                 }
-                return { ok: true, data: await res.json() };
-            }, fetchUrl);
-            if (!fetchResult.ok) {
-                throw new Error(`HTTP error! status: ${fetchResult.status}`);
+            });
+            if (!res.ok) {
+                return { ok: false, status: res.status };
             }
-            data = fetchResult.data;
+            return { ok: true, data: await res.json() };
+        }, fetchUrl);
+        if (!fetchResult.ok) {
+            throw new Error(`HTTP error! status: ${fetchResult.status}`);
         }
-        finally {
-            await browser.close();
-        }
+        data = fetchResult.data;
         let candidateLinks = [];
         if (data && data.data && Array.isArray(data.data)) {
             candidateLinks = data.data.map((item) => `https://prosas.com.br/editais/${item.id}`);
@@ -2541,6 +2547,11 @@ exports.prosasBulkDiscoveryWorker = (0, tasks_1.onTaskDispatched)({
     catch (e) {
         logger.error(`[Prosas Bulk Discovery] Prosas API fetch failed: ${e.message}`);
         throw e;
+    }
+    finally {
+        if (browser) {
+            await browser.close();
+        }
     }
 });
 //# sourceMappingURL=index.js.map
