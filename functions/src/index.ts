@@ -2665,17 +2665,12 @@ export const prosasBulkDiscoveryWorker = onTaskDispatched({
 
     let fetchUrl = `https://prosas.com.br/selecao/api/v2/third_party/oportunidades/inscricoes_abertas?include=area_interesses%2Cincentivador&page%5Bpage%5D=${page}&page%5Bsize%5D=20&&sort=`;
 
-    chromium.use(stealth());
-    const browser = await chromium.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-
     try {
-        const pageContext = await browser.newPage();
-        await pageContext.goto(fetchUrl, { waitUntil: 'networkidle' });
-        const jsonContent = await pageContext.evaluate(() => document.body.innerText);
-        const data = JSON.parse(jsonContent);
+        const response = await fetch(fetchUrl);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
 
         let candidateLinks: string[] = [];
         if (data && data.data && Array.isArray(data.data)) {
@@ -2717,7 +2712,5 @@ export const prosasBulkDiscoveryWorker = onTaskDispatched({
     } catch (e: any) {
         logger.error(`[Prosas Bulk Discovery] Prosas API fetch failed: ${e.message}`);
         throw e;
-    } finally {
-        await browser.close();
     }
 });
