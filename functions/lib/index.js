@@ -863,6 +863,9 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         // Process in chunks of 3 to control concurrency and adhere to Vertex AI rate limits
         const chunkSize = 3;
         const essentialKeywords = ['edital', 'inscrição', 'inscrições', 'prazo', 'fomento', 'chamada pública', 'financiamento'];
+        // Phase 1: Pre-filtering and Scoring (Steps A & B)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const evaluatedLinks = [];
         for (let i = 0; i < shieldedResults.length; i += chunkSize) {
             const chunk = shieldedResults.slice(i, i + chunkSize);
             await Promise.all(chunk.map(async (r) => {
@@ -887,15 +890,49 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                     const textEmbedding = await generateTextEmbedding(cleanJsonSnippet);
                     similarityScore = cosineSimilarity(oscEmbedding, textEmbedding);
                     console.log(`Vector similarity for ${link} (Snippet) is ${similarityScore}`);
+                    if (similarityScore === 0) {
+                        console.warn(`cosineSimilarity returned 0 for snippet of ${link}, forcing to 1 to bypass filter.`);
+                        similarityScore = 1;
+                    }
                 }
                 catch (embedErr) {
                     console.warn(`Failed to generate embedding for snippet of ${link}, bypassing snippet filter:`, embedErr);
                     similarityScore = 1; // Bypass filter on failure to prevent silent rejections
                 }
-                if (similarityScore <= 0.30) {
-                    return; // Skip if similarity is too low
+                if (similarityScore > 0.30) {
+                    evaluatedLinks.push({ r, score: similarityScore });
                 }
+            }));
+            // Debounce progress updates after each chunk
+            if (jobRef) {
+                await jobRef.update({
+                    'progress.linksFound': totalLinksFound,
+                    'progress.linksEvaluated': totalLinksEvaluated,
+                    updatedAt: firestore_1.FieldValue.serverTimestamp()
+                });
+            }
+        }
+        // Sort by score descending and take the top 30 most promising links
+        evaluatedLinks.sort((a, b) => b.score - a.score);
+        const topLinks = evaluatedLinks.slice(0, 30);
+        console.log(`Phase 1 complete. Proceeding with top ${topLinks.length} links out of ${evaluatedLinks.length} evaluated.`);
+        if (jobRef) {
+            await jobRef.update({
+                logs: firestore_1.FieldValue.arrayUnion(`Fase 1 concluída. Avaliando os top ${topLinks.length} links promissores de ${evaluatedLinks.length}.`),
+                updatedAt: firestore_1.FieldValue.serverTimestamp()
+            });
+        }
+        // Phase 2: Full Fetch and LLM Triage (Steps C & D)
+        for (let i = 0; i < topLinks.length; i += chunkSize) {
+            const chunk = topLinks.slice(i, i + chunkSize);
+            await Promise.all(chunk.map(async ({ r }) => {
+                const link = r.link;
                 console.log(`Fetching full content for promising link: ${link}`);
+                const cleanJsonSnippet = JSON.stringify({
+                    title: r.title,
+                    url: r.link,
+                    snippet: r.snippet
+                });
                 let fullTextToAnalyze = cleanJsonSnippet;
                 // Step C: Fetch Full HTML and Re-apply Heuristic (Medium Cost)
                 try {
@@ -934,8 +971,6 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
             // Debounce progress updates after each chunk
             if (jobRef) {
                 await jobRef.update({
-                    'progress.linksFound': totalLinksFound,
-                    'progress.linksEvaluated': totalLinksEvaluated,
                     'progress.validEditaisEnqueued': totalValidEditaisEnqueued,
                     updatedAt: firestore_1.FieldValue.serverTimestamp()
                 });
