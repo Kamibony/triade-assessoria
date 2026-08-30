@@ -1131,6 +1131,43 @@ export const ingestOscDataFunction = onCall({
 
 
 
+async function routeEditalUrl(url: string, sourceContext: string, searchId?: string, options?: { searchQuery?: string | undefined }): Promise<{ success: boolean, message: string }> {
+    if (url.toLowerCase().includes('prosas.com.br')) {
+        logger.info(`[Smart Router] Routing Prosas link to authenticated worker: ${url}`);
+        await getFunctions().taskQueue('prosasAuthenticatedWorker').enqueue({ url, searchId: searchId || sourceContext });
+        return { success: true, message: "Edital encaminhado para o raspador autenticado (Prosas)." };
+    }
+
+    try {
+        const text = await fetchAndExtractText(url);
+        if (!text || text.length < 500) {
+            return { success: false, message: "Texto ausente ou muito curto." };
+        }
+
+        // Heuristic Pre-filter
+        const textLower = text.toLowerCase();
+        const essentialKeywords = ['edital', 'inscrição', 'inscrições', 'prazo', 'fomento', 'chamada pública', 'financiamento'];
+        const hasKeyword = essentialKeywords.some(kw => textLower.includes(kw));
+
+        if (!hasKeyword) {
+             return { success: false, message: "Rejeitado pelo filtro heurístico pré-LLM (palavras-chave ausentes)." };
+        }
+
+        const triageResult = await triageEditalWebpage({ text, searchQuery: options?.searchQuery });
+
+        if (triageResult.isValidEdital) {
+            // Only fall back to sourceContext if searchId is strictly undefined
+            await enqueueEditalExtraction(url, text, triageResult.reason, searchId !== undefined ? searchId : sourceContext);
+            return { success: true, message: triageResult.reason };
+        } else {
+            return { success: false, message: triageResult.reason };
+        }
+    } catch (error) {
+        logger.error(`[Smart Router] Error processing link ${url}:`, error);
+        return { success: false, message: error instanceof Error ? error.message : "Erro desconhecido" };
+    }
+}
+
 async function enqueueEditalExtraction(link: string, text: string, reason: string, searchId?: string) {
     const db = getFirestore();
     const tempContentRef = db.collection('scraping_contents').doc();
@@ -1263,23 +1300,11 @@ async function processRssFeeds() {
                 processedCount++;
                 console.log(`Processing link: ${item.link}`);
 
-                const text = await fetchAndExtractText(item.link);
-                if (!text || text.length < 500) {
-                     console.log(`Skipping: Text too short or extraction failed for ${item.link}`);
-                     continue;
-                }
+                const routeResult = await routeEditalUrl(item.link, "RSS");
+                console.log(`Router result for ${item.link}: success=${routeResult.success}, message=${routeResult.message}`);
 
-                const triageResult = await triageEditalWebpage({ text });
-                console.log(`Triage for ${item.link}: isValidEdital=${triageResult.isValidEdital}, reason=${triageResult.reason}`);
-
-                if (triageResult.isValidEdital) {
-                    try {
-                        await enqueueEditalExtraction(item.link, text, triageResult.reason, "RSS");
-                        console.log(`Successfully enqueued Edital extraction for ${item.link}`);
-                        savedCount++; // Incrementing for now to reflect enqueued count
-                    } catch (e) {
-                         console.error(`Error enqueuing extraction for ${item.link}:`, e);
-                    }
+                if (routeResult.success) {
+                     savedCount++;
                 }
             }
         } catch (error) {
@@ -1383,18 +1408,13 @@ export const ingestManualEditalFunction = onCall({
     }
 
     try {
-        const text = await fetchAndExtractText(url);
-        if (!text || text.length < 500) {
-             return { success: false, message: "A extração de texto falhou ou a página tem pouco conteúdo." };
+        const routeResult = await routeEditalUrl(url, "MANUAL");
+
+        if (!routeResult.success) {
+             return { success: false, message: `O conteúdo não parece ser um edital válido. Motivo: ${routeResult.message}` };
         }
 
-        const triageResult = await triageEditalWebpage({ text });
-        if (!triageResult.isValidEdital) {
-             return { success: false, message: `O conteúdo não parece ser um edital válido. Motivo: ${triageResult.reason}` };
-        }
-
-        await enqueueEditalExtraction(url, text, triageResult.reason, "MANUAL");
-        return { success: true, editalId: "pending", message: "Edital válido. Adicionado à fila de processamento e extração com IA." };
+        return { success: true, editalId: "pending", message: routeResult.message };
 
     } catch (error: unknown) {
         console.error('Error in ingestManualEditalFunction:', error);
@@ -2412,13 +2432,6 @@ export const processScrapingTargetWorker = onTaskDispatched({
             const link = linksToProcess[i];
             if (!link) continue;
 
-            if (link.toLowerCase().includes('prosas.com.br')) {
-                logger.info(`[Scraper] Routing Prosas link to authenticated worker: ${link}`);
-                await getFunctions().taskQueue('prosasAuthenticatedWorker').enqueue({ url: link, searchId });
-                totalProcessed++;
-                continue;
-            }
-
             const existingRef = await db.collection('editais').where('sourceUrl', '==', link).limit(1).get();
             if (!existingRef.empty) {
                 totalProcessed++;
@@ -2426,38 +2439,15 @@ export const processScrapingTargetWorker = onTaskDispatched({
             }
 
             try {
-                const text = await fetchAndExtractText(link);
-                if (!text || text.length < 500) {
+                const routeResult = await routeEditalUrl(link, searchId, searchId, { searchQuery: query });
+
+                if (routeResult.success) {
                     await searchRef.update({
-                        logs: FieldValue.arrayUnion({ link, status: 'Ignorado', reason: 'Texto ausente ou muito curto.' })
-                    });
-                    totalProcessed++;
-                    continue;
-                }
-
-                // Heuristic Pre-filter: Check for essential keywords before calling the LLM
-                const textLower = text.toLowerCase();
-                const essentialKeywords = ['edital', 'inscrição', 'inscrições', 'prazo', 'fomento', 'chamada pública', 'financiamento'];
-                const hasKeyword = essentialKeywords.some(kw => textLower.includes(kw));
-
-                if (!hasKeyword) {
-                    await searchRef.update({
-                        logs: FieldValue.arrayUnion({ link, status: 'Ignorado', reason: 'Rejeitado pelo filtro heurístico pré-LLM (palavras-chave ausentes).' })
-                    });
-                    totalProcessed++;
-                    continue;
-                }
-
-                const triageResult = await triageEditalWebpage({ text, searchQuery: query });
-
-                if (triageResult.isValidEdital) {
-                    await enqueueEditalExtraction(link, text, triageResult.reason, searchId);
-                    await searchRef.update({
-                        logs: FieldValue.arrayUnion({ link, status: 'Em Processamento (Extração)', reason: triageResult.reason })
+                        logs: FieldValue.arrayUnion({ link, status: 'Em Processamento (Extração)', reason: routeResult.message })
                     });
                 } else {
                     await searchRef.update({
-                        logs: FieldValue.arrayUnion({ link, status: 'Rejeitado', reason: triageResult.reason })
+                        logs: FieldValue.arrayUnion({ link, status: 'Ignorado/Rejeitado', reason: routeResult.message })
                     });
                 }
             } catch (error) {
