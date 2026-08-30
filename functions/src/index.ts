@@ -2770,7 +2770,7 @@ export const prosasBulkDiscoveryWorker = onTaskDispatched({
     timeoutSeconds: 1800,
     memory: '2GiB'
 }, async (request) => {
-    const { page = 1 } = request.data as { page?: number };
+    let { page = 1, consecutiveZeroNewCount = 0 } = request.data as { page?: number, consecutiveZeroNewCount?: number };
     const db = getFirestore();
     const queue = getFunctions().taskQueue('prosasAuthenticatedWorker');
 
@@ -2851,9 +2851,20 @@ export const prosasBulkDiscoveryWorker = onTaskDispatched({
 
         logger.info(`[Prosas Bulk Discovery] Enqueued ${newCount} new editais for authenticated scraping.`);
 
+        if (newCount === 0) {
+            consecutiveZeroNewCount++;
+        } else {
+            consecutiveZeroNewCount = 0;
+        }
+
+        if (consecutiveZeroNewCount >= 3) {
+            logger.info(`[Prosas Bulk Discovery] Encountered 3 consecutive pages with 0 new editais. Early exit triggered.`);
+            return;
+        }
+
         // Enqueue next page
         const discoveryQueue = getFunctions().taskQueue('prosasBulkDiscoveryWorker');
-        await discoveryQueue.enqueue({ page: page + 1 });
+        await discoveryQueue.enqueue({ page: page + 1, consecutiveZeroNewCount });
         logger.info(`[Prosas Bulk Discovery] Enqueued page ${page + 1} for discovery.`);
 
     } catch (e: any) {
