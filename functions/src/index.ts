@@ -2168,10 +2168,10 @@ export const extractionWorker = onTaskDispatched({
             const docRef = await db.collection('editais').add(editalDocData);
 
             if (searchRef) {
-                await searchRef.update({
+                await searchRef.set({
                     logs: FieldValue.arrayUnion({ link, status: 'Importado', reason: reason }),
                     savedCount: FieldValue.increment(1)
-                });
+                }, { merge: true });
             }
 
             // Handoff: Trigger Match Evaluator for agentic search if searchId contains an oscId pattern
@@ -2190,9 +2190,9 @@ export const extractionWorker = onTaskDispatched({
             }
         } else {
             if (searchRef) {
-                await searchRef.update({
+                await searchRef.set({
                     logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: 'Falha na validação do schema do edital.' })
-                });
+                }, { merge: true });
             }
         }
 
@@ -2205,9 +2205,9 @@ export const extractionWorker = onTaskDispatched({
     } catch (error) {
         console.error(`Error in extractionWorker for link ${link}:`, error);
         if (searchRef) {
-            await searchRef.update({
+            await searchRef.set({
                 logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: error instanceof Error ? error.message : 'Erro desconhecido na extração' })
-            });
+            }, { merge: true });
         }
         throw error;
     }
