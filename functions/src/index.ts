@@ -1091,7 +1091,8 @@ export const matchEvaluatorWorker = onTaskDispatched({
     rateLimits: {
         maxConcurrentDispatches: 5, // Prevent Vertex AI rate limits (HTTP 429)
     },
-    timeoutSeconds: 540 // Allow enough time for Genkit execution
+    timeoutSeconds: 540, // Allow enough time for Genkit execution
+    memory: '1GiB'
 }, async (request) => {
     const { oscId, editalId } = request.data as { oscId: string, editalId: string };
 
@@ -2120,7 +2121,8 @@ export const seedScrapingTargets = onCall({
 export const extractionWorker = onTaskDispatched({
     retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
     rateLimits: { maxConcurrentDispatches: 2 },
-    timeoutSeconds: 540
+    timeoutSeconds: 540,
+    memory: '1GiB'
 }, async (request) => {
     const { searchId, link, contentId, reason } = request.data as { searchId?: string, link: string, contentId: string, reason: string };
 
