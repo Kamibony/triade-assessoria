@@ -150,7 +150,7 @@ Data de Fundação: ${input.osc.foundationDate}
 Localização: ${input.osc.location}
 Status da Documentação: ${input.osc.documentationStatus}
 Projetos Culturais Anteriores: ${input.osc.previousProjectsApproved ? 'Sim' : 'Não'}
-Atividades Principais: ${input.osc.coreActivities.join(', ')}
+Atividades Principais: ${(input.osc.coreActivities || []).join(', ')}
 
 Regras do Edital:
 Título: ${input.edital.title}
@@ -361,9 +361,9 @@ INSTRUÇÃO CRÍTICA DE ENRIQUECIMENTO (PARA ONGs DE IMPORTAÇÃO EM MASSA):
 Se a Missão da ONG for 'Não especificada' ou muito curta/genérica, você NÃO DEVE gerar queries vazias ou puramente baseadas no nome da ONG. Você DEVE inferir e expandir o contexto da busca deduzindo os temas relevantes com base nas "Atividades Principais" (que geralmente derivam de códigos CNAE ou Macro-áreas do IPEA, como 'Assistência Social', 'Educação', etc.). Exemplo: Se a atividade for 'Educação', expanda queries com termos como 'educação infantil', 'jovens', 'escola', etc.
 
 Perfil da ONG:
-Nome: ${input.osc.name}
-Localização: ${input.osc.location}
-Atividades Principais: ${input.osc.coreActivities.join(', ')}
+Nome: ${input.osc.name || 'Não especificada'}
+Localização: ${input.osc.location || 'Não especificada'}
+Atividades Principais: ${(input.osc.coreActivities || []).join(', ')}
 Missão: ${input.osc.mission || 'Não especificada'}
 
 Retorne apenas as queries geradas no array.`;
@@ -509,14 +509,14 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
     let editalEmbedding = rawEditalData?.embedding || null;
     if (!oscEmbedding) {
         console.log(`Generating missing embedding for OSC ${oscId}`);
-        const oscText = `Missão: ${oscData.mission || ''}. Foco: ${oscData.coreActivities?.join(', ') || ''}. Nome: ${oscData.name || ''}`;
+        const oscText = `Missão: ${oscData.mission || ''}. Foco: ${(oscData.coreActivities || []).join(', ')}. Nome: ${oscData.name || ''}`;
         oscEmbedding = await generateTextEmbedding(oscText);
         await db.collection('oscs').doc(oscId).update({ embedding: oscEmbedding });
         oscData.embedding = oscEmbedding;
     }
     if (!editalEmbedding) {
         console.log(`Generating missing embedding for Edital ${editalId}`);
-        const editalText = `Objetivo e Título: ${editalData.title || ''}. Elegibilidade: Atividades permitidas: ${editalData.eligibilityCriteria.allowedActivities?.join(', ') || ''}.`;
+        const editalText = `Objetivo e Título: ${editalData.title || ''}. Elegibilidade: Atividades permitidas: ${(editalData.eligibilityCriteria?.allowedActivities || []).join(', ')}.`;
         editalEmbedding = await generateTextEmbedding(editalText);
         await db.collection('editais').doc(editalId).update({ embedding: editalEmbedding });
         editalData.embedding = editalEmbedding;
@@ -588,7 +588,7 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         const oscData = parseResult.data;
         let oscEmbedding = rawOscData?.embedding || null;
         if (!oscEmbedding) {
-            const oscText = `Missão: ${oscData.mission || ''}. Foco: ${oscData.coreActivities?.join(', ') || ''}. Nome: ${oscData.name || ''}`;
+            const oscText = `Missão: ${oscData.mission || ''}. Foco: ${(oscData.coreActivities || []).join(', ')}. Nome: ${oscData.name || ''}`;
             oscEmbedding = await generateTextEmbedding(oscText);
             await db.collection('oscs').doc(oscId).update({ embedding: oscEmbedding });
         }
@@ -1546,7 +1546,7 @@ const searchDatabaseTool = ai.defineTool({
     if (input.activity) {
         const lowerActivity = input.activity.toLowerCase();
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        oscs = oscs.filter((osc) => osc.coreActivities.some((act) => act.toLowerCase().includes(lowerActivity)));
+        oscs = oscs.filter((osc) => (osc.coreActivities || []).some((act) => act.toLowerCase().includes(lowerActivity)));
     }
     // Return up to the requested limit
     oscs = oscs.slice(0, input.limit || 10);
