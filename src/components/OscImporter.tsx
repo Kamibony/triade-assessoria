@@ -11,7 +11,7 @@ export function OscImporter() {
   const [uf, setUf] = useState('');
   const [municipio, setMunicipio] = useState('');
   const [activityArea, setActivityArea] = useState('');
-  const [keywords, setKeywords] = useState('');
+  const [aiPrompt, setAiPrompt] = useState('');
   const [onlyActive, setOnlyActive] = useState(true);
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<{type: 'success' | 'error', message: string} | null>(null);
@@ -34,7 +34,7 @@ export function OscImporter() {
         uf: uf.trim() || undefined,
         municipio: municipio.trim() || undefined,
         activityArea: activityArea || undefined,
-        keywords: keywords.trim() || undefined,
+        aiPrompt: aiPrompt.trim() || undefined,
         onlyActive: onlyActive
       });
 
@@ -117,14 +117,14 @@ export function OscImporter() {
           </div>
 
           <div className="space-y-2">
-            <label htmlFor="keywords" className="block text-sm font-medium">Palavras-chave (Opcional)</label>
-            <input
-              id="keywords"
-              type="text"
-              value={keywords}
-              onChange={(e) => setKeywords(e.target.value)}
-              placeholder="ex: quilombolas, mulheres, agricultura (separado por vírgulas)"
-              className="w-full rounded-md border border-input bg-background px-4 py-3 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            <label htmlFor="aiPrompt" className="block text-sm font-medium">Descreva o perfil da OSC que você procura (Opcional - Busca IA)</label>
+            <textarea
+              id="aiPrompt"
+              value={aiPrompt}
+              onChange={(e) => setAiPrompt(e.target.value)}
+              placeholder='ex: "Encontre ONGs ajudando mulheres indígenas, quilombolas, ou trabalhando na agricultura"'
+              rows={3}
+              className="w-full rounded-md border border-input bg-background px-4 py-3 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-y"
             />
           </div>
 

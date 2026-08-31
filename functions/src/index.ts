@@ -1149,10 +1149,10 @@ export const processOscChunkWorker = onTaskDispatched({
     },
     timeoutSeconds: 540
 }, async (request) => {
-    const { oscIds, activityArea, keywords, onlyActive } = request.data as {
+    const { oscIds, activityArea, aiPrompt, onlyActive } = request.data as {
         oscIds: number[];
         activityArea?: string;
-        keywords?: string;
+        aiPrompt?: string;
         onlyActive?: boolean
     };
 
@@ -1164,6 +1164,8 @@ export const processOscChunkWorker = onTaskDispatched({
     const db = getFirestore();
     let processed = 0;
     let imported = 0;
+
+    const collectedOscs: any[] = [];
 
     for (const id_osc of oscIds) {
         try {
@@ -1205,28 +1207,53 @@ export const processOscChunkWorker = onTaskDispatched({
                 }
             }
 
-            if (keywords) {
-                const keywordArray = keywords.split(',').map(k => k.trim().toLowerCase()).filter(k => k.length > 0);
-                if (keywordArray.length > 0) {
-                    const textFields = [
-                        (rawData.razao_social || ''),
-                        (rawData.nome_fantasia || ''),
-                        (rawData.cnae_fiscal_descricao || '')
-                    ];
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    (rawData.cnaes_secundarios || []).forEach((c: any) => {
-                        textFields.push(c.descricao || '');
-                    });
 
-                    const combinedText = textFields.join(' ').toLowerCase();
-                    const hasMatch = keywordArray.some(keyword => combinedText.includes(keyword));
+            collectedOscs.push({ cleanCnpj, rawData, id_osc });
 
-                    if (!hasMatch) {
-                        continue;
-                    }
-                }
-            }
+        } catch (error: unknown) {
+            console.error(`Error processing OSC ${id_osc}:`, error);
+        } finally {
+            processed++;
+        }
+    }
 
+    let filteredOscs = collectedOscs;
+
+    if (aiPrompt && filteredOscs.length > 0) {
+        try {
+            const promptData = filteredOscs.map(osc => {
+                const textFields = [
+                    (osc.rawData.razao_social || ''),
+                    (osc.rawData.nome_fantasia || ''),
+                    (osc.rawData.cnae_fiscal_descricao || '')
+                ];
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (osc.rawData.cnaes_secundarios || []).forEach((c: any) => {
+                    textFields.push(c.descricao || '');
+                });
+                return `CNPJ: ${osc.cleanCnpj}, Name: ${textFields[0]}, Descriptions: ${textFields.join(' ')}`;
+            }).join('\n');
+
+            const llmPrompt = `You are an expert data filter. User's request: ${aiPrompt}. Here are ${filteredOscs.length} NGOs (Name + CNAE descriptions):\n${promptData}\nAnalyze their semantic alignment with the request. Return a raw JSON array containing ONLY the string CNPJs of the NGOs that genuinely match the profile. Exclude unrelated entities (like churches, sports clubs, or irrelevant associations) unless specifically requested.`;
+
+            const response = await ai.generate({
+                model: 'vertexai/gemini-2.5-flash',
+                prompt: llmPrompt,
+                config: { temperature: 0.1 },
+                output: { schema: z.array(z.string()) }
+            });
+
+            const matchedCnpjs = response.output || [];
+            filteredOscs = filteredOscs.filter(osc => matchedCnpjs.includes(osc.cleanCnpj));
+        } catch (error) {
+            console.error("AI Filtering error:", error);
+            filteredOscs = [];
+        }
+    }
+
+    for (const osc of filteredOscs) {
+        try {
+            const { cleanCnpj, rawData } = osc;
             // 4. Transform and Upsert
             const name = rawData.razao_social || 'Nome Desconhecido';
             const foundationDate = rawData.data_inicio_atividade || new Date().toISOString().split('T')[0];
@@ -1265,11 +1292,8 @@ export const processOscChunkWorker = onTaskDispatched({
 
             await oscRef.set(upsertData, { merge: true });
             imported++;
-
         } catch (error: unknown) {
-            console.error(`Error processing OSC ${id_osc}:`, error);
-        } finally {
-            processed++;
+            console.error(`Error transforming and upserting OSC ${osc.cleanCnpj}:`, error);
         }
     }
 
@@ -1286,11 +1310,11 @@ export const ingestOscDataFunction = onCall({
     //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
     // }
 
-    const { uf, municipio, activityArea, keywords, onlyActive } = request.data as {
+    const { uf, municipio, activityArea, aiPrompt, onlyActive } = request.data as {
         uf?: string;
         municipio?: string;
         activityArea?: string;
-        keywords?: string;
+        aiPrompt?: string;
         onlyActive?: boolean
     };
 
@@ -1369,7 +1393,7 @@ export const ingestOscDataFunction = onCall({
         await queue.enqueue({
             oscIds: chunk,
             activityArea,
-            keywords,
+            aiPrompt,
             onlyActive
         });
         enqueuedTasks++;
