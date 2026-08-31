@@ -41,7 +41,11 @@ export declare const ingestOscDataFunction: import("firebase-functions/v2/https"
 }>, unknown>;
 export declare const triggerMatchOrchestrator: import("firebase-functions/v2/https").CallableFunction<any, Promise<Record<string, unknown> | {
     id: string;
+    oscId: string;
+    editalId: string;
     oscName: string;
+    editalTitle: string;
+    sourceUrl: any;
     createdAt: FieldValue;
 } | null>, unknown>;
 export declare const onOscUpdated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").Change<import("firebase-functions/v2/firestore").QueryDocumentSnapshot> | undefined, {
