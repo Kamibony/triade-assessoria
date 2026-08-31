@@ -371,6 +371,9 @@ Estratégia OBRIGATÓRIA para as 7 queries:
 - Gere 7 queries diversas explorando a área de atuação, recortes demográficos/temáticos e a Estratégia Geográfica Diversificada acima.
 - OBRIGATORIAMENTE, em pelo menos 2 das 7 queries, use explicitamente o operador "site:" para focar em domínios governamentais ou institucionais. (ex: site:gov.br edital cultura ${currentYear}).
 
+INSTRUÇÃO DE SANITIZAÇÃO DE QUERIES (O ARMADILHA DO NOME):
+Se o nome da ONG contiver o nome explícito de um Estado ou Cidade (ex: "Associação Cultural EITA Paraíba"), você DEVE REMOVER E IGNORAR esse termo geográfico específico ao gerar as queries de tier 3 ("Buscas amplas ou nacionais"). Isso evita forçar o motor de busca para uma bolha local quando o objetivo é buscar editais de abrangência nacional.
+
 INSTRUÇÃO CRÍTICA DE ENRIQUECIMENTO (PARA ONGs DE IMPORTAÇÃO EM MASSA):
 Se a Missão da ONG for 'Não especificada' ou muito curta/genérica, você NÃO DEVE gerar queries vazias ou puramente baseadas no nome da ONG. Você DEVE inferir e expandir o contexto da busca deduzindo os temas relevantes com base nas "Atividades Principais" (que geralmente derivam de códigos CNAE ou Macro-áreas do IPEA, como 'Assistência Social', 'Educação', etc.). Exemplo: Se a atividade for 'Educação', expanda queries com termos como 'educação infantil', 'jovens', 'escola', etc.
 
@@ -716,10 +719,13 @@ export const agenticSearchWorker = onTaskDispatched({
         let allSearchResults: { link: string, title: string, snippet: string, query: string }[] = [];
 
         const QUERY_CHUNK_SIZE = 3;
+        const NEGATIVE_KEYWORDS = "-resultado -homologação -prorrogação -convocação -notícia";
+
         for (let q = 0; q < queries.length; q += QUERY_CHUNK_SIZE) {
             const queryChunk = queries.slice(q, q + QUERY_CHUNK_SIZE);
 
-            await Promise.all(queryChunk.map(async (query) => {
+            await Promise.all(queryChunk.map(async (baseQuery) => {
+                const query = `${baseQuery} ${NEGATIVE_KEYWORDS}`;
                 try {
                     if (jobRef) {
                         await jobRef.update({
