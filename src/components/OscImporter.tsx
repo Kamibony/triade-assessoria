@@ -11,6 +11,7 @@ export function OscImporter() {
   const [uf, setUf] = useState('');
   const [municipio, setMunicipio] = useState('');
   const [activityArea, setActivityArea] = useState('');
+  const [keywords, setKeywords] = useState('');
   const [onlyActive, setOnlyActive] = useState(true);
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<{type: 'success' | 'error', message: string} | null>(null);
@@ -33,6 +34,7 @@ export function OscImporter() {
         uf: uf.trim() || undefined,
         municipio: municipio.trim() || undefined,
         activityArea: activityArea || undefined,
+        keywords: keywords.trim() || undefined,
         onlyActive: onlyActive
       });
 
@@ -112,6 +114,18 @@ export function OscImporter() {
                 className="w-full rounded-md border border-input bg-background px-4 py-3 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="keywords" className="block text-sm font-medium">Palavras-chave (Opcional)</label>
+            <input
+              id="keywords"
+              type="text"
+              value={keywords}
+              onChange={(e) => setKeywords(e.target.value)}
+              placeholder="ex: quilombolas, mulheres, agricultura (separado por vírgulas)"
+              className="w-full rounded-md border border-input bg-background px-4 py-3 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

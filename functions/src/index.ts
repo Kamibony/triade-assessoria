@@ -1149,9 +1149,10 @@ export const processOscChunkWorker = onTaskDispatched({
     },
     timeoutSeconds: 540
 }, async (request) => {
-    const { oscIds, activityArea, onlyActive } = request.data as {
+    const { oscIds, activityArea, keywords, onlyActive } = request.data as {
         oscIds: number[];
         activityArea?: string;
+        keywords?: string;
         onlyActive?: boolean
     };
 
@@ -1201,6 +1202,28 @@ export const processOscChunkWorker = onTaskDispatched({
 
                 if (!matchesArea) {
                     continue;
+                }
+            }
+
+            if (keywords) {
+                const keywordArray = keywords.split(',').map(k => k.trim().toLowerCase()).filter(k => k.length > 0);
+                if (keywordArray.length > 0) {
+                    const textFields = [
+                        (rawData.razao_social || ''),
+                        (rawData.nome_fantasia || ''),
+                        (rawData.cnae_fiscal_descricao || '')
+                    ];
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    (rawData.cnaes_secundarios || []).forEach((c: any) => {
+                        textFields.push(c.descricao || '');
+                    });
+
+                    const combinedText = textFields.join(' ').toLowerCase();
+                    const hasMatch = keywordArray.some(keyword => combinedText.includes(keyword));
+
+                    if (!hasMatch) {
+                        continue;
+                    }
                 }
             }
 
@@ -1263,10 +1286,11 @@ export const ingestOscDataFunction = onCall({
     //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
     // }
 
-    const { uf, municipio, activityArea, onlyActive } = request.data as {
+    const { uf, municipio, activityArea, keywords, onlyActive } = request.data as {
         uf?: string;
         municipio?: string;
         activityArea?: string;
+        keywords?: string;
         onlyActive?: boolean
     };
 
@@ -1345,6 +1369,7 @@ export const ingestOscDataFunction = onCall({
         await queue.enqueue({
             oscIds: chunk,
             activityArea,
+            keywords,
             onlyActive
         });
         enqueuedTasks++;

@@ -1058,7 +1058,7 @@ exports.processOscChunkWorker = (0, tasks_1.onTaskDispatched)({
     },
     timeoutSeconds: 540
 }, async (request) => {
-    const { oscIds, activityArea, onlyActive } = request.data;
+    const { oscIds, activityArea, keywords, onlyActive } = request.data;
     if (!oscIds || !Array.isArray(oscIds)) {
         console.error("Invalid task payload: missing oscIds.");
         return;
@@ -1097,6 +1097,25 @@ exports.processOscChunkWorker = (0, tasks_1.onTaskDispatched)({
                 const matchesArea = mainActivity.includes(searchArea) || secActivities.some((a) => a.includes(searchArea));
                 if (!matchesArea) {
                     continue;
+                }
+            }
+            if (keywords) {
+                const keywordArray = keywords.split(',').map(k => k.trim().toLowerCase()).filter(k => k.length > 0);
+                if (keywordArray.length > 0) {
+                    const textFields = [
+                        (rawData.razao_social || ''),
+                        (rawData.nome_fantasia || ''),
+                        (rawData.cnae_fiscal_descricao || '')
+                    ];
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    (rawData.cnaes_secundarios || []).forEach((c) => {
+                        textFields.push(c.descricao || '');
+                    });
+                    const combinedText = textFields.join(' ').toLowerCase();
+                    const hasMatch = keywordArray.some(keyword => combinedText.includes(keyword));
+                    if (!hasMatch) {
+                        continue;
+                    }
                 }
             }
             // 4. Transform and Upsert
@@ -1150,7 +1169,7 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
     // if (!request.auth) {
     //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
     // }
-    const { uf, municipio, activityArea, onlyActive } = request.data;
+    const { uf, municipio, activityArea, keywords, onlyActive } = request.data;
     if (!uf && !municipio) {
         throw new https_1.HttpsError('invalid-argument', 'Either uf or municipio filter is required.');
     }
@@ -1212,6 +1231,7 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
         await queue.enqueue({
             oscIds: chunk,
             activityArea,
+            keywords,
             onlyActive
         });
         enqueuedTasks++;
