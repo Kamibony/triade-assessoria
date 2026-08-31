@@ -1006,7 +1006,8 @@ exports.matchEvaluatorWorker = (0, tasks_1.onTaskDispatched)({
     rateLimits: {
         maxConcurrentDispatches: 5, // Prevent Vertex AI rate limits (HTTP 429)
     },
-    timeoutSeconds: 540 // Allow enough time for Genkit execution
+    timeoutSeconds: 540, // Allow enough time for Genkit execution
+    memory: '1GiB'
 }, async (request) => {
     const { oscId, editalId } = request.data;
     if (!oscId || !editalId) {
@@ -1864,7 +1865,8 @@ exports.seedScrapingTargets = (0, https_1.onCall)({
 exports.extractionWorker = (0, tasks_1.onTaskDispatched)({
     retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
     rateLimits: { maxConcurrentDispatches: 2 },
-    timeoutSeconds: 540
+    timeoutSeconds: 540,
+    memory: '1GiB'
 }, async (request) => {
     const { searchId, link, contentId, reason } = request.data;
     if (!link || !contentId) {
