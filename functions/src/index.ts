@@ -371,6 +371,9 @@ Estratégia OBRIGATÓRIA para as 7 queries:
 - Gere 7 queries diversas explorando a área de atuação, recortes demográficos/temáticos e a Estratégia Geográfica Diversificada acima.
 - OBRIGATORIAMENTE, em pelo menos 2 das 7 queries, use explicitamente o operador "site:" para focar em domínios governamentais ou institucionais. (ex: site:gov.br edital cultura ${currentYear}).
 
+INSTRUÇÃO CRÍTICA DE ENRIQUECIMENTO (PARA ONGs DE IMPORTAÇÃO EM MASSA):
+Se a Missão da ONG for 'Não especificada' ou muito curta/genérica, você NÃO DEVE gerar queries vazias ou puramente baseadas no nome da ONG. Você DEVE inferir e expandir o contexto da busca deduzindo os temas relevantes com base nas "Atividades Principais" (que geralmente derivam de códigos CNAE ou Macro-áreas do IPEA, como 'Assistência Social', 'Educação', etc.). Exemplo: Se a atividade for 'Educação', expanda queries com termos como 'educação infantil', 'jovens', 'escola', etc.
+
 Perfil da ONG:
 Nome: ${input.osc.name}
 Localização: ${input.osc.location}
@@ -1470,28 +1473,11 @@ export const onOscUpdated = onDocumentUpdated('oscs/{oscId}', async (event) => {
     const oscId = event.params.oscId;
     const db = getFirestore();
 
-    // Fetch all open editais (assuming we might want a status check, for now fetch all)
-    // Actually we will just fetch all editais for simplicity based on the current schema logic
-    const editaisSnapshot = await db.collection('editais').get();
-    const queue = getFunctions().taskQueue('matchEvaluatorWorker');
-
-    const enqueuePromises = editaisSnapshot.docs.map(editalDoc => {
-        return queue.enqueue({
-            oscId: oscId,
-            editalId: editalDoc.id
-        });
-    });
-
-    // Trigger the agentic search task for proactive edital discovery
-    const agenticQueue = getFunctions().taskQueue('agenticSearchWorker');
-    enqueuePromises.push(
-        agenticQueue.enqueue({
-            oscId: oscId
-        }) as unknown as Promise<void>
-    );
-
-    await Promise.all(enqueuePromises);
-    console.log(`Enqueued ${editaisSnapshot.docs.length} match tasks and 1 agentic search task for OSC update ${oscId}.`);
+    // The automated fan-out to matchEvaluatorWorker and agenticSearchWorker has been removed
+    // to prevent the "Thundering Herd" effect during mass ingestion of OSCs.
+    // Agentic Search and matching should now be triggered manually via VIP requests
+    // or via a decoupled slow-burn cron queue.
+    console.log(`OSC ${oscId} updated successfully. Automated match cascades are disabled.`);
 });
 
 
