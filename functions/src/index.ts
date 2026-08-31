@@ -539,28 +539,23 @@ async function processMatchEvaluation(oscId: string, editalId: string, forceReca
 
     let matchResult: unknown;
 
-    if (similarityScore < 0.60) {
-        console.log(`Skipping LLM evaluation due to low vector similarity: ${similarityScore}`);
-        matchResult = {
-            matchScore: Math.round(similarityScore * 100),
-            reasoning: 'Match descartado na pré-filtragem por similaridade vetorial (Cosine Similarity < 0.60).',
-            eligibility: false
-        };
-    } else {
-        matchResult = await scoreMatch({
-            osc: oscData,
-            edital: editalData,
-            oscId: oscId,
-            editalId: editalId
-        });
-    }
+    matchResult = await scoreMatch({
+        osc: oscData,
+        edital: editalData,
+        oscId: oscId,
+        editalId: editalId
+    });
 
 
     const matchRef = existingMatchRef || db.collection('matches').doc();
     const matchDocData = {
         ...(matchResult as object),
         id: matchRef.id,
+        oscId: oscId,
+        editalId: editalId,
         oscName: oscData.name,
+        editalTitle: editalData.title,
+        sourceUrl: rawEditalData?.sourceUrl || null,
         createdAt: FieldValue.serverTimestamp()
     };
 

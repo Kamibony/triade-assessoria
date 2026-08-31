@@ -505,27 +505,21 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
     const similarityScore = cosineSimilarity(oscEmbedding, editalEmbedding);
     console.log(`Vector similarity score for OSC ${oscId} and Edital ${editalId}: ${similarityScore}`);
     let matchResult;
-    if (similarityScore < 0.60) {
-        console.log(`Skipping LLM evaluation due to low vector similarity: ${similarityScore}`);
-        matchResult = {
-            matchScore: Math.round(similarityScore * 100),
-            reasoning: 'Match descartado na pré-filtragem por similaridade vetorial (Cosine Similarity < 0.60).',
-            eligibility: false
-        };
-    }
-    else {
-        matchResult = await scoreMatch({
-            osc: oscData,
-            edital: editalData,
-            oscId: oscId,
-            editalId: editalId
-        });
-    }
+    matchResult = await scoreMatch({
+        osc: oscData,
+        edital: editalData,
+        oscId: oscId,
+        editalId: editalId
+    });
     const matchRef = existingMatchRef || db.collection('matches').doc();
     const matchDocData = {
         ...matchResult,
         id: matchRef.id,
+        oscId: oscId,
+        editalId: editalId,
         oscName: oscData.name,
+        editalTitle: editalData.title,
+        sourceUrl: rawEditalData?.sourceUrl || null,
         createdAt: firestore_1.FieldValue.serverTimestamp()
     };
     await matchRef.set(matchDocData, { merge: true });
