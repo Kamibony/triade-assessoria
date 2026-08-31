@@ -113,7 +113,11 @@ const scoreMatch = ai.defineFlow(
         outputSchema: matchSchema,
     },
     async (input) => {
+        const currentDate = new Date().toISOString();
         const prompt = `Você é um agente especialista em avaliação de projetos culturais para leis de incentivo no Brasil, atuando pela Tríade Assessoria.
+
+Contexto de Data do Sistema:
+A data atual de hoje é ${currentDate}. Tenha isso em mente ao avaliar prazos e datas de encerramento.
 
 A sua tarefa é cruzar os dados de uma ONG com as regras e critérios de elegibilidade de um Edital específico e determinar o Match (compatibilidade).
 
@@ -137,6 +141,11 @@ Critérios de Elegibilidade:
 Avalie os critérios cruzando a ONG com o Edital.
 Gere um 'matchScore' de 0 a 100 indicando o grau de compatibilidade.
 Determine 'eligibility' (true ou false).
+
+Regra Estrita de Expiração:
+Verifique agressivamente se o edital já passou do prazo final (ex: "inscrições encerradas", ou se a data limite de inscrição já passou em relação à data atual do sistema fornecida acima).
+SE O EDITAL ESTIVER ENCERRADO OU COM PRAZO EXPIRADO, você DEVE gerar um 'matchScore' de 0, determinar 'eligibility' como false, e a primeira frase do 'reasoning' DEVE ser EXATAMENTE: "Edital Encerrado / Prazo expirado."
+
 Forneça um 'reasoning' (justificativa detalhada para a nota e elegibilidade).
 Forneça um 'aiSummary' (um resumo de 1-2 frases destacando os pontos fortes ou fracos).
 Forneça um 'badges' (2 a 3 tags curtas que categorizam o match, ex: 'Alta Aderência', 'Desafio Financeiro', 'Foco Regional').
@@ -355,7 +364,11 @@ Siga RIGOROSAMENTE estas regras para a formatação das queries:
 - Inclua o ano de forma simples: Adicione o ano atual ou próximo (${currentYear} ou ${nextYear}) como apenas mais um termo.
 
 Estratégia OBRIGATÓRIA para as 7 queries:
-- Gere 7 queries diversas explorando o local, estado, região, área de atuação e recortes demográficos/temáticos da ONG.
+- Você DEVE adotar uma Estratégia Geográfica Diversificada, gerando uma mistura de:
+  1. Buscas hiper-locais focadas na cidade e/ou estado da ONG.
+  2. Buscas regionais (ex: "Nordeste", "Sul", "Centro-Oeste").
+  3. Buscas amplas ou nacionais (ex: "abrangência nacional", "fundações empresariais", ou omitindo a geografia inteiramente).
+- Gere 7 queries diversas explorando a área de atuação, recortes demográficos/temáticos e a Estratégia Geográfica Diversificada acima.
 - OBRIGATORIAMENTE, em pelo menos 2 das 7 queries, use explicitamente o operador "site:" para focar em domínios governamentais ou institucionais. (ex: site:gov.br edital cultura ${currentYear}).
 
 Perfil da ONG:
