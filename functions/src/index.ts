@@ -13,6 +13,22 @@ import * as admin from 'firebase-admin';
 import { defineString } from 'firebase-functions/params';
 import { GoogleAuth } from 'google-auth-library';
 import { genkit } from 'genkit';
+export function formatGenkitError(error: unknown, defaultMessage: string = "Erro interno desconhecido.") {
+    let message = defaultMessage;
+    if (error instanceof Error) {
+        if (error.message.includes("429") || error.message.includes("Quota")) {
+            message = "Cota diária de IA esgotada. Tente novamente amanhã.";
+        } else if (error.message.includes("403") || error.message.includes("fetch") || error.message.includes("auth") || error.message.includes("Unable to authenticate your request")) {
+            message = "Erro de comunicação com o serviço de IA. Verifique as credenciais ou permissões.";
+        } else if (error.message.includes("Unknown action type returned from plugin vertexai")) {
+             message = "Erro interno: Versão do plugin vertexai incompatível ou ação desconhecida.";
+        } else {
+             message = error.message;
+        }
+    }
+    console.error("Original raw error:", error);
+    return new HttpsError("internal", message);
+}
 import { z } from 'zod';
 import { vertexAI } from '@genkit-ai/google-genai';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
@@ -1125,7 +1141,7 @@ export const agenticSearchWorker = onTaskDispatched({
         if (jobRef) {
             await jobRef.update({
                 status: 'failed',
-                error: error instanceof Error ? error.message : 'Erro interno desconhecido.',
+                error: formatGenkitError(error, 'Erro interno desconhecido.').message,
                 updatedAt: FieldValue.serverTimestamp()
             });
         }
@@ -2073,7 +2089,7 @@ export const triggerAgenticSearch = onCall({
         return { success: true, message: `Busca agêntica enfileirada para OSC ${oscId}`, jobId: jobRef.id };
     } catch (error: unknown) {
         console.error("Error triggering agentic search:", error);
-        throw new HttpsError('internal', 'Falha ao iniciar a busca agêntica.');
+        throw formatGenkitError(error, 'Falha ao iniciar a busca agêntica.');
     }
 });
 
