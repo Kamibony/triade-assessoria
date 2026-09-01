@@ -15,6 +15,12 @@ export interface AgenticSearchJob {
     validEditaisEnqueued: number;
   };
   logs: string[];
+  analytics?: {
+    methodBreakdown: { internal: number; web: number };
+    queryPerformance: Record<string, number>;
+    topDomains: Record<string, number>;
+    rejections: Record<string, number>;
+  };
   startedAt: Timestamp | null;
   updatedAt: Timestamp | null;
   completedAt?: Timestamp | null;
