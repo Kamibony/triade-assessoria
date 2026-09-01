@@ -119,7 +119,15 @@ const scoreMatch = ai.defineFlow(
 Contexto de Data do Sistema:
 A data atual de hoje é ${currentDate}. Tenha isso em mente ao avaliar prazos e datas de encerramento.
 
-A sua tarefa é cruzar os dados de uma ONG com as regras e critérios de elegibilidade de um Edital específico e determinar o Match (compatibilidade).
+A sua tarefa é cruzar os dados de uma ONG com as regras e critérios de elegibilidade de um Edital específico e determinar o Match (compatibilidade) aplicando um Processo Estrito de Avaliação de Duas Fases (Two-Gate Evaluation Process).
+
+Fase 1 (Gate 1): Validação Temporal / Status
+Verifique agressivamente se o edital já passou do prazo final (ex: "inscrições encerradas", ou se a data limite de inscrição já passou em relação à data atual do sistema fornecida acima).
+Check the current date. If the edital's application deadline has passed, or if the page indicates 'Encerrado', 'Resultados', or 'Prorrogado' (for a past date), you MUST immediately halt evaluation, assign a final score of 0%, and set the status to 'Inelegível'. Do NOT average the score with thematic fit.
+SE O EDITAL ESTIVER ENCERRADO OU COM PRAZO EXPIRADO, você DEVE gerar um 'matchScore' de 0, determinar 'eligibility' como false, e a primeira frase do 'reasoning' DEVE ser EXATAMENTE: "Edital Encerrado / Prazo expirado." e pular a Fase 2.
+
+Fase 2 (Gate 2): Alinhamento Temático (Apenas se passar pela Fase 1)
+Avalie os critérios de elegibilidade abaixo cruzando a ONG com o Edital e gere um 'matchScore' de 0 a 100 indicando o grau de compatibilidade (Alinhamento Temático), se e somente se o edital for considerado Válido / Aberto na Fase 1. Determine 'eligibility' (true ou false).
 
 Perfil da ONG:
 Nome: ${input.osc.name}
@@ -137,14 +145,6 @@ Critérios de Elegibilidade:
 - Localizações exigidas: ${input.edital.eligibilityCriteria.requiredLocations.join(', ')}
 - Documentação exigida: ${input.edital.eligibilityCriteria.requiredDocumentation.join(', ')}
 - Atividades permitidas: ${input.edital.eligibilityCriteria.allowedActivities.join(', ')}
-
-Avalie os critérios cruzando a ONG com o Edital.
-Gere um 'matchScore' de 0 a 100 indicando o grau de compatibilidade.
-Determine 'eligibility' (true ou false).
-
-Regra Estrita de Expiração:
-Verifique agressivamente se o edital já passou do prazo final (ex: "inscrições encerradas", ou se a data limite de inscrição já passou em relação à data atual do sistema fornecida acima).
-SE O EDITAL ESTIVER ENCERRADO OU COM PRAZO EXPIRADO, você DEVE gerar um 'matchScore' de 0, determinar 'eligibility' como false, e a primeira frase do 'reasoning' DEVE ser EXATAMENTE: "Edital Encerrado / Prazo expirado."
 
 Forneça um 'reasoning' (justificativa detalhada para a nota e elegibilidade).
 Forneça um 'aiSummary' (um resumo de 1-2 frases destacando os pontos fortes ou fracos).
