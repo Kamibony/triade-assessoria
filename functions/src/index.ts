@@ -78,7 +78,7 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 
 admin.initializeApp();
 
 const ai = genkit({
-    plugins: [vertexAI({ projectId: process.env.GCLOUD_PROJECT || 'triade-assessoria', location: 'us-central1' })],
+    plugins: [vertexAI({ projectId: 'triade-assessoria', location: 'us-central1' })],
 });
 
 const parsePdfToProfile = ai.defineFlow(
@@ -2056,6 +2056,10 @@ export const triggerAgenticSearch = onCall({
     timeoutSeconds: 300,
     invoker: 'public',
 }, async (request) => {
+    logger.info(`[Diagnostics] triggerAgenticSearch invoked.`);
+    logger.info(`[Diagnostics] GCLOUD_PROJECT: ${process.env.GCLOUD_PROJECT || 'not set'}`);
+    logger.info(`[Diagnostics] GOOGLE_APPLICATION_CREDENTIALS: ${process.env.GOOGLE_APPLICATION_CREDENTIALS || 'not set'}`);
+
     try {
         const oscId = request.data.oscId;
         if (!oscId) {
