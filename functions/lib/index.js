@@ -37,6 +37,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = void 0;
+exports.formatGenkitError = formatGenkitError;
 process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const fs = __importStar(require("fs"));
@@ -52,6 +53,25 @@ const admin = __importStar(require("firebase-admin"));
 const params_1 = require("firebase-functions/params");
 const google_auth_library_1 = require("google-auth-library");
 const genkit_1 = require("genkit");
+function formatGenkitError(error, defaultMessage = "Erro interno desconhecido.") {
+    let message = defaultMessage;
+    if (error instanceof Error) {
+        if (error.message.includes("429") || error.message.includes("Quota")) {
+            message = "Cota diária de IA esgotada. Tente novamente amanhã.";
+        }
+        else if (error.message.includes("403") || error.message.includes("fetch") || error.message.includes("auth") || error.message.includes("Unable to authenticate your request")) {
+            message = "Erro de comunicação com o serviço de IA. Verifique as credenciais ou permissões.";
+        }
+        else if (error.message.includes("Unknown action type returned from plugin vertexai")) {
+            message = "Erro interno: Versão do plugin vertexai incompatível ou ação desconhecida.";
+        }
+        else {
+            message = error.message;
+        }
+    }
+    console.error("Original raw error:", error);
+    return new https_1.HttpsError("internal", message);
+}
 const zod_1 = require("zod");
 const google_genai_1 = require("@genkit-ai/google-genai");
 const https_1 = require("firebase-functions/v2/https");
@@ -1043,7 +1063,7 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         if (jobRef) {
             await jobRef.update({
                 status: 'failed',
-                error: error instanceof Error ? error.message : 'Erro interno desconhecido.',
+                error: formatGenkitError(error, 'Erro interno desconhecido.').message,
                 updatedAt: firestore_1.FieldValue.serverTimestamp()
             });
         }
@@ -1830,7 +1850,7 @@ exports.triggerAgenticSearch = (0, https_1.onCall)({
     }
     catch (error) {
         console.error("Error triggering agentic search:", error);
-        throw new https_1.HttpsError('internal', 'Falha ao iniciar a busca agêntica.');
+        throw formatGenkitError(error, 'Falha ao iniciar a busca agêntica.');
     }
 });
 exports.autonomousSearchWorker = (0, https_1.onCall)({

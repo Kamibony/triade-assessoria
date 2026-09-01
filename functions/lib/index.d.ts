@@ -1,4 +1,6 @@
 import { FieldValue } from 'firebase-admin/firestore';
+export declare function formatGenkitError(error: unknown, defaultMessage?: string): HttpsError;
+import { HttpsError } from 'firebase-functions/v2/https';
 export declare const parsePdfProfileFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     name: string;
     cnpj?: string | undefined;
