@@ -354,6 +354,9 @@ Estratégia OBRIGATÓRIA para as 7 queries:
 - Gere 7 queries diversas explorando a área de atuação, recortes demográficos/temáticos e a Estratégia Geográfica Diversificada acima.
 - OBRIGATORIAMENTE, em pelo menos 2 das 7 queries, use explicitamente o operador "site:" para focar em domínios governamentais ou institucionais. (ex: site:gov.br edital cultura ${currentYear}).
 
+INSTRUÇÃO DE OPERADORES NEGATIVOS:
+Você DEVE OBRIGATORIAMENTE anexar a seguinte string de operadores negativos no final de TODAS as 7 queries geradas: "-resultado -homologação -notícia -prorrogação -convocação". Isso é essencial para filtrar ruídos do motor de busca.
+
 INSTRUÇÃO DE SANITIZAÇÃO DE QUERIES (O ARMADILHA DO NOME):
 Se o nome da ONG contiver o nome explícito de um Estado ou Cidade (ex: "Associação Cultural EITA Paraíba"), você DEVE REMOVER E IGNORAR esse termo geográfico específico ao gerar as queries de tier 3 ("Buscas amplas ou nacionais"). Isso evita forçar o motor de busca para uma bolha local quando o objetivo é buscar editais de abrangência nacional.
 
@@ -663,13 +666,16 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         let totalLinksFound = 0;
         let totalLinksEvaluated = 0;
         let totalValidEditaisEnqueued = 0;
+        const methodBreakdown = { internal: 0, web: 0 };
+        const queryPerformance = {};
+        const topDomains = {};
+        const rejections = { expired: 0, out_of_scope: 0, fetch_error: 0, snippet_rejected: 0 };
         let allSearchResults = [];
         const QUERY_CHUNK_SIZE = 3;
-        const NEGATIVE_KEYWORDS = "-resultado -homologação -prorrogação -convocação -notícia";
         for (let q = 0; q < queries.length; q += QUERY_CHUNK_SIZE) {
             const queryChunk = queries.slice(q, q + QUERY_CHUNK_SIZE);
             await Promise.all(queryChunk.map(async (baseQuery) => {
-                const query = `${baseQuery} ${NEGATIVE_KEYWORDS}`;
+                const query = baseQuery;
                 try {
                     if (jobRef) {
                         await jobRef.update({
@@ -760,6 +766,11 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                                                 // Clean HTML tags from snippet
                                                 snippet = snippet.replace(/<\/?[^>]+(>|$)/g, "");
                                             }
+                                            try {
+                                                const domain = new URL(derivedStructData.link).hostname;
+                                                topDomains[domain] = (topDomains[domain] || 0) + 1;
+                                            }
+                                            catch (e) { }
                                             allSearchResults.push({
                                                 link: derivedStructData.link,
                                                 title: derivedStructData.title || '',
@@ -807,6 +818,11 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                                     const results = braveData.web?.results || [];
                                     for (const r of results) {
                                         if (r.url) {
+                                            try {
+                                                const domain = new URL(r.url).hostname;
+                                                topDomains[domain] = (topDomains[domain] || 0) + 1;
+                                            }
+                                            catch (e) { }
                                             allSearchResults.push({
                                                 link: r.url,
                                                 title: r.title || '',
@@ -891,6 +907,7 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                 // Step A: Keyword Heuristic Pre-filter on Snippet (Zero Cost)
                 const hasKeywordInSnippet = essentialKeywords.some(kw => titleAndSnippet.includes(kw));
                 if (!hasKeywordInSnippet) {
+                    rejections.snippet_rejected++;
                     return; // Skip if snippet completely lacks essential keywords
                 }
                 const cleanJsonSnippet = JSON.stringify({
@@ -916,6 +933,9 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                 }
                 if (similarityScore > 0.30) {
                     evaluatedLinks.push({ r, score: similarityScore });
+                }
+                else {
+                    rejections.snippet_rejected++;
                 }
             }));
             // Debounce progress updates after each chunk
@@ -957,17 +977,20 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                         const hasKeywordInFullText = essentialKeywords.some(kw => fetchedTextLower.includes(kw));
                         if (!hasKeywordInFullText) {
                             console.log(`Rejecting ${link} post-fetch: missing essential keywords in full text.`);
+                            rejections.out_of_scope++;
                             return; // Reject before LLM evaluation
                         }
                         fullTextToAnalyze = fetchedText;
                     }
                     else {
                         console.warn(`Rejecting ${link}: full text fetch returned insufficient content.`);
+                        rejections.fetch_error++;
                         return; // Drop URL if fetch didn't yield enough content
                     }
                 }
                 catch (fetchErr) {
                     console.warn(`Failed to fetch full text for ${link}, dropping URL to prevent hallucinations`, fetchErr);
+                    rejections.fetch_error++;
                     return; // Explicitly drop URL on failure
                 }
                 if (jobRef && !hasUpdatedStatus) { // Update status to scoring on the first valid link of the batch
@@ -981,6 +1004,18 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                     await enqueueEditalExtraction(link, fullTextToAnalyze, triageResult.reason, oscId);
                     console.log(`Successfully enqueued agentic extraction for ${link}`);
                     totalValidEditaisEnqueued++;
+                    methodBreakdown.web++;
+                    if (r.query) {
+                        queryPerformance[r.query] = (queryPerformance[r.query] || 0) + 1;
+                    }
+                }
+                else {
+                    if (triageResult.reason.toLowerCase().includes('expirado') || triageResult.reason.toLowerCase().includes('encerrado')) {
+                        rejections.expired++;
+                    }
+                    else {
+                        rejections.out_of_scope++;
+                    }
                 }
             }));
             // Debounce progress updates after each chunk
@@ -996,6 +1031,7 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
             await jobRef.update({
                 status: 'completed',
                 logs: firestore_1.FieldValue.arrayUnion('Busca finalizada com sucesso.'),
+                analytics: { methodBreakdown, queryPerformance, topDomains, rejections },
                 completedAt: firestore_1.FieldValue.serverTimestamp(),
                 updatedAt: firestore_1.FieldValue.serverTimestamp()
             });

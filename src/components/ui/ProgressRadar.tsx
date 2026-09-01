@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import type { AgenticSearchJob } from '../../lib/useAgenticSearchTracker';
-import { Loader2, Search, Brain, Globe, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
+import { Loader2, Search, Brain, Globe, CheckCircle2, XCircle, AlertCircle, BarChart, Target, ShieldAlert } from 'lucide-react';
 import { Button } from './Button';
 
 interface ProgressRadarProps {
@@ -144,31 +144,132 @@ export const ProgressRadar: React.FC<ProgressRadarProps> = ({ job, onRetry, onDi
           </div>
         )}
 
-        {isCompleted && progress.validEditaisEnqueued === 0 && (
-          <div className="mt-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex items-start gap-3">
-             <AlertCircle className="text-yellow-600 shrink-0 mt-0.5" size={20} />
-             <div>
-                <h4 className="text-sm font-semibold text-yellow-800">Nenhum edital novo encontrado</h4>
-                <p className="text-sm text-yellow-700 mt-1">
-                   A IA vasculhou a web com base no perfil da ONG, mas não encontrou nenhuma nova oportunidade válida neste momento. Tente novamente em alguns dias.
-                </p>
-             </div>
+
+
+
+        {isCompleted && (
+          <div className="mt-6">
+            {progress.validEditaisEnqueued > 0 ? (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3 mb-4">
+                  <CheckCircle2 className="text-green-600 shrink-0 mt-0.5" size={20} />
+                  <div>
+                      <h4 className="text-sm font-semibold text-green-800">Busca Concluída com Sucesso!</h4>
+                      <p className="text-sm text-green-700 mt-1">
+                        Encontramos {progress.validEditaisEnqueued} edita{progress.validEditaisEnqueued === 1 ? 'l' : 'is'} promissore{progress.validEditaisEnqueued === 1 ? '' : 's'}. Eles foram enviados para a fila de extração detalhada e aparecerão nos Matches em breve.
+                      </p>
+                  </div>
+                </div>
+            ) : (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex items-start gap-3 mb-4">
+                  <AlertCircle className="text-yellow-600 shrink-0 mt-0.5" size={20} />
+                  <div>
+                      <h4 className="text-sm font-semibold text-yellow-800">Nenhum edital novo encontrado</h4>
+                      <p className="text-sm text-yellow-700 mt-1">
+                        A IA vasculhou a web com base no perfil da ONG, mas não encontrou nenhuma nova oportunidade válida neste momento. Veja os detalhes abaixo.
+                      </p>
+                  </div>
+                </div>
+            )}
+
+            {job.analytics && (
+              <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                <div className="bg-gray-50 border-b border-gray-200 px-4 py-3 flex items-center gap-2">
+                  <BarChart size={18} className="text-gray-500" />
+                  <h4 className="text-sm font-semibold text-gray-700">Relatório de Análise da Busca</h4>
+                </div>
+
+                <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                  {/* Query Performance */}
+                  <div>
+                    <h5 className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1 mb-3">
+                      <Target size={14} /> Queries de Maior Sucesso
+                    </h5>
+                    {Object.keys(job.analytics.queryPerformance).length > 0 ? (
+                      <ul className="space-y-2">
+                        {Object.entries(job.analytics.queryPerformance)
+                          .sort((a, b) => b[1] - a[1])
+                          .slice(0, 3)
+                          .map(([query, count], idx) => (
+                          <li key={idx} className="flex justify-between items-center text-sm">
+                            <span className="truncate text-gray-700 flex-1 pr-2" title={query}>"{query}"</span>
+                            <span className="font-semibold text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full text-xs">
+                              {count} {count === 1 ? 'match' : 'matches'}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-sm text-gray-400 italic">Nenhuma query retornou resultados válidos.</p>
+                    )}
+                  </div>
+
+                  {/* Top Domains */}
+                  <div>
+                    <h5 className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1 mb-3">
+                      <Globe size={14} /> Principais Fontes
+                    </h5>
+                    {Object.keys(job.analytics.topDomains).length > 0 ? (
+                      <ul className="space-y-2">
+                        {Object.entries(job.analytics.topDomains)
+                          .sort((a, b) => b[1] - a[1])
+                          .slice(0, 3)
+                          .map(([domain, count], idx) => (
+                          <li key={idx} className="flex justify-between items-center text-sm">
+                            <span className="truncate text-gray-700">{domain}</span>
+                            <span className="text-gray-500 text-xs">{count} acessos</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-sm text-gray-400 italic">Nenhum domínio processado.</p>
+                    )}
+                  </div>
+
+                  {/* Rejections */}
+                  <div className="md:col-span-2 border-t border-gray-100 pt-4">
+                    <h5 className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1 mb-3">
+                      <ShieldAlert size={14} /> Motivos de Rejeição (Filtro IA)
+                    </h5>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="bg-red-50 p-3 rounded-lg border border-red-100">
+                        <div className="text-lg font-bold text-red-700">{job.analytics.rejections.expired || 0}</div>
+                        <div className="text-xs text-red-600 mt-1">Expirados</div>
+                      </div>
+                      <div className="bg-orange-50 p-3 rounded-lg border border-orange-100">
+                        <div className="text-lg font-bold text-orange-700">{job.analytics.rejections.out_of_scope || 0}</div>
+                        <div className="text-xs text-orange-600 mt-1">Fora do Escopo</div>
+                      </div>
+                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+                        <div className="text-lg font-bold text-gray-700">{job.analytics.rejections.snippet_rejected || 0}</div>
+                        <div className="text-xs text-gray-600 mt-1">Baixa Relevância</div>
+                      </div>
+                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+                        <div className="text-lg font-bold text-gray-700">{job.analytics.rejections.fetch_error || 0}</div>
+                        <div className="text-xs text-gray-600 mt-1">Erro de Leitura</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="md:col-span-2 border-t border-gray-100 pt-4">
+                    <h5 className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1 mb-3">
+                      <Search size={14} /> Origem da Descoberta (Metodologia)
+                    </h5>
+                    <div className="flex gap-4">
+                      <div className="bg-blue-50 px-4 py-2 rounded-lg border border-blue-100">
+                        <div className="text-sm font-bold text-blue-700">{job.analytics.methodBreakdown.web || 0}</div>
+                        <div className="text-xs text-blue-600">Buscas na Web (Brave / Vertex)</div>
+                      </div>
+                      <div className="bg-purple-50 px-4 py-2 rounded-lg border border-purple-100">
+                        <div className="text-sm font-bold text-purple-700">{job.analytics.methodBreakdown.internal || 0}</div>
+                        <div className="text-xs text-purple-600">Base Interna</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
-
-        {isCompleted && progress.validEditaisEnqueued > 0 && (
-          <div className="mt-6 bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
-             <CheckCircle2 className="text-green-600 shrink-0 mt-0.5" size={20} />
-             <div>
-                <h4 className="text-sm font-semibold text-green-800">Sucesso!</h4>
-                <p className="text-sm text-green-700 mt-1">
-                   Encontramos {progress.validEditaisEnqueued} edita{progress.validEditaisEnqueued === 1 ? 'l' : 'is'} promissore{progress.validEditaisEnqueued === 1 ? '' : 's'}.
-                   Eles foram enviados para a fila de extração detalhada e aparecerão nos Matches em breve.
-                </p>
-             </div>
-          </div>
-        )}
-
       </div>
     </div>
   );
