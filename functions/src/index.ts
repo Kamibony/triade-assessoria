@@ -709,6 +709,7 @@ export const agenticSearchWorker = onTaskDispatched({
         if (jobRef) {
             await jobRef.update({
                 'progress.queriesGenerated': queries.length,
+                'progress.validEditaisEnqueued': instantMatches,
                 status: 'scraping_web',
                 logs: FieldValue.arrayUnion(`Geradas ${queries.length} queries. Iniciando busca na web...`),
                 updatedAt: FieldValue.serverTimestamp()
@@ -717,9 +718,9 @@ export const agenticSearchWorker = onTaskDispatched({
 
         let totalLinksFound = 0;
         let totalLinksEvaluated = 0;
-        let totalValidEditaisEnqueued = 0;
+        let totalValidEditaisEnqueued = instantMatches;
 
-        const methodBreakdown = { internal: 0, web: 0 };
+        const methodBreakdown = { internal: instantMatches, web: 0 };
         const queryPerformance: Record<string, number> = {};
         const topDomains: Record<string, number> = {};
         const rejections: { [key: string]: number; expired: number; out_of_scope: number; fetch_error: number; snippet_rejected: number; } = { expired: 0, out_of_scope: 0, fetch_error: 0, snippet_rejected: 0 };
@@ -1267,12 +1268,12 @@ export const processOscChunkWorker = onTaskDispatched({
                 return `CNPJ: ${osc.cleanCnpj}, Name: ${textFields[0]}, Descriptions: ${textFields.join(' ')}`;
             }).join('\n');
 
-            const llmPrompt = `You are an expert data filter. User's request: ${aiPrompt}. Here are ${filteredOscs.length} NGOs (Name + CNAE descriptions):\n${promptData}\nAnalyze their semantic alignment with the request. Return a raw JSON array containing ONLY the string CNPJs of the NGOs that genuinely match the profile. Exclude unrelated entities (like churches, sports clubs, or irrelevant associations) unless specifically requested.`;
+            const llmPrompt = `You are a strict, ruthless data filter. Evaluate NGOs strictly based on explicit textual evidence in their Name or CNAE. Do NOT assume generic religious organizations (igrejas, congregações) or generic neighborhood associations (moradores) run niche programs unless their name explicitly states it. If the user asks for a specific niche and the NGO is generic, EXCLUDE IT. When in doubt, EXCLUDE. User's request: ${aiPrompt}. Here are ${filteredOscs.length} NGOs (Name + CNAE descriptions):\n${promptData}\nAnalyze their semantic alignment with the request. Return a raw JSON array containing ONLY the string CNPJs of the NGOs that genuinely match the profile.`;
 
             const response = await ai.generate({
                 model: 'vertexai/gemini-2.5-flash',
                 prompt: llmPrompt,
-                config: { temperature: 0.1 },
+                config: { temperature: 0.0 },
                 output: { schema: z.array(z.string()) }
             });
 
