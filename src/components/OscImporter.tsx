@@ -1,10 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '../lib/firebase';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { functions, db } from '../lib/firebase';
 import { Button } from './ui/Button';
-import { Loader2, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Loader2, RefreshCw, CheckCircle2, AlertCircle, Activity } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
+
+interface SystemJob {
+  id: string;
+  type: string;
+  status: 'running' | 'completed' | 'error';
+  totalOscsFetched: number;
+  totalChunks: number;
+  chunksProcessed: number;
+  validOscsSaved: number;
+}
 
 export function OscImporter() {
   const { t } = useTranslation();
@@ -15,6 +26,40 @@ export function OscImporter() {
   const [onlyActive, setOnlyActive] = useState(true);
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<{type: 'success' | 'error', message: string} | null>(null);
+  const [activeJob, setActiveJob] = useState<SystemJob | null>(null);
+  const wasJobRunningRef = useRef(false);
+
+  useEffect(() => {
+    const q = query(
+      collection(db, 'system_jobs'),
+      where('type', '==', 'osc_ingestion'),
+      where('status', '==', 'running')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      if (!snapshot.empty) {
+        const doc = snapshot.docs[0];
+        setActiveJob({ id: doc.id, ...doc.data() } as SystemJob);
+        setIsImporting(true); // Disable form while a job is running
+        wasJobRunningRef.current = true;
+      } else {
+        if (wasJobRunningRef.current) {
+          // If we had a job and now we don't, it means it completed
+          setIsImporting(false);
+          setImportResult({
+            type: 'success',
+            message: 'Importação concluída. As OSCs validadas já estão no Diretório.'
+          });
+          wasJobRunningRef.current = false;
+        }
+        setActiveJob(null);
+      }
+    }, (error) => {
+      console.error("Error listening to system jobs:", error);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const handleImportOsc = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -169,12 +214,50 @@ export function OscImporter() {
           </div>
 
           <Button type="submit" disabled={isImporting} className="w-full py-6 text-lg">
-            {isImporting ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <RefreshCw className="w-5 h-5 mr-2" />}
+            {isImporting && !activeJob ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <RefreshCw className="w-5 h-5 mr-2" />}
             {t('admin.bulkImporter.button')}
           </Button>
         </form>
 
-        {importResult && (
+        {activeJob && (
+          <div className="mt-8 p-6 rounded-lg border bg-card text-card-foreground shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold flex items-center">
+                <Activity className="w-5 h-5 mr-2 text-primary animate-pulse" />
+                Importação em Andamento
+              </h3>
+              <span className="text-sm font-medium bg-primary/10 text-primary px-3 py-1 rounded-full">
+                {Math.round((activeJob.chunksProcessed / activeJob.totalChunks) * 100)}%
+              </span>
+            </div>
+
+            <div className="space-y-4">
+              <div className="w-full bg-secondary rounded-full h-2.5">
+                <div
+                  className="bg-primary h-2.5 rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min(100, (activeJob.chunksProcessed / Math.max(1, activeJob.totalChunks)) * 100)}%` }}
+                ></div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="bg-muted p-3 rounded-md">
+                  <p className="text-muted-foreground mb-1">OSCs Descobertas</p>
+                  <p className="text-xl font-bold">{activeJob.totalOscsFetched.toLocaleString()}</p>
+                </div>
+                <div className="bg-muted p-3 rounded-md">
+                  <p className="text-muted-foreground mb-1">OSCs Salvas (Válidas)</p>
+                  <p className="text-xl font-bold text-green-600 dark:text-green-400">{activeJob.validOscsSaved.toLocaleString()}</p>
+                </div>
+                <div className="bg-muted p-3 rounded-md col-span-2 flex justify-between items-center">
+                  <p className="text-muted-foreground">Lotes Processados (Chunks)</p>
+                  <p className="font-semibold">{activeJob.chunksProcessed} de {activeJob.totalChunks}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {importResult && !activeJob && (
           <div className={`mt-6 p-4 rounded-md border flex items-start ${
             importResult.type === 'success'
               ? 'bg-green-500/10 border-green-500/50 text-green-600 dark:text-green-400'

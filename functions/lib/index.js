@@ -1095,7 +1095,7 @@ exports.processOscChunkWorker = (0, tasks_1.onTaskDispatched)({
     },
     timeoutSeconds: 540
 }, async (request) => {
-    const { oscIds, activityArea, aiPrompt, onlyActive } = request.data;
+    const { oscIds, activityArea, aiPrompt, onlyActive, jobId } = request.data;
     if (!oscIds || !Array.isArray(oscIds)) {
         console.error("Invalid task payload: missing oscIds.");
         return;
@@ -1104,72 +1104,91 @@ exports.processOscChunkWorker = (0, tasks_1.onTaskDispatched)({
     let processed = 0;
     let imported = 0;
     const collectedOscs = [];
-    for (const id_osc of oscIds) {
-        try {
-            // Deliberate delay to prevent rate-limiting from BrasilAPI / IPEA
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            // 1. Get CNPJ from IPEA
-            const oscDetailsRes = await fetchWithRetry(`https://mapaosc.ipea.gov.br/api/api/osc/cabecalho/${id_osc}`);
-            const oscDetails = await oscDetailsRes.json();
-            const rawCnpj = oscDetails.cd_identificador_osc;
-            if (!rawCnpj)
-                continue;
-            const cleanCnpj = String(rawCnpj).replace(/\D/g, '');
-            if (cleanCnpj.length !== 14)
-                continue;
-            // 2. Enrich Profile Data using BrasilAPI
-            const brasilApiResponse = await fetchWithRetry(`https://brasilapi.com.br/api/cnpj/v1/${cleanCnpj}`);
-            const rawData = await brasilApiResponse.json();
-            // 3. Apply Filters
-            if (onlyActive) {
-                // If the description is not ATIVA (e.g. INAPTA, BAIXADA) we skip
-                if (rawData.descricao_situacao_cadastral !== 'ATIVA') {
-                    continue;
+    // Process API requests in chunks of 5
+    const API_CHUNK_SIZE = 5;
+    for (let i = 0; i < oscIds.length; i += API_CHUNK_SIZE) {
+        const chunk = oscIds.slice(i, i + API_CHUNK_SIZE);
+        await Promise.all(chunk.map(async (id_osc) => {
+            try {
+                // 1. Get CNPJ from IPEA
+                const oscDetailsRes = await fetchWithRetry(`https://mapaosc.ipea.gov.br/api/api/osc/cabecalho/${id_osc}`);
+                const oscDetails = await oscDetailsRes.json();
+                const rawCnpj = oscDetails.cd_identificador_osc;
+                if (!rawCnpj)
+                    return;
+                const cleanCnpj = String(rawCnpj).replace(/\D/g, '');
+                if (cleanCnpj.length !== 14)
+                    return;
+                // 2. Enrich Profile Data using BrasilAPI
+                const brasilApiResponse = await fetchWithRetry(`https://brasilapi.com.br/api/cnpj/v1/${cleanCnpj}`);
+                const rawData = await brasilApiResponse.json();
+                // 3. Apply Filters
+                if (onlyActive) {
+                    if (rawData.descricao_situacao_cadastral !== 'ATIVA') {
+                        return;
+                    }
                 }
-            }
-            if (activityArea) {
-                const searchArea = activityArea.toLowerCase();
-                const mainActivity = (rawData.cnae_fiscal_descricao || '').toLowerCase();
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const secActivities = (rawData.cnaes_secundarios || []).map((c) => (c.descricao || '').toLowerCase());
-                const matchesArea = mainActivity.includes(searchArea) || secActivities.some((a) => a.includes(searchArea));
-                if (!matchesArea) {
-                    continue;
+                if (activityArea) {
+                    const searchArea = activityArea.toLowerCase();
+                    const mainActivity = (rawData.cnae_fiscal_descricao || '').toLowerCase();
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const secActivities = (rawData.cnaes_secundarios || []).map((c) => (c.descricao || '').toLowerCase());
+                    const matchesArea = mainActivity.includes(searchArea) || secActivities.some((a) => a.includes(searchArea));
+                    if (!matchesArea) {
+                        return;
+                    }
                 }
+                collectedOscs.push({ cleanCnpj, rawData, id_osc });
             }
-            collectedOscs.push({ cleanCnpj, rawData, id_osc });
-        }
-        catch (error) {
-            console.error(`Error processing OSC ${id_osc}:`, error);
-        }
-        finally {
-            processed++;
-        }
+            catch (error) {
+                console.error(`Error processing OSC ${id_osc}:`, error);
+            }
+            finally {
+                processed++;
+            }
+        }));
+        // Deliberate delay to prevent rate-limiting from BrasilAPI / IPEA
+        await new Promise(resolve => setTimeout(resolve, 1000));
     }
     let filteredOscs = collectedOscs;
     if (aiPrompt && filteredOscs.length > 0) {
         try {
-            const promptData = filteredOscs.map(osc => {
-                const textFields = [
-                    (osc.rawData.razao_social || ''),
-                    (osc.rawData.nome_fantasia || ''),
-                    (osc.rawData.cnae_fiscal_descricao || '')
-                ];
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                (osc.rawData.cnaes_secundarios || []).forEach((c) => {
-                    textFields.push(c.descricao || '');
-                });
-                return `CNPJ: ${osc.cleanCnpj}, Name: ${textFields[0]}, Descriptions: ${textFields.join(' ')}`;
-            }).join('\n');
-            const llmPrompt = `You are a strict, ruthless data filter. Evaluate NGOs strictly based on explicit textual evidence in their Name or CNAE. Do NOT assume generic religious organizations (igrejas, congregações) or generic neighborhood associations (moradores) run niche programs unless their name explicitly states it. If the user asks for a specific niche and the NGO is generic, EXCLUDE IT. When in doubt, EXCLUDE. User's request: ${aiPrompt}. Here are ${filteredOscs.length} NGOs (Name + CNAE descriptions):\n${promptData}\nAnalyze their semantic alignment with the request. Return a raw JSON array containing ONLY the string CNPJs of the NGOs that genuinely match the profile.`;
-            const response = await ai.generate({
-                model: 'vertexai/gemini-2.5-flash',
-                prompt: llmPrompt,
-                config: { temperature: 0.0 },
-                output: { schema: zod_1.z.array(zod_1.z.string()) }
-            });
-            const matchedCnpjs = response.output || [];
-            filteredOscs = filteredOscs.filter(osc => matchedCnpjs.includes(osc.cleanCnpj));
+            // Process AI filtering in chunks of 50 to avoid prompt size limits and rate limits
+            const AI_CHUNK_SIZE = 50;
+            const aiChunks = [];
+            for (let i = 0; i < filteredOscs.length; i += AI_CHUNK_SIZE) {
+                aiChunks.push(filteredOscs.slice(i, i + AI_CHUNK_SIZE));
+            }
+            let allMatchedCnpjs = [];
+            // Limit concurrency for AI requests to 3
+            const MAX_AI_CONCURRENCY = 3;
+            for (let i = 0; i < aiChunks.length; i += MAX_AI_CONCURRENCY) {
+                const batch = aiChunks.slice(i, i + MAX_AI_CONCURRENCY);
+                const batchResults = await Promise.all(batch.map(async (chunk) => {
+                    const promptData = chunk.map(osc => {
+                        const textFields = [
+                            (osc.rawData.razao_social || ''),
+                            (osc.rawData.nome_fantasia || ''),
+                            (osc.rawData.cnae_fiscal_descricao || '')
+                        ];
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        (osc.rawData.cnaes_secundarios || []).forEach((c) => {
+                            textFields.push(c.descricao || '');
+                        });
+                        return `CNPJ: ${osc.cleanCnpj}, Name: ${textFields[0]}, Descriptions: ${textFields.join(' ')}`;
+                    }).join('\n');
+                    const llmPrompt = `You are a strict, ruthless data filter. Evaluate NGOs strictly based on explicit textual evidence in their Name or CNAE. Do NOT assume generic religious organizations (igrejas, congregações) or generic neighborhood associations (moradores) run niche programs unless their name explicitly states it. If the user asks for a specific niche and the NGO is generic, EXCLUDE IT. When in doubt, EXCLUDE. User's request: ${aiPrompt}. Here are ${chunk.length} NGOs (Name + CNAE descriptions):\n${promptData}\nAnalyze their semantic alignment with the request. Return a raw JSON array containing ONLY the string CNPJs of the NGOs that genuinely match the profile.`;
+                    const response = await ai.generate({
+                        model: 'vertexai/gemini-2.5-flash',
+                        prompt: llmPrompt,
+                        config: { temperature: 0.0 },
+                        output: { schema: zod_1.z.array(zod_1.z.string()) }
+                    });
+                    return response.output || [];
+                }));
+                allMatchedCnpjs = allMatchedCnpjs.concat(batchResults.flat());
+            }
+            filteredOscs = filteredOscs.filter(osc => allMatchedCnpjs.includes(osc.cleanCnpj));
         }
         catch (error) {
             console.error("AI Filtering error:", error);
@@ -1214,6 +1233,31 @@ exports.processOscChunkWorker = (0, tasks_1.onTaskDispatched)({
         }
         catch (error) {
             console.error(`Error transforming and upserting OSC ${osc.cleanCnpj}:`, error);
+        }
+    }
+    if (jobId) {
+        try {
+            const jobRef = db.collection('system_jobs').doc(jobId);
+            await db.runTransaction(async (transaction) => {
+                const jobDoc = await transaction.get(jobRef);
+                if (jobDoc.exists) {
+                    const data = jobDoc.data();
+                    const newChunksProcessed = (data?.chunksProcessed || 0) + 1;
+                    const newValidOscsSaved = (data?.validOscsSaved || 0) + imported;
+                    const updateData = {
+                        chunksProcessed: newChunksProcessed,
+                        validOscsSaved: newValidOscsSaved,
+                        updatedAt: firestore_1.FieldValue.serverTimestamp()
+                    };
+                    if (newChunksProcessed >= (data?.totalChunks || 0)) {
+                        updateData.status = 'completed';
+                    }
+                    transaction.update(jobRef, updateData);
+                }
+            });
+        }
+        catch (error) {
+            console.error(`Error updating job ${jobId}:`, error);
         }
     }
     logger.info(`Chunk processing complete. Processed: ${processed}, Imported: ${imported}`);
@@ -1281,8 +1325,22 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
         return { success: true, message: 'No OSCs found for the given criteria.' };
     }
     // 2. Chunk the results and enqueue to Cloud Tasks
-    const CHUNK_SIZE = 100;
+    const CHUNK_SIZE = 250;
     const queue = (0, functions_1.getFunctions)().taskQueue('processOscChunkWorker');
+    const db = (0, firestore_1.getFirestore)();
+    const jobRef = db.collection('system_jobs').doc();
+    const jobId = jobRef.id;
+    const totalChunks = Math.ceil(oscList.length / CHUNK_SIZE);
+    await jobRef.set({
+        type: 'osc_ingestion',
+        status: 'running',
+        totalOscsFetched: oscList.length,
+        totalChunks: totalChunks,
+        chunksProcessed: 0,
+        validOscsSaved: 0,
+        createdAt: firestore_1.FieldValue.serverTimestamp(),
+        updatedAt: firestore_1.FieldValue.serverTimestamp(),
+    });
     let enqueuedTasks = 0;
     for (let i = 0; i < oscList.length; i += CHUNK_SIZE) {
         const chunk = oscList.slice(i, i + CHUNK_SIZE).map(osc => osc.id_osc);
@@ -1290,7 +1348,8 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
             oscIds: chunk,
             activityArea,
             aiPrompt,
-            onlyActive
+            onlyActive,
+            jobId
         });
         enqueuedTasks++;
     }
