@@ -30,7 +30,7 @@ export function formatGenkitError(error: unknown, defaultMessage: string = "Erro
     return new HttpsError("internal", message);
 }
 import { z } from 'zod';
-import { vertexAI } from '@genkit-ai/google-genai';
+import { vertexAI, textEmbedding004 } from '@genkit-ai/vertexai';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import * as logger from 'firebase-functions/logger';
@@ -437,8 +437,6 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
     }
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
-
-import { textEmbedding004 } from '@genkit-ai/vertexai';
 
 async function generateTextEmbedding(text: string): Promise<number[]> {
     try {
