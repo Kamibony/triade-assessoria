@@ -421,10 +421,11 @@ function cosineSimilarity(vecA, vecB) {
     }
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
+const vertexai_1 = require("@genkit-ai/vertexai");
 async function generateTextEmbedding(text) {
     try {
         const response = await ai.embed({
-            embedder: 'vertexai/text-embedding-004',
+            embedder: vertexai_1.textEmbedding004,
             content: text.substring(0, 5000)
         });
         if (Array.isArray(response)) {
