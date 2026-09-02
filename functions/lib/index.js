@@ -579,12 +579,25 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
     const similarityScore = cosineSimilarity(oscEmbedding, editalEmbedding);
     console.log(`Vector similarity score for OSC ${oscId} and Edital ${editalId}: ${similarityScore}`);
     let matchResult;
-    matchResult = await scoreMatch({
-        osc: oscData,
-        edital: editalData,
-        oscId: oscId,
-        editalId: editalId
-    });
+    if (similarityScore < 0.70) {
+        console.log(`Silently rejecting match for OSC ${oscId} and Edital ${editalId} due to low similarity score (${similarityScore} < 0.70)`);
+        matchResult = {
+            matchScore: 0,
+            eligibility: false,
+            status: 'Inelegível',
+            badges: ['Baixa Relevância (Filtro)'],
+            aiSummary: 'A avaliação foi interrompida devido à baixa similaridade semântica entre a ONG e o Edital.',
+            reasoning: null
+        };
+    }
+    else {
+        matchResult = await scoreMatch({
+            osc: oscData,
+            edital: editalData,
+            oscId: oscId,
+            editalId: editalId
+        });
+    }
     const matchRef = existingMatchRef || db.collection('matches').doc();
     const matchDocData = {
         ...matchResult,
@@ -689,7 +702,7 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         for (const edital of validEditaisForSimilarity) {
             if (oscEmbedding) {
                 const similarityScore = cosineSimilarity(oscEmbedding, edital.embedding);
-                if (similarityScore >= 0.60) { // Same threshold as the regular pre-filter
+                if (similarityScore >= 0.70) { // Same strict threshold as the new pre-filter baseline
                     await matchEvaluatorQueue.enqueue({
                         oscId: oscId,
                         editalId: edital.docId
@@ -1198,7 +1211,7 @@ exports.processOscChunkWorker = (0, tasks_1.onTaskDispatched)({
         await new Promise(resolve => setTimeout(resolve, 1000));
     }
     let filteredOscs = collectedOscs;
-    if (aiPrompt && filteredOscs.length > 0) {
+    if (aiPrompt && aiPrompt.trim() !== '' && filteredOscs.length > 0) {
         try {
             // Process AI filtering in chunks of 50 to avoid prompt size limits and rate limits
             const AI_CHUNK_SIZE = 50;
