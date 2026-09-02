@@ -89,7 +89,7 @@ export declare const matchSchema: z.ZodObject<{
     oscName: z.ZodOptional<z.ZodString>;
     matchScore: z.ZodNumber;
     eligibility: z.ZodBoolean;
-    reasoning: z.ZodString;
+    reasoning: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     aiSummary: z.ZodOptional<z.ZodString>;
     badges: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     actionPlan: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
@@ -99,7 +99,7 @@ export declare const matchSchema: z.ZodObject<{
     oscName?: string | undefined;
     matchScore: number;
     eligibility: boolean;
-    reasoning: string;
+    reasoning?: string | null | undefined;
     aiSummary?: string | undefined;
     badges?: string[] | undefined;
     actionPlan?: string[] | undefined;
@@ -109,7 +109,7 @@ export declare const matchSchema: z.ZodObject<{
     oscName?: string | undefined;
     matchScore: number;
     eligibility: boolean;
-    reasoning: string;
+    reasoning?: string | null | undefined;
     aiSummary?: string | undefined;
     badges?: string[] | undefined;
     actionPlan?: string[] | undefined;
