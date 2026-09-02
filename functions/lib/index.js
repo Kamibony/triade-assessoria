@@ -224,7 +224,8 @@ Responda estritamente em português do Brasil (pt-BR).
 });
 exports.parsePdfProfileFunction = (0, https_1.onCall)({
     cors: true,
-    memory: '512MiB'
+    memory: '2GiB',
+    concurrency: 2
 }, async (request) => {
     // TODO: Re-enable auth checks once Auth is implemented.
     // if (!request.auth) {
@@ -364,7 +365,8 @@ async function fetchAndExtractText(url) {
 }
 exports.extractEditalRulesFunction = (0, https_1.onCall)({
     cors: true,
-    memory: '512MiB'
+    memory: '2GiB',
+    concurrency: 2
 }, async (request) => {
     // TODO: Re-enable auth checks once Auth is implemented.
     // if (!request.auth) {
@@ -487,15 +489,26 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
     const rawOscData = oscDoc.data();
     const rawEditalData = editalDoc.data();
     // Fix 4: Dirty Data Resilience (use safeParse)
-    const oscParseResult = schemas_js_1.ngoProfileSchema.safeParse(rawOscData);
+    // Map sparse mass-imported data with valid defaults before parsing
+    const enrichedOscData = {
+        name: rawOscData?.name || 'ONG Desconhecida',
+        foundationDate: rawOscData?.foundationDate || 'Data Desconhecida',
+        location: rawOscData?.location || 'Localização Desconhecida',
+        documentationStatus: rawOscData?.documentationStatus || 'Pendente',
+        previousProjectsApproved: rawOscData?.previousProjectsApproved || false,
+        coreActivities: rawOscData?.coreActivities || [],
+        ...rawOscData
+    };
+    const oscParseResult = schemas_js_1.ngoProfileSchema.safeParse(enrichedOscData);
     const editalParseResult = schemas_js_1.editalSchema.safeParse(rawEditalData);
     if (!oscParseResult.success) {
-        console.warn(`Invalid OSC data for ${oscId}:`, oscParseResult.error);
-        throw new Error(`Invalid OSC data for ${oscId}`);
+        console.warn(`Invalid OSC data for ${oscId} (Skipping match safely):`, oscParseResult.error);
+        // Silently return instead of throwing to prevent infinite retry loops in Cloud Tasks
+        return null;
     }
     if (!editalParseResult.success) {
-        console.warn(`Invalid Edital data for ${editalId}:`, editalParseResult.error);
-        throw new Error(`Invalid Edital data for ${editalId}`);
+        console.warn(`Invalid Edital data for ${editalId} (Skipping match safely):`, editalParseResult.error);
+        return null;
     }
     const oscData = oscParseResult.data;
     const editalData = editalParseResult.data;
@@ -1127,8 +1140,13 @@ exports.matchEvaluatorWorker = (0, tasks_1.onTaskDispatched)({
         return;
     }
     try {
-        await processMatchEvaluation(oscId, editalId);
-        console.log(`Successfully processed task for OSC ${oscId} and Edital ${editalId}`);
+        const result = await processMatchEvaluation(oscId, editalId);
+        if (result === null) {
+            console.log(`Task skipped safely due to invalid data for OSC ${oscId} and Edital ${editalId}`);
+        }
+        else {
+            console.log(`Successfully processed task for OSC ${oscId} and Edital ${editalId}`);
+        }
     }
     catch (error) {
         console.error(`Task execution failed for OSC ${oscId} and Edital ${editalId}`, error);
@@ -1540,13 +1558,21 @@ async function processRssFeeds() {
         try {
             console.log(`Fetching RSS feed: ${feedUrl}`);
             const feed = await parser.parseURL(feedUrl);
-            for (const item of feed.items) {
+            // Limit to top 5 items per feed to prevent token leaks
+            const topItems = feed.items.slice(0, 5);
+            for (const item of topItems) {
                 if (!item.link)
                     continue;
                 // Check if already ingested
-                const existingEdital = await db.collection('editais').where('sourceUrl', '==', item.link).get();
+                const existingEdital = await db.collection('editais').where('sourceUrl', '==', item.link).limit(1).get();
                 if (!existingEdital.empty) {
                     console.log(`Skipping already ingested link: ${item.link}`);
+                    continue;
+                }
+                // Add an extra check against the scraping queue to prevent race conditions with data lake
+                const existingQueue = await db.collection('scraping_contents').where('url', '==', item.link).limit(1).get();
+                if (!existingQueue.empty) {
+                    console.log(`Skipping link already in scraping queue: ${item.link}`);
                     continue;
                 }
                 processedCount++;
@@ -1811,12 +1837,25 @@ exports.manualTriggerRssSyncFunction = (0, https_1.onCall)({
 });
 exports.scheduledMatchSweeper = (0, scheduler_1.onSchedule)('0 0 * * 0', async () => {
     const db = (0, firestore_1.getFirestore)();
-    const editaisSnapshot = await db.collection('editais').get();
-    const oscsSnapshot = await db.collection('oscs').get();
+    // Safety Limit: Only sweep editais created in the last 7 days to avoid unbounded cartesian joins
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+    const editaisSnapshot = await db.collection('editais')
+        .where('createdAt', '>=', oneWeekAgo)
+        .limit(50) // Hard cap to prevent runaway loops
+        .get();
+    const oscsSnapshot = await db.collection('oscs')
+        .limit(100) // Hard cap to prevent runaway cartesian joins with editais
+        .get();
     const queue = (0, functions_1.getFunctions)().taskQueue('matchEvaluatorWorker');
     const oscIds = oscsSnapshot.docs.map(doc => doc.id);
     let enqueuedCount = 0;
+    const MAX_ENQUEUES = 500; // Global fail-safe limit for the sweeper
     for (const editalDoc of editaisSnapshot.docs) {
+        if (enqueuedCount >= MAX_ENQUEUES) {
+            console.log(`Sweeper reached safety limit of ${MAX_ENQUEUES} enqueues. Stopping.`);
+            break;
+        }
         const editalId = editalDoc.id;
         // Check which OSCs already have matches for this Edital
         const matchesQuery = await db.collection('matches')
@@ -1825,15 +1864,16 @@ exports.scheduledMatchSweeper = (0, scheduler_1.onSchedule)('0 0 * * 0', async (
         const matchedOscIds = new Set(matchesQuery.docs.map(doc => doc.data().oscId));
         // Find missing oscIds
         const missingOscIds = oscIds.filter(id => !matchedOscIds.has(id));
-        console.log(`Sweeping ${missingOscIds.length} missing matches for Edital ${editalId}`);
-        const enqueuePromises = missingOscIds.map(oscId => {
+        const oscsToEnqueue = missingOscIds.slice(0, MAX_ENQUEUES - enqueuedCount);
+        console.log(`Sweeping ${oscsToEnqueue.length} missing matches for Edital ${editalId}`);
+        const enqueuePromises = oscsToEnqueue.map(oscId => {
             return queue.enqueue({
                 oscId: oscId,
                 editalId: editalId
             });
         });
         await Promise.all(enqueuePromises);
-        enqueuedCount += missingOscIds.length;
+        enqueuedCount += oscsToEnqueue.length;
     }
     console.log(`Weekly sweeper complete. Enqueued ${enqueuedCount} missing matches.`);
 });
@@ -2492,9 +2532,11 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                         try {
                             const expireAt = new Date();
                             expireAt.setHours(expireAt.getHours() + 24);
+                            // Fix: Guardrail against Firestore 1MB document size limit
+                            const safeHtml = html ? html.substring(0, 500000) : '';
                             await db.collection('scraping_contents').add({
                                 url: fetchUrl,
-                                text: html,
+                                text: safeHtml,
                                 source: 'data_lake_html',
                                 targetId: target.id,
                                 createdAt: firestore_1.FieldValue.serverTimestamp(),
@@ -2565,9 +2607,11 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                             try {
                                 const expireAt = new Date();
                                 expireAt.setHours(expireAt.getHours() + 24);
+                                // Fix: Guardrail against Firestore 1MB document size limit
+                                const safeHtml = html ? html.substring(0, 500000) : '';
                                 await db.collection('scraping_contents').add({
                                     url: fetchUrl,
-                                    text: html,
+                                    text: safeHtml,
                                     source: 'data_lake_auto',
                                     targetId: target.id,
                                     createdAt: firestore_1.FieldValue.serverTimestamp(),
