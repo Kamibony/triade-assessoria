@@ -438,10 +438,12 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
+import { textEmbedding004 } from '@genkit-ai/vertexai';
+
 async function generateTextEmbedding(text: string): Promise<number[]> {
     try {
         const response = await ai.embed({
-            embedder: 'vertexai/text-embedding-004',
+            embedder: textEmbedding004,
             content: text.substring(0, 5000)
         });
         if (Array.isArray(response)) {
