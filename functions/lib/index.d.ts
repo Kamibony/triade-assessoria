@@ -1,31 +1,15 @@
 import { FieldValue } from 'firebase-admin/firestore';
 export declare function formatGenkitError(error: unknown, defaultMessage?: string): HttpsError;
 import { HttpsError } from 'firebase-functions/v2/https';
+export declare const parsePdfProfileWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
 export declare const parsePdfProfileFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
-    name: string;
-    cnpj?: string | undefined;
-    mission?: string | undefined;
-    boardValidity?: string | undefined;
-    foundationDate: string;
-    location: string;
-    documentationStatus: "Em dia" | "Irregular" | "Pendente";
-    previousProjectsApproved: boolean;
-    coreActivities: string[];
-    embedding?: number[] | undefined;
+    trackingId: string;
+    status: string;
 }>, unknown>;
+export declare const extractEditalRulesWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
 export declare const extractEditalRulesFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
-    title: string;
-    issuer: string;
-    publicationDate: string;
-    deadline: string;
-    totalBudget: number;
-    eligibilityCriteria: {
-        minYearsActive: number;
-        requiredLocations: string[];
-        requiredDocumentation: string[];
-        allowedActivities: string[];
-    };
-    embedding?: number[] | undefined;
+    trackingId: string;
+    status: string;
 }>, unknown>;
 export declare const agenticSearchWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
 export declare const matchEvaluatorWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
@@ -45,11 +29,36 @@ export declare const triggerMatchOrchestrator: import("firebase-functions/v2/htt
     id: string;
     oscId: string;
     editalId: string;
+    oscName: any;
+    editalTitle: any;
+    sourceUrl: any;
+    createdAt: FieldValue;
+    matchScore: number;
+    eligibility: boolean;
+    status: string;
+    badges: string[];
+    aiSummary: string;
+    reasoning: null;
+    actionPlan: string[];
+} | {
+    id: string;
+    oscId: string;
+    editalId: string;
     oscName: string;
     editalTitle: string;
     sourceUrl: any;
     createdAt: FieldValue;
-} | null>, unknown>;
+} | {
+    id: string;
+    oscId: any;
+    editalId: any;
+    matchScore: number;
+    eligibility: boolean;
+    status: string;
+    badges: string[];
+    aiSummary: string;
+    reasoning: null;
+}>, unknown>;
 export declare const onOscUpdated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").Change<import("firebase-functions/v2/firestore").QueryDocumentSnapshot> | undefined, {
     oscId: string;
 }>>;
