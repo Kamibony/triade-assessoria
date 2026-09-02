@@ -202,20 +202,29 @@ Responda estritamente em português do Brasil (pt-BR).
 
 
 export const parsePdfProfileFunction = onCall({
-    cors: true
+    cors: true,
+    memory: '512MiB'
 }, async (request) => {
     // TODO: Re-enable auth checks once Auth is implemented.
     // if (!request.auth) {
     //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
     // }
-    return await parsePdfToProfile({ pdfBase64s: request.data.pdfBase64 ? [request.data.pdfBase64] : request.data.pdfBase64s || [] });
+
+    const pdfBase64s = request.data.pdfBase64 ? [request.data.pdfBase64] : request.data.pdfBase64s || [];
+    for (const b64 of pdfBase64s) {
+        if (typeof b64 === 'string' && b64.length > 7000000) {
+            throw new HttpsError('invalid-argument', 'Um dos arquivos PDF excede o limite máximo permitido (aproximadamente 5MB).');
+        }
+    }
+
+    return await parsePdfToProfile({ pdfBase64s });
 });
 
 const selectEditalLinksFlow = ai.defineFlow(
     {
         name: 'selectEditalLinksFlow',
         inputSchema: z.object({
-            links: z.array(z.string()).describe("Lista de URLs pré-filtradas"),
+            links: z.array(z.string()).max(40).describe("Lista de URLs pré-filtradas"),
         }),
         outputSchema: z.object({
             selectedLinks: z.array(z.string()).describe("Apenas os links que parecem apontar para detalhes de editais ou chamadas.")
@@ -360,12 +369,18 @@ async function fetchAndExtractText(url: string): Promise<string> {
 
 
 export const extractEditalRulesFunction = onCall({
-    cors: true
+    cors: true,
+    memory: '512MiB'
 }, async (request) => {
     // TODO: Re-enable auth checks once Auth is implemented.
     // if (!request.auth) {
     //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
     // }
+
+    if (request.data.pdfBase64 && request.data.pdfBase64.length > 7000000) {
+        throw new HttpsError('invalid-argument', 'O arquivo PDF excede o limite máximo permitido (aproximadamente 5MB).');
+    }
+
     return await extractEditalRules(request.data);
 });
 
@@ -1898,7 +1913,7 @@ const copilotFlow = ai.defineFlow(
     {
         name: 'copilotFlow',
         inputSchema: z.object({
-            prompt: z.string().describe("Natural language prompt from the user"),
+            prompt: z.string().max(2000).describe("Natural language prompt from the user"),
         }),
         outputSchema: copilotResponseSchema,
     },
@@ -1936,9 +1951,39 @@ export const askCopilotFunction = onCall({
         throw new HttpsError('unauthenticated', 'User must be authenticated.');
     }
 
+    const uid = request.auth.uid;
+    const db = getFirestore();
+    const userRef = db.collection('users').doc(uid);
+
     const { prompt } = request.data as { prompt: string };
     if (!prompt) {
         throw new HttpsError('invalid-argument', 'O prompt é obrigatório.');
+    }
+    if (prompt.length > 2000) {
+        throw new HttpsError('invalid-argument', 'O prompt excede o limite máximo de 2000 caracteres.');
+    }
+
+    try {
+        await db.runTransaction(async (transaction) => {
+            const userDoc = await transaction.get(userRef);
+            const now = Date.now();
+            if (userDoc.exists) {
+                const data = userDoc.data();
+                if (data && data.lastCopilotRequest) {
+                    const diff = now - data.lastCopilotRequest;
+                    if (diff < 10000) {
+                        throw new HttpsError('resource-exhausted', 'Por favor, aguarde 10 segundos antes de enviar outra solicitação ao Copilot.');
+                    }
+                }
+            }
+            transaction.set(userRef, { lastCopilotRequest: now }, { merge: true });
+        });
+    } catch (error: any) {
+        if (error.code === 'resource-exhausted') {
+            throw error;
+        }
+        console.error('Error checking rate limit:', error);
+        throw new HttpsError('internal', 'Erro interno ao verificar o limite de taxa.');
     }
 
     try {
