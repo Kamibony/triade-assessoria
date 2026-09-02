@@ -116,13 +116,10 @@ export declare const matchSchema: z.ZodObject<{
 }>;
 export declare const triageSchema: z.ZodObject<{
     isValidEdital: z.ZodBoolean;
-    reason: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     isValidEdital: boolean;
-    reason: string;
 }, {
     isValidEdital: boolean;
-    reason: string;
 }>;
 export declare const copilotResponseSchema: z.ZodObject<{
     matchedOscs: z.ZodArray<z.ZodObject<{

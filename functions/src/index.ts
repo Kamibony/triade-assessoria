@@ -291,19 +291,18 @@ NÃO EXIJA que o texto contenha todas as regras ou o regulamento jurídico compl
 Rejeite apenas artigos genéricos de opinião, notícias exclusivas sobre resultados de editais passados ou páginas que não tenham relação com oportunidades de captação de recursos.`;
 
         if (input.searchQuery) {
-            prompt += `\nIMPORTANTE (FILTRO ESTRITO): O operador especificou uma consulta de busca: "${input.searchQuery}". O edital DEVE ser estritamente relacionado a este tema. Se não for, marque isValidEdital = false e justifique.`;
+            prompt += `\nIMPORTANTE (FILTRO ESTRITO): O operador especificou uma consulta de busca: "${input.searchQuery}". O edital DEVE ser estritamente relacionado a este tema. Se não for, marque isValidEdital = false.`;
         }
 
         prompt += `\nResponda com isValidEdital = true se for um edital, landing page ou anúncio oficial de grant E (se houver consulta) se alinhar perfeitamente com a consulta.
-Justifique sua resposta na 'reason'.
-Sempre retorne os dados em português do Brasil (pt-BR).`;
+Provide NO reasoning, NO explanations, and NO thinking steps. Output ONLY the raw JSON.`;
 
         const response = await ai.generate({
             model: 'vertexai/gemini-2.5-flash',
             messages: [
                 { role: 'user', content: [
                     { text: prompt },
-                    { text: `Texto:\n\n${input.text.substring(0, 30000)}` }
+                    { text: `Texto:\n\n${input.text.substring(0, 3000)}` }
                 ]}
             ],
             output: { schema: triageSchema }
@@ -388,7 +387,7 @@ Estratégia OBRIGATÓRIA para as 7 queries:
 - OBRIGATORIAMENTE, em pelo menos 2 das 7 queries, use explicitamente o operador "site:" para focar em domínios governamentais ou institucionais. (ex: site:gov.br edital cultura ${currentYear}).
 
 INSTRUÇÃO DE OPERADORES NEGATIVOS:
-Você DEVE OBRIGATORIAMENTE anexar a seguinte string de operadores negativos no final de TODAS as 7 queries geradas: "-resultado -homologação -notícia -prorrogação -convocação". Isso é essencial para filtrar ruídos do motor de busca.
+Você DEVE OBRIGATORIAMENTE anexar a seguinte string de operadores negativos no final de TODAS as 7 queries geradas: "-resultado -homologação -notícia -prorrogação -convocação (filetype:pdf OR inurl:edital OR \"chamada pública\")". Isso é essencial para filtrar ruídos do motor de busca.
 
 INSTRUÇÃO DE SANITIZAÇÃO DE QUERIES (O ARMADILHA DO NOME):
 Se o nome da ONG contiver o nome explícito de um Estado ou Cidade (ex: "Associação Cultural EITA Paraíba"), você DEVE REMOVER E IGNORAR esse termo geográfico específico ao gerar as queries de tier 3 ("Buscas amplas ou nacionais"). Isso evita forçar o motor de busca para uma bolha local quando o objetivo é buscar editais de abrangência nacional.
@@ -978,7 +977,7 @@ export const agenticSearchWorker = onTaskDispatched({
 
         // Process in chunks of 3 to control concurrency and adhere to Vertex AI rate limits
         const chunkSize = 3;
-        const essentialKeywords = ['edital', 'inscrição', 'inscrições', 'prazo', 'fomento', 'chamada pública', 'financiamento'];
+        const essentialKeywords = ['edital', 'inscrição', 'inscrições', 'prazo', 'cronograma', 'fomento', 'chamada pública', 'financiamento'];
 
         // Phase 1: Pre-filtering and Scoring (Steps A & B)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1098,10 +1097,10 @@ export const agenticSearchWorker = onTaskDispatched({
                 }
 
                 // Step D: LLM Triage (High Cost)
-                fullTextToAnalyze = fullTextToAnalyze.substring(0, 10000); // Truncate to reduce token cost
+                fullTextToAnalyze = fullTextToAnalyze.substring(0, 3000); // Truncate to reduce token cost
                 const triageResult = await triageEditalWebpage({ text: fullTextToAnalyze, searchQuery: r.query });
                 if (triageResult.isValidEdital) {
-                    await enqueueEditalExtraction(link, fullTextToAnalyze, triageResult.reason, oscId);
+                    await enqueueEditalExtraction(link, fullTextToAnalyze, "Edital válido", oscId);
                     console.log(`Successfully enqueued agentic extraction for ${link}`);
                     totalValidEditaisEnqueued++;
                     methodBreakdown.web++;
@@ -1109,11 +1108,7 @@ export const agenticSearchWorker = onTaskDispatched({
                         queryPerformance[r.query] = (queryPerformance[r.query] || 0) + 1;
                     }
                 } else {
-                    if (triageResult.reason.toLowerCase().includes('expirado') || triageResult.reason.toLowerCase().includes('encerrado')) {
-                        rejections.expired++;
-                    } else {
-                        rejections.out_of_scope++;
-                    }
+                    rejections.out_of_scope++;
                 }
             }));
 
@@ -1544,7 +1539,7 @@ async function routeEditalUrl(url: string, sourceContext: string, searchId?: str
 
         // Heuristic Pre-filter
         const textLower = text.toLowerCase();
-        const essentialKeywords = ['edital', 'inscrição', 'inscrições', 'prazo', 'fomento', 'chamada pública', 'financiamento'];
+        const essentialKeywords = ['edital', 'inscrição', 'inscrições', 'prazo', 'cronograma', 'fomento', 'chamada pública', 'financiamento'];
         const hasKeyword = essentialKeywords.some(kw => textLower.includes(kw));
 
         if (!hasKeyword) {
@@ -1555,10 +1550,10 @@ async function routeEditalUrl(url: string, sourceContext: string, searchId?: str
 
         if (triageResult.isValidEdital) {
             // Only fall back to sourceContext if searchId is strictly undefined
-            await enqueueEditalExtraction(url, text, triageResult.reason, searchId !== undefined ? searchId : sourceContext);
-            return { success: true, message: triageResult.reason };
+            await enqueueEditalExtraction(url, text, "Edital válido", searchId !== undefined ? searchId : sourceContext);
+            return { success: true, message: "Edital válido" };
         } else {
-            return { success: false, message: triageResult.reason };
+            return { success: false, message: "Edital inválido" };
         }
     } catch (error) {
         logger.error(`[Smart Router] Error processing link ${url}:`, error);
