@@ -131,13 +131,25 @@ Extraia as informações necessárias e preencha o perfil da ONG (ngoProfileSche
 Você DEVE extrair o CNPJ, Nome (Legal Name), Missão/Foco de atuação (do Estatuto) e a Validade da Diretoria (da ATA).
 Se o documento não mencionar o status da documentação, presuma 'Pendente'. Se não houver clareza sobre projetos anteriores, presuma falso.
 Sempre retorne os dados em português do Brasil (pt-BR).`;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const content = [{ text: prompt }];
+    for (let i = 0; i < input.pdfBase64s.length; i++) {
+        try {
+            const base64String = input.pdfBase64s[i] || '';
+            if (!base64String)
+                continue;
+            const pdfBuffer = Buffer.from(base64String, 'base64');
+            const pdfData = await pdfParse(pdfBuffer, { max: 10 });
+            content.push({ text: `Conteúdo do Documento ${i + 1}:\n\n${pdfData.text.substring(0, 15000)}` });
+        }
+        catch (error) {
+            console.warn(`Falha ao analisar o PDF base64 no índice ${i}:`, error);
+        }
+    }
     const response = await ai.generate({
         model: 'vertexai/gemini-2.5-flash',
         messages: [
-            { role: 'user', content: [
-                    { text: prompt },
-                    ...input.pdfBase64s.map(pdf => ({ media: { url: `data:application/pdf;base64,${pdf}` } }))
-                ] }
+            { role: 'user', content: content }
         ],
         output: { schema: schemas_js_1.ngoProfileSchema }
     });
@@ -167,7 +179,7 @@ A sua tarefa é cruzar os dados de uma ONG com as regras e critérios de elegibi
 Fase 1 (Gate 1): Validação Temporal / Status
 Verifique agressivamente se o edital já passou do prazo final (ex: "inscrições encerradas", ou se a data limite de inscrição já passou em relação à data atual do sistema fornecida acima).
 Check the current date. If the edital's application deadline has passed, or if the page indicates 'Encerrado', 'Resultados', or 'Prorrogado' (for a past date), you MUST immediately halt evaluation, assign a final score of 0%, and set the status to 'Inelegível'. Do NOT average the score with thematic fit.
-SE O EDITAL ESTIVER ENCERRADO OU COM PRAZO EXPIRADO, você DEVE gerar um 'matchScore' de 0, determinar 'eligibility' como false, e a primeira frase do 'reasoning' DEVE ser EXATAMENTE: "Edital Encerrado / Prazo expirado." e pular a Fase 2.
+SE O EDITAL ESTIVER ENCERRADO OU COM PRAZO EXPIRADO, você DEVE gerar um 'matchScore' de 0, determinar 'eligibility' como false. IMPORTANTE: Nesse caso, retorne 'reasoning: null' e NÃO gere um 'actionPlan' para poupar tokens, pule a Fase 2.
 
 Fase 2 (Gate 2): Alinhamento Temático (Apenas se passar pela Fase 1)
 Avalie os critérios de elegibilidade abaixo cruzando a ONG com o Edital e gere um 'matchScore' de 0 a 100 indicando o grau de compatibilidade (Alinhamento Temático), se e somente se o edital for considerado Válido / Aberto na Fase 1. Determine 'eligibility' (true ou false).
@@ -189,10 +201,10 @@ Critérios de Elegibilidade:
 - Documentação exigida: ${input.edital.eligibilityCriteria.requiredDocumentation.join(', ')}
 - Atividades permitidas: ${input.edital.eligibilityCriteria.allowedActivities.join(', ')}
 
-Forneça um 'reasoning' (justificativa detalhada para a nota e elegibilidade).
+Se a ONG for ELEGÍVEL e o score for > 0, forneça um 'reasoning' (justificativa detalhada).
 Forneça um 'aiSummary' (um resumo de 1-2 frases destacando os pontos fortes ou fracos).
 Forneça um 'badges' (2 a 3 tags curtas que categorizam o match, ex: 'Alta Aderência', 'Desafio Financeiro', 'Foco Regional').
-Se a ONG for INELEGÍVEL ou tiver nota baixa, você DEVE gerar um 'actionPlan' (Plano de Ação) estruturado.
+Se a ONG for INELEGÍVEL (0 de score) não gere actionPlan nem reasoning. Se for elegível e com score baixo mas passível de melhora, gere o actionPlan.
 Responda estritamente em português do Brasil (pt-BR).
 `;
     const response = await ai.generate({
@@ -263,10 +275,20 @@ Sempre retorne os dados no formato estruturado solicitado em português do Brasi
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const content = [{ text: prompt }];
     if (input.pdfBase64) {
-        content.push({ media: { url: `data:application/pdf;base64,${input.pdfBase64}` } });
+        try {
+            const pdfBuffer = Buffer.from(input.pdfBase64, 'base64');
+            const pdfData = await pdfParse(pdfBuffer, { max: 10 });
+            const extractedText = pdfData.text.substring(0, 15000);
+            content.push({ text: `Texto extraído do PDF:\n\n${extractedText}` });
+        }
+        catch (error) {
+            console.error("Falha ao analisar o PDF base64:", error);
+            throw new Error("Falha ao analisar o PDF fornecido.");
+        }
     }
     else if (input.text) {
-        content.push({ text: `Texto do edital:\n\n${input.text}` });
+        const truncatedText = input.text.substring(0, 15000);
+        content.push({ text: `Texto do edital:\n\n${truncatedText}` });
     }
     const response = await ai.generate({
         model: 'vertexai/gemini-2.5-flash',
@@ -1627,21 +1649,24 @@ const searchDatabaseTool = ai.defineTool({
     })
 }, async (input) => {
     const db = (0, firestore_1.getFirestore)();
-    // Fetch up to 10 editais for context
-    const editaisSnapshot = await db.collection('editais').limit(10).get();
+    // Fetch up to 5 editais for context
+    const editaisSnapshot = await db.collection('editais').limit(5).get();
     const editais = editaisSnapshot.docs.map(doc => ({
-        ...doc.data(),
+        title: doc.data().title,
+        importantDates: doc.data().importantDates,
         editalId: doc.id
-    }));
+    })); // Cast as any to bypass strict schema for minimal response
     // Fetch NGOs with basic filtering
     const oscsQuery = db.collection('oscs');
     // We will just fetch a chunk and filter in memory if queries get complex,
-    // or apply simple filters
-    const oscsSnapshot = await oscsQuery.limit(input.limit || 50).get();
+    // or apply simple filters (Cap limit strictly to 5)
+    const safeLimit = Math.min(input.limit || 5, 5);
+    const oscsSnapshot = await oscsQuery.limit(safeLimit).get();
     let oscs = oscsSnapshot.docs.map(doc => ({
-        ...doc.data(),
+        name: doc.data().name,
+        location: doc.data().location,
         oscId: doc.id
-    }));
+    })); // Cast as any to bypass strict schema for minimal response
     // Apply basic in-memory filters for simplicity given complex NoSQL querying constraints
     if (input.city) {
         const lowerCity = input.city.toLowerCase();

@@ -34,10 +34,10 @@ export const matchSchema = z.object({
     oscName: z.string().optional().describe("Nome da ONG analisada"),
     matchScore: z.number().min(0).max(100).describe("Score de match entre a ONG e o Edital (0 a 100)"),
     eligibility: z.boolean().describe("Se a ONG é elegível (true) ou não (false)"),
-    reasoning: z.string().describe("Justificativa detalhada do AI para o score e elegibilidade"),
+    reasoning: z.string().nullable().optional().describe("Justificativa detalhada do AI para o score e elegibilidade (nulo se falhar no portão 1 ou inelegível)"),
     aiSummary: z.string().optional().describe("Um resumo conciso de 1-2 frases sobre a compatibilidade"),
     badges: z.array(z.string()).optional().describe("Lista de tags ou selos (ex: 'Alto Alinhamento', 'Prazo Curto', 'Regional')"),
-    actionPlan: z.array(z.string()).optional().describe("Plano de Ação sugerido caso a ONG não seja elegível ou tenha score baixo")
+    actionPlan: z.array(z.string()).optional().describe("Plano de Ação sugerido caso a ONG não seja elegível ou tenha score baixo (opcional/pular para poupar tokens se inelegível claro)")
 });
 
 export const triageSchema = z.object({
