@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.parsePdfProfileFunction = void 0;
+exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = void 0;
 exports.formatGenkitError = formatGenkitError;
 process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -222,10 +222,35 @@ Responda estritamente em português do Brasil (pt-BR).
         oscId: input.oscId
     };
 });
+exports.parsePdfProfileWorker = (0, tasks_1.onTaskDispatched)({
+    retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
+    rateLimits: { maxConcurrentDispatches: 2 },
+    timeoutSeconds: 540,
+    memory: '2GiB'
+}, async (request) => {
+    const { pdfBase64s, trackingId } = request.data;
+    const db = (0, firestore_1.getFirestore)();
+    const trackingRef = db.collection('pdf_extractions').doc(trackingId);
+    try {
+        const result = await parsePdfToProfile({ pdfBase64s });
+        await trackingRef.set({
+            status: 'completed',
+            result: result,
+            updatedAt: firestore_1.FieldValue.serverTimestamp()
+        }, { merge: true });
+    }
+    catch (error) {
+        console.error(`Error in parsePdfProfileWorker for ${trackingId}:`, error);
+        await trackingRef.set({
+            status: 'error',
+            error: error instanceof Error ? error.message : 'Unknown error',
+            updatedAt: firestore_1.FieldValue.serverTimestamp()
+        }, { merge: true });
+        throw error;
+    }
+});
 exports.parsePdfProfileFunction = (0, https_1.onCall)({
     cors: true,
-    memory: '2GiB',
-    concurrency: 2
 }, async (request) => {
     // TODO: Re-enable auth checks once Auth is implemented.
     // if (!request.auth) {
@@ -237,7 +262,19 @@ exports.parsePdfProfileFunction = (0, https_1.onCall)({
             throw new https_1.HttpsError('invalid-argument', 'Um dos arquivos PDF excede o limite máximo permitido (aproximadamente 5MB).');
         }
     }
-    return await parsePdfToProfile({ pdfBase64s });
+    const db = (0, firestore_1.getFirestore)();
+    const trackingRef = db.collection('pdf_extractions').doc();
+    await trackingRef.set({
+        status: 'pending',
+        type: 'profile_extraction',
+        createdAt: firestore_1.FieldValue.serverTimestamp()
+    });
+    const queue = (0, functions_1.getFunctions)().taskQueue('parsePdfProfileWorker');
+    await queue.enqueue({
+        pdfBase64s: pdfBase64s,
+        trackingId: trackingRef.id
+    });
+    return { trackingId: trackingRef.id, status: 'pending' };
 });
 const selectEditalLinksFlow = ai.defineFlow({
     name: 'selectEditalLinksFlow',
@@ -363,10 +400,35 @@ async function fetchAndExtractText(url) {
         return "";
     }
 }
+exports.extractEditalRulesWorker = (0, tasks_1.onTaskDispatched)({
+    retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
+    rateLimits: { maxConcurrentDispatches: 2 },
+    timeoutSeconds: 540,
+    memory: '2GiB'
+}, async (request) => {
+    const { data, trackingId } = request.data;
+    const db = (0, firestore_1.getFirestore)();
+    const trackingRef = db.collection('pdf_extractions').doc(trackingId);
+    try {
+        const result = await extractEditalRules(data);
+        await trackingRef.set({
+            status: 'completed',
+            result: result,
+            updatedAt: firestore_1.FieldValue.serverTimestamp()
+        }, { merge: true });
+    }
+    catch (error) {
+        console.error(`Error in extractEditalRulesWorker for ${trackingId}:`, error);
+        await trackingRef.set({
+            status: 'error',
+            error: error instanceof Error ? error.message : 'Unknown error',
+            updatedAt: firestore_1.FieldValue.serverTimestamp()
+        }, { merge: true });
+        throw error;
+    }
+});
 exports.extractEditalRulesFunction = (0, https_1.onCall)({
     cors: true,
-    memory: '2GiB',
-    concurrency: 2
 }, async (request) => {
     // TODO: Re-enable auth checks once Auth is implemented.
     // if (!request.auth) {
@@ -375,7 +437,19 @@ exports.extractEditalRulesFunction = (0, https_1.onCall)({
     if (request.data.pdfBase64 && request.data.pdfBase64.length > 7000000) {
         throw new https_1.HttpsError('invalid-argument', 'O arquivo PDF excede o limite máximo permitido (aproximadamente 5MB).');
     }
-    return await extractEditalRules(request.data);
+    const db = (0, firestore_1.getFirestore)();
+    const trackingRef = db.collection('pdf_extractions').doc();
+    await trackingRef.set({
+        status: 'pending',
+        type: 'rules_extraction',
+        createdAt: firestore_1.FieldValue.serverTimestamp()
+    });
+    const queue = (0, functions_1.getFunctions)().taskQueue('extractEditalRulesWorker');
+    await queue.enqueue({
+        data: request.data,
+        trackingId: trackingRef.id
+    });
+    return { trackingId: trackingRef.id, status: 'pending' };
 });
 const firestore_2 = require("firebase-functions/v2/firestore");
 const generateSearchQueries = ai.defineFlow({
@@ -501,29 +575,6 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
     };
     const oscParseResult = schemas_js_1.ngoProfileSchema.safeParse(enrichedOscData);
     const editalParseResult = schemas_js_1.editalSchema.safeParse(rawEditalData);
-    if (!oscParseResult.success) {
-        console.warn(`Invalid OSC data for ${oscId} (Skipping match safely):`, oscParseResult.error);
-        // Silently return instead of throwing to prevent infinite retry loops in Cloud Tasks
-        return null;
-    }
-    if (!editalParseResult.success) {
-        console.warn(`Invalid Edital data for ${editalId} (Skipping match safely):`, editalParseResult.error);
-        return null;
-    }
-    const oscData = oscParseResult.data;
-    const editalData = editalParseResult.data;
-    // Check for existing match
-    const matchesQuery = await db.collection('matches')
-        .where('oscId', '==', oscId)
-        .where('editalId', '==', editalId)
-        .limit(1)
-        .get();
-    let existingMatchRef = null;
-    let existingMatchData = null;
-    if (!matchesQuery.empty) {
-        existingMatchRef = matchesQuery.docs[0]?.ref || null;
-        existingMatchData = matchesQuery.docs[0]?.data() || null;
-    }
     // Helper for safe timestamp extraction
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const getMillis = (field) => {
@@ -540,6 +591,46 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
         }
         return null;
     };
+    // Check for existing match
+    const matchesQuery = await db.collection('matches')
+        .where('oscId', '==', oscId)
+        .where('editalId', '==', editalId)
+        .limit(1)
+        .get();
+    let existingMatchRef = null;
+    let existingMatchData = null;
+    if (!matchesQuery.empty) {
+        existingMatchRef = matchesQuery.docs[0]?.ref || null;
+        existingMatchData = matchesQuery.docs[0]?.data() || null;
+    }
+    if (!oscParseResult.success) {
+        console.warn(`Invalid OSC data for ${oscId} (Writing Incomplete Profile match safely):`, oscParseResult.error);
+        const matchRef = existingMatchRef || db.collection('matches').doc();
+        const incompleteMatchDoc = {
+            id: matchRef.id,
+            oscId: oscId,
+            editalId: editalId,
+            oscName: enrichedOscData.name || 'ONG Desconhecida',
+            editalTitle: rawEditalData?.title || 'Edital Desconhecido',
+            sourceUrl: rawEditalData?.sourceUrl || null,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+            matchScore: 0,
+            eligibility: false,
+            status: 'Inelegível (Dados Incompletos)',
+            badges: ['Perfil Incompleto'],
+            aiSummary: 'A avaliação não pôde ser concluída porque os dados da OSC estão incompletos ou inválidos.',
+            reasoning: null,
+            actionPlan: ['Atualize os dados do perfil da OSC para permitir a avaliação de match.']
+        };
+        await matchRef.set(incompleteMatchDoc, { merge: true });
+        return incompleteMatchDoc;
+    }
+    if (!editalParseResult.success) {
+        console.warn(`Invalid Edital data for ${editalId} (Skipping match safely):`, editalParseResult.error);
+        return null;
+    }
+    const oscData = oscParseResult.data;
+    const editalData = editalParseResult.data;
     // Fix 6: Robust timestamp validation for caching
     let shouldRecalculate = forceRecalculate;
     if (!shouldRecalculate && existingMatchData) {
@@ -1080,7 +1171,7 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                 fullTextToAnalyze = fullTextToAnalyze.substring(0, 3000); // Truncate to reduce token cost
                 const triageResult = await triageEditalWebpage({ text: fullTextToAnalyze, searchQuery: r.query });
                 if (triageResult.isValidEdital) {
-                    await enqueueEditalExtraction(link, fullTextToAnalyze, "Edital válido", oscId);
+                    await enqueueEditalExtraction(link, fullTextToAnalyze, "Edital válido", jobId || `AGENTIC_${oscId}`);
                     console.log(`Successfully enqueued agentic extraction for ${link}`);
                     totalValidEditaisEnqueued++;
                     methodBreakdown.web++;
@@ -1510,12 +1601,34 @@ exports.triggerMatchOrchestrator = (0, https_1.onCall)({
     }
     try {
         const matchResult = await processMatchEvaluation(oscId, editalId, forceRecalculate);
+        if (matchResult === null) {
+            return {
+                id: `error_${oscId}_${editalId}`,
+                oscId: oscId,
+                editalId: editalId,
+                matchScore: 0,
+                eligibility: false,
+                status: 'Inelegível (Falha no Processamento)',
+                badges: ['Erro'],
+                aiSummary: 'A avaliação falhou inesperadamente.',
+                reasoning: null
+            };
+        }
         return matchResult;
     }
     catch (error) {
         console.error('Error generating match:', error);
-        const errorMessage = error instanceof Error ? error.message : 'Internal error generating match.';
-        throw new https_1.HttpsError('internal', errorMessage);
+        return {
+            id: `error_${oscId}_${editalId}`,
+            oscId: oscId,
+            editalId: editalId,
+            matchScore: 0,
+            eligibility: false,
+            status: 'Inelegível (Erro no Servidor)',
+            badges: ['Erro'],
+            aiSummary: 'Erro interno ao processar avaliação.',
+            reasoning: null
+        };
     }
 });
 exports.onOscUpdated = (0, firestore_2.onDocumentUpdated)('oscs/{oscId}', async (event) => {
@@ -1837,36 +1950,52 @@ exports.manualTriggerRssSyncFunction = (0, https_1.onCall)({
 });
 exports.scheduledMatchSweeper = (0, scheduler_1.onSchedule)('0 0 * * 0', async () => {
     const db = (0, firestore_1.getFirestore)();
-    // Safety Limit: Only sweep editais created in the last 7 days to avoid unbounded cartesian joins
+    // Safety Limit: Only sweep editais created in the last 7 days
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
     const editaisSnapshot = await db.collection('editais')
         .where('createdAt', '>=', oneWeekAgo)
-        .limit(50) // Hard cap to prevent runaway loops
-        .get();
-    const oscsSnapshot = await db.collection('oscs')
-        .limit(100) // Hard cap to prevent runaway cartesian joins with editais
         .get();
     const queue = (0, functions_1.getFunctions)().taskQueue('matchEvaluatorWorker');
-    const oscIds = oscsSnapshot.docs.map(doc => doc.id);
     let enqueuedCount = 0;
-    const MAX_ENQUEUES = 500; // Global fail-safe limit for the sweeper
+    const MAX_ENQUEUES = 2000; // Global fail-safe limit for the sweeper
     for (const editalDoc of editaisSnapshot.docs) {
         if (enqueuedCount >= MAX_ENQUEUES) {
             console.log(`Sweeper reached safety limit of ${MAX_ENQUEUES} enqueues. Stopping.`);
             break;
         }
         const editalId = editalDoc.id;
+        const editalData = editalDoc.data();
+        const editalEmbedding = editalData.embedding;
+        if (!editalEmbedding || !Array.isArray(editalEmbedding) || editalEmbedding.length === 0) {
+            console.log(`Skipping edital ${editalId} because it lacks a valid embedding.`);
+            continue;
+        }
         // Check which OSCs already have matches for this Edital
         const matchesQuery = await db.collection('matches')
             .where('editalId', '==', editalId)
             .get();
         const matchedOscIds = new Set(matchesQuery.docs.map(doc => doc.data().oscId));
+        // Retrieve top 50 nearest OSCs using Vector Search
+        let oscsSnapshot;
+        try {
+            // Note: findNearest is available in Node.js Firestore SDK for Vector Search
+            // We'll fallback to a regular query if not supported by types yet, but standard @google-cloud/firestore should support it
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            oscsSnapshot = await db.collection('oscs')
+                .findNearest('embedding', editalEmbedding, { limit: 50, distanceMeasure: 'COSINE' })
+                .get();
+        }
+        catch (error) {
+            console.error(`Vector search failed for edital ${editalId}:`, error);
+            continue;
+        }
+        const oscIds = oscsSnapshot.docs.map((doc) => doc.id);
         // Find missing oscIds
-        const missingOscIds = oscIds.filter(id => !matchedOscIds.has(id));
+        const missingOscIds = oscIds.filter((id) => !matchedOscIds.has(id));
         const oscsToEnqueue = missingOscIds.slice(0, MAX_ENQUEUES - enqueuedCount);
         console.log(`Sweeping ${oscsToEnqueue.length} missing matches for Edital ${editalId}`);
-        const enqueuePromises = oscsToEnqueue.map(oscId => {
+        const enqueuePromises = oscsToEnqueue.map((oscId) => {
             return queue.enqueue({
                 oscId: oscId,
                 editalId: editalId
@@ -2376,12 +2505,18 @@ exports.prosasAuthenticatedWorker = (0, tasks_1.onTaskDispatched)({
         const failuresRef = db.collection('failed_ingestions');
         const querySnapshot = await failuresRef.where('url', '==', url).limit(1).get();
         const retryCount = request.retryCount || 0;
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        if (errorMessage === 'Prosas session expired. Need to renew session.') {
+            logger.warn(`[Prosas Auth Worker] Handling session expiry. Skipping permanent circuit breaker.`);
+            // Throw error so it can be retried eventually (possibly after cron runs again), but avoid permanent block
+            throw error;
+        }
         if (retryCount >= 2) {
             logger.error(`[Prosas Auth Worker] Circuit Breaker triggered for ${url} after ${retryCount + 1} attempts.`);
             if (querySnapshot.empty) {
                 await failuresRef.add({
                     url: url,
-                    reason: error instanceof Error ? error.message : 'Unknown error',
+                    reason: errorMessage,
                     failedAt: firestore_1.FieldValue.serverTimestamp(),
                     isPermanent: true
                 });
@@ -2390,7 +2525,7 @@ exports.prosasAuthenticatedWorker = (0, tasks_1.onTaskDispatched)({
                 await querySnapshot.docs[0].ref.update({
                     failedAt: firestore_1.FieldValue.serverTimestamp(),
                     isPermanent: true,
-                    reason: error instanceof Error ? error.message : 'Unknown error'
+                    reason: errorMessage
                 });
             }
             // Don't throw to stop retrying
