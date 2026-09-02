@@ -40,8 +40,7 @@ exports.matchSchema = zod_1.z.object({
     actionPlan: zod_1.z.array(zod_1.z.string()).optional().describe("Plano de Ação sugerido caso a ONG não seja elegível ou tenha score baixo")
 });
 exports.triageSchema = zod_1.z.object({
-    isValidEdital: zod_1.z.boolean().describe("True se a página contiver as regras de um edital ou for o documento oficial do edital. False se for apenas uma notícia SOBRE o edital."),
-    reason: zod_1.z.string().describe("Justificativa para a decisão")
+    isValidEdital: zod_1.z.boolean().describe("True se a página contiver as regras de um edital ou for o documento oficial do edital. False se for apenas uma notícia SOBRE o edital.")
 });
 exports.copilotResponseSchema = zod_1.z.object({
     matchedOscs: zod_1.z.array(zod_1.z.object({

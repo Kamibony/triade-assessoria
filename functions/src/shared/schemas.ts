@@ -41,8 +41,7 @@ export const matchSchema = z.object({
 });
 
 export const triageSchema = z.object({
-    isValidEdital: z.boolean().describe("True se a página contiver as regras de um edital ou for o documento oficial do edital. False se for apenas uma notícia SOBRE o edital."),
-    reason: z.string().describe("Justificativa para a decisão")
+    isValidEdital: z.boolean().describe("True se a página contiver as regras de um edital ou for o documento oficial do edital. False se for apenas uma notícia SOBRE o edital.")
 });
 
 export const copilotResponseSchema = z.object({
