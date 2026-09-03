@@ -1736,10 +1736,10 @@ async function routeEditalUrl(url: string, sourceContext: string, searchId?: str
 
 async function enqueueEditalExtraction(link: string, text: string, reason: string, searchId?: string) {
     const db = getFirestore();
-    // Guardrail: Truncate text to 10000 characters to prevent LLM token exhaustion
-    if (text && text.length > 10000) {
-        logger.info(`[Guardrail] Truncating text for ${link} from ${text.length} to 10000 characters.`);
-        text = text.substring(0, 10000);
+    // Guardrail: Truncate text to 3000 characters to prevent LLM token exhaustion
+    if (text && text.length > 3000) {
+        logger.info(`[Guardrail] Truncating text for ${link} from ${text.length} to 3000 characters.`);
+        text = text.substring(0, 3000);
     }
     const tempContentRef = db.collection('scraping_contents').doc();
 
@@ -2613,8 +2613,9 @@ export const extractionWorker = onTaskDispatched({
             const docRef = await db.collection('editais').add(editalDocData);
 
             if (searchRef) {
+                const safeReason = reason ? reason.substring(0, 200) : '';
                 await searchRef.set({
-                    logs: FieldValue.arrayUnion({ link, status: 'Importado', reason: reason }),
+                    logs: FieldValue.arrayUnion({ link, status: 'Importado', reason: safeReason }),
                     savedCount: FieldValue.increment(1)
                 }, { merge: true });
             }
@@ -2650,8 +2651,10 @@ export const extractionWorker = onTaskDispatched({
     } catch (error) {
         console.error(`Error in extractionWorker for link ${link}:`, error);
         if (searchRef) {
+            const rawErrorMsg = error instanceof Error ? error.message : 'Erro desconhecido na extração';
+            const safeErrorMsg = rawErrorMsg ? rawErrorMsg.substring(0, 200) : '';
             await searchRef.set({
-                logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: error instanceof Error ? error.message : 'Erro desconhecido na extração' })
+                logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: safeErrorMsg })
             }, { merge: true });
         }
         throw error;
@@ -2997,26 +3000,6 @@ export const processScrapingTargetWorker = onTaskDispatched({
                         }
 
                         if (isOk) {
-                            try {
-                                const expireAt = new Date();
-                                expireAt.setHours(expireAt.getHours() + 24);
-
-                                // Fix: Guardrail against Firestore 1MB document size limit
-                                const safeHtml = html ? html.substring(0, 500000) : '';
-
-                                await db.collection('scraping_contents').add({
-                                    url: fetchUrl,
-                                    text: safeHtml,
-                                    source: 'data_lake_html',
-                                    targetId: target.id,
-                                    createdAt: FieldValue.serverTimestamp(),
-                                    expireAt: expireAt
-                                });
-                                logger.info(`[Data Lake] Raw HTML dumped to scraping_contents for: ${fetchUrl}`);
-                            } catch (err) {
-                                logger.error(`[Data Lake] Error dumping raw HTML to scraping_contents for: ${fetchUrl}`, err);
-                            }
-
                         const $ = cheerio.load(html);
                         const selector = target.cssSelector || 'a';
 
@@ -3075,26 +3058,6 @@ export const processScrapingTargetWorker = onTaskDispatched({
                         }
 
                         if (isOk) {
-                            try {
-                                const expireAt = new Date();
-                                expireAt.setHours(expireAt.getHours() + 24);
-
-                                // Fix: Guardrail against Firestore 1MB document size limit
-                                const safeHtml = html ? html.substring(0, 500000) : '';
-
-                                await db.collection('scraping_contents').add({
-                                    url: fetchUrl,
-                                    text: safeHtml,
-                                    source: 'data_lake_auto',
-                                    targetId: target.id,
-                                    createdAt: FieldValue.serverTimestamp(),
-                                    expireAt: expireAt
-                                });
-                                logger.info(`[Data Lake] Raw Content dumped to scraping_contents for: ${fetchUrl}`);
-                            } catch (err) {
-                                logger.error(`[Data Lake] Error dumping raw content to scraping_contents for: ${fetchUrl}`, err);
-                            }
-
                             if (contentType.includes('xml') || contentType.includes('rss')) {
                                 try {
                                     const parser = new Parser();
@@ -3171,20 +3134,23 @@ export const processScrapingTargetWorker = onTaskDispatched({
 
             try {
                 const routeResult = await routeEditalUrl(link, searchId, searchId, { searchQuery: query });
+                const safeReason = routeResult.message ? routeResult.message.substring(0, 200) : '';
 
                 if (routeResult.success) {
                     await searchRef.update({
-                        logs: FieldValue.arrayUnion({ link, status: 'Em Processamento (Extração)', reason: routeResult.message })
+                        logs: FieldValue.arrayUnion({ link, status: 'Em Processamento (Extração)', reason: safeReason })
                     });
                 } else {
                     await searchRef.update({
-                        logs: FieldValue.arrayUnion({ link, status: 'Ignorado/Rejeitado', reason: routeResult.message })
+                        logs: FieldValue.arrayUnion({ link, status: 'Ignorado/Rejeitado', reason: safeReason })
                     });
                 }
             } catch (error) {
                 console.error(`Error processing link ${link} from ${target.name}:`, error);
+                const rawErrorMsg = error instanceof Error ? error.message : 'Erro desconhecido';
+                const safeErrorMsg = rawErrorMsg ? rawErrorMsg.substring(0, 200) : '';
                 await searchRef.update({
-                    logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: error instanceof Error ? error.message : 'Erro desconhecido' })
+                    logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: safeErrorMsg })
                 });
             }
             totalProcessed++;
