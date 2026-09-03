@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { getFirestore, collection, onSnapshot, query, deleteDoc, doc, updateDoc } from 'firebase/firestore';
-import { Loader2, Search, Trash2, Edit, X } from 'lucide-react';
+import { Loader2, Search, Trash2, Edit, X, Building2, MapPin, Activity } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/Button';
 import type { NgoProfile } from '../lib/types';
@@ -98,6 +98,49 @@ export function OscDirectoryView() {
     }
   };
 
+  const stats = useMemo(() => {
+    const total = oscs.length;
+
+    const locations: Record<string, number> = {};
+    let topLocation = 'N/A';
+    let topLocationCount = 0;
+
+    const activities: Record<string, number> = {};
+    let topActivity = 'N/A';
+    let topActivityCount = 0;
+
+    oscs.forEach(osc => {
+      if (osc.location) {
+        // Extract state if format is "City - ST" or just use location
+        const stateMatch = osc.location.match(/-\s*([A-Z]{2})$/i);
+        const locKey = stateMatch ? stateMatch[1].toUpperCase() : osc.location;
+        locations[locKey] = (locations[locKey] || 0) + 1;
+        if (locations[locKey] > topLocationCount) {
+          topLocationCount = locations[locKey];
+          topLocation = locKey;
+        }
+      }
+
+      if (osc.coreActivities) {
+        osc.coreActivities.forEach(act => {
+          activities[act] = (activities[act] || 0) + 1;
+          if (activities[act] > topActivityCount) {
+            topActivityCount = activities[act];
+            topActivity = act;
+          }
+        });
+      }
+    });
+
+    return {
+      total,
+      topLocation,
+      topLocationCount,
+      topActivity,
+      topActivityCount
+    };
+  }, [oscs]);
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -108,33 +151,69 @@ export function OscDirectoryView() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row gap-4 justify-between items-center bg-card p-4 rounded-lg border">
-        <div className="relative w-full md:w-96">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder="Buscar por Nome ou CNPJ..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="bg-card p-4 rounded-lg border shadow-sm flex items-center space-x-4">
+          <div className="p-3 bg-primary/10 rounded-full text-primary">
+            <Building2 className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground font-medium">OSCs Ativas</p>
+            <p className="text-2xl font-bold">{stats.total}</p>
+          </div>
         </div>
-
-        <div className="w-full md:w-64">
-          <select
-            value={activityFilter}
-            onChange={(e) => setActivityFilter(e.target.value)}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <option value="">Todas as Atividades</option>
-            {allActivities.map(act => (
-              <option key={act} value={act}>{act}</option>
-            ))}
-          </select>
+        <div className="bg-card p-4 rounded-lg border shadow-sm flex items-center space-x-4">
+          <div className="p-3 bg-osc/10 rounded-full text-osc">
+            <MapPin className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground font-medium">Principal Região</p>
+            <p className="text-xl font-bold truncate max-w-[150px]" title={stats.topLocation}>{stats.topLocation}</p>
+            <p className="text-xs text-muted-foreground">{stats.topLocationCount} organizações</p>
+          </div>
+        </div>
+        <div className="bg-card p-4 rounded-lg border shadow-sm flex items-center space-x-4">
+          <div className="p-3 bg-green-500/10 rounded-full text-green-500">
+            <Activity className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground font-medium">Maior Atuação</p>
+            <p className="text-lg font-bold truncate max-w-[150px]" title={stats.topActivity}>{stats.topActivity}</p>
+            <p className="text-xs text-muted-foreground">{stats.topActivityCount} organizações</p>
+          </div>
         </div>
       </div>
 
-      <div className="bg-card rounded-lg border shadow-sm overflow-hidden">
+      <div className="bg-card rounded-lg border shadow-sm overflow-hidden flex flex-col">
+        <div className="p-4 border-b bg-muted/20 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+          <div className="text-sm font-medium text-muted-foreground flex items-center">
+            Mostrando <span className="font-bold text-foreground mx-1">{filteredOscs.length}</span> de <span className="font-bold text-foreground mx-1">{oscs.length}</span> organizações
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Buscar por Nome ou CNPJ..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+            <div className="w-full sm:w-48">
+              <select
+                value={activityFilter}
+                onChange={(e) => setActivityFilter(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">Todas as Atividades</option>
+                {allActivities.map(act => (
+                  <option key={act} value={act}>{act}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
             <thead className="bg-muted/50 text-muted-foreground">
@@ -188,9 +267,6 @@ export function OscDirectoryView() {
               )}
             </tbody>
           </table>
-        </div>
-        <div className="p-4 border-t text-xs text-muted-foreground">
-          Mostrando {filteredOscs.length} de {oscs.length} organizações.
         </div>
       </div>
 
