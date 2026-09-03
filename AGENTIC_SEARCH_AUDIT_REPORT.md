@@ -67,3 +67,32 @@ Based on the audit, here are concrete architectural and code-level solutions to 
 4.  **Strengthen Error Handling in Queueing Mechanisms:**
     *   **Problem:** If `enqueueEditalExtraction` fails after writing to `scraping_contents` but before task enqueuing, a dangling document is left.
     *   **Solution:** Implement transactional guarantees or a robust DLQ (Dead Letter Queue) mechanism to ensure that if a task fails to enqueue, the corresponding temporary database entry is either rolled back or flagged for retry.
+## 5. Prosas Authenticated Scraping Module
+
+The pipeline integrates a specialized authentication mechanism to bypass paywalls and CAPTCHAs on Prosas, enabling deep data extraction.
+
+**1. Session Generation & Rotation (`renewProsasSessionCron` & scripts):**
+   - A dedicated script (`functions/scripts/generate-prosas-session.js`) and a scheduled Cloud Function (`renewProsasSessionCron` running daily at 03:00) automate the login process using Playwright.
+   - Credentials (PROSAS_USERNAME/PASSWORD) are injected, and the session state (cookies, local storage) is exported via Playwright's `storageState` API.
+   - The serialized session state is uploaded to a secure Google Cloud Storage bucket (`triade-prosas-session-state`).
+
+**2. Injection & Authenticated Discovery (`prosasBulkDiscoveryWorker`):**
+   - The bulk discovery worker directly downloads the active session from GCS into memory.
+   - It bypasses Cloudflare/auth walls by injecting this session into a new headless browser context (`browser.newContext({ storageState: sessionData })`).
+   - The worker paginates through search UI pages, simulates human scrolling, and extracts edital links directly from the rendered DOM, enqueuing them to the extraction queue.
+
+**3. Deep Extraction (`prosasAuthenticatedWorker`):**
+   - Triggered for individual edital URLs (e.g., via `routeEditalUrl` intercepting 'prosas.com.br' links).
+   - Downloads the session state, navigates to the authenticated URL, and waits for dynamic content.
+   - Detects session expiry (e.g., redirection to `/users/sign_in`). If expired, it explicitly throws 'Prosas session expired. Need to renew session.' to prevent permanent circuit breaking, allowing retries after the next cron run.
+   - Extracts page text and downloads attached PDFs directly from the authenticated session, pushing the combined content to `scraping_contents` for standard Genkit extraction.
+
+**Security & Operational Risks:**
+   - **Cookie Expiration & Invalidation:** Prosas cookies might expire mid-day or be forcibly invalidated due to concurrent logins or detected anomalous behavior, causing pipeline stall until the next scheduled cron run.
+   - **Credential Storage:** While scripts use env variables, ensuring they are securely mapped via Google Cloud Secret Manager in production is critical to prevent credential leaks in deployment logs.
+   - **Thundering Herd on Expiry:** If the session drops, multiple queued extraction tasks might rapidly fail and retry, potentially locking the account or wasting compute resources.
+
+**Actionable Engineering Solutions:**
+   1. **Proactive Session Health Checks:** Implement a lightweight, pre-flight check at the start of the `prosasAuthenticatedWorker`. If the check fails, immediately push an out-of-band Pub/Sub message to trigger an on-demand run of `renewProsasSessionCron`, then pause/re-enqueue current tasks with a backoff, rather than waiting 24 hours.
+   2. **Secure Token Storage Pipeline:** Transition from `.env` based credentials to explicit Secret Manager bindings for the cron job, ensuring passwords are never resident in memory longer than necessary.
+   3. **Circuit Breaker for Account Protection:** If `renewProsasSessionCron` fails multiple times consecutively (e.g., due to a password change or aggressive CAPTCHA block), trigger an alert to administrators and suspend the queue to prevent account banning.
