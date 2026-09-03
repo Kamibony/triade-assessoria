@@ -1269,7 +1269,8 @@ exports.processOscChunkWorker = (0, tasks_1.onTaskDispatched)({
         maxConcurrentDispatches: 2,
         maxDispatchesPerSecond: 1,
     },
-    timeoutSeconds: 540
+    timeoutSeconds: 540,
+    memory: '1GiB'
 }, async (request) => {
     const { oscIds, activityArea, aiPrompt, onlyActive, jobId } = request.data;
     if (!oscIds || !Array.isArray(oscIds)) {
@@ -1441,7 +1442,7 @@ exports.processOscChunkWorker = (0, tasks_1.onTaskDispatched)({
 exports.ingestOscDataFunction = (0, https_1.onCall)({
     cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
     timeoutSeconds: 540,
-    memory: '256MiB', // reduced memory since it's just an orchestrator now
+    memory: '1GiB',
     invoker: 'public',
 }, async (request) => {
     // TODO: Re-enable auth checks once Auth is implemented.
@@ -2560,7 +2561,8 @@ exports.prosasAuthenticatedWorker = (0, tasks_1.onTaskDispatched)({
 exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
     retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
     rateLimits: { maxConcurrentDispatches: 5 },
-    timeoutSeconds: 540
+    timeoutSeconds: 540,
+    memory: '1GiB'
 }, async (request) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { searchId, target, query, page = 1, linksQueue = [] } = request.data;
