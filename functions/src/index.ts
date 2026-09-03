@@ -69,7 +69,15 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 
             const err = error as Error;
             logger.warn(`Fetch attempt ${i + 1} failed for ${url}: ${err.message}`);
             if (i === retries - 1) throw err;
-            await new Promise(resolve => setTimeout(resolve, 2000 * Math.pow(2, i))); // Exponential backoff
+
+            let backoffTime = 2000 * Math.pow(2, i);
+            if (err.message.includes('429')) {
+                // Aggressive exponential backoff for 429 Too Many Requests
+                backoffTime = Math.min(3000 * Math.pow(2, i), 30000);
+                // Add random jitter between 0 and 1000ms
+                backoffTime += Math.floor(Math.random() * 1000);
+            }
+            await new Promise(resolve => setTimeout(resolve, backoffTime)); // Exponential backoff
         }
     }
     throw new Error(`Failed to fetch ${url} after ${retries} retries`);
@@ -1376,12 +1384,12 @@ export const processOscChunkWorker = onTaskDispatched({
 
     const collectedOscs: any[] = [];
 
-    // Process API requests in chunks of 5
-    const API_CHUNK_SIZE = 5;
+    // Process API requests in chunks of 3 to throttle BrasilAPI requests
+    const API_CHUNK_SIZE = 3;
     for (let i = 0; i < oscIds.length; i += API_CHUNK_SIZE) {
         const chunk = oscIds.slice(i, i + API_CHUNK_SIZE);
 
-        await Promise.all(chunk.map(async (id_osc) => {
+        await Promise.allSettled(chunk.map(async (id_osc) => {
             try {
                 // 1. Get CNPJ from IPEA
                 const oscDetailsRes = await fetchWithRetry(`https://mapaosc.ipea.gov.br/api/api/osc/cabecalho/${id_osc}`);
@@ -1393,8 +1401,8 @@ export const processOscChunkWorker = onTaskDispatched({
                 const cleanCnpj = String(rawCnpj).replace(/\D/g, '');
                 if (cleanCnpj.length !== 14) return;
 
-                // 2. Enrich Profile Data using BrasilAPI
-                const brasilApiResponse = await fetchWithRetry(`https://brasilapi.com.br/api/cnpj/v1/${cleanCnpj}`);
+                // 2. Enrich Profile Data using BrasilAPI (pass 5 retries to handle 429s better)
+                const brasilApiResponse = await fetchWithRetry(`https://brasilapi.com.br/api/cnpj/v1/${cleanCnpj}`, {}, 5);
                 const rawData = await brasilApiResponse.json();
 
                 // 3. Apply Filters
