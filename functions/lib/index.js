@@ -2418,6 +2418,21 @@ exports.prosasAuthenticatedWorker = (0, tasks_1.onTaskDispatched)({
         logger.info(`[Prosas Auth Worker] Downloading session state from gs://${sessionBucketName}/${sessionFileName}`);
         await storage.bucket(sessionBucketName).file(sessionFileName).download({ destination: sessionFilePath });
         logger.info(`[Prosas Auth Worker] Session state downloaded to ${sessionFilePath}`);
+        // 1.5 Session Health Check
+        try {
+            const sessionDataRaw = fs.readFileSync(sessionFilePath, 'utf8');
+            const sessionData = JSON.parse(sessionDataRaw);
+            if (!sessionData.cookies || sessionData.cookies.length === 0) {
+                logger.warn('[Prosas Auth Worker] Downloaded session appears invalid (no cookies). Triggering inline renewal...');
+                await renewProsasSessionInternal();
+                await storage.bucket(sessionBucketName).file(sessionFileName).download({ destination: sessionFilePath });
+            }
+        }
+        catch (e) {
+            logger.warn('[Prosas Auth Worker] Failed to read or parse session state. Triggering inline renewal...', e);
+            await renewProsasSessionInternal();
+            await storage.bucket(sessionBucketName).file(sessionFileName).download({ destination: sessionFilePath });
+        }
         // 2. Playwright Scraping
         playwright_extra_1.chromium.use((0, puppeteer_extra_plugin_stealth_1.default)());
         const browser = await playwright_extra_1.chromium.launch({
@@ -2437,7 +2452,8 @@ exports.prosasAuthenticatedWorker = (0, tasks_1.onTaskDispatched)({
             // Check for session expiration
             const currentUrl = page.url();
             if (currentUrl.includes('/users/sign_in')) {
-                logger.error(`[Prosas Auth Worker] Session expired or invalid. Redirected to ${currentUrl}`);
+                logger.warn(`[Prosas Auth Worker] Session expired in-flight. Redirected to ${currentUrl}. Triggering inline renewal and throwing retryable error.`);
+                await renewProsasSessionInternal();
                 throw new Error('Prosas session expired. Need to renew session.');
             }
             // Extract the main content text
@@ -2902,17 +2918,13 @@ exports.onSearchCreated = (0, firestore_2.onDocumentCreated)({ document: 'search
         });
     }
 });
-exports.renewProsasSessionCron = (0, scheduler_1.onSchedule)({
-    schedule: '0 3 * * *',
-    timeoutSeconds: 300,
-    memory: '2GiB'
-}, async (event) => {
-    logger.info('[Prosas Session Cron] Starting session renewal...');
+async function renewProsasSessionInternal() {
+    logger.info('[Prosas Session Internal] Starting session renewal...');
     const username = process.env.PROSAS_USERNAME;
     const password = process.env.PROSAS_PASSWORD;
     if (!username || !password) {
-        logger.error('[Prosas Session Cron] Missing PROSAS_USERNAME or PROSAS_PASSWORD.');
-        return;
+        logger.error('[Prosas Session Internal] Missing PROSAS_USERNAME or PROSAS_PASSWORD.');
+        throw new Error('Missing PROSAS_USERNAME or PROSAS_PASSWORD.');
     }
     playwright_extra_1.chromium.use((0, puppeteer_extra_plugin_stealth_1.default)());
     const browser = await playwright_extra_1.chromium.launch({
@@ -2923,36 +2935,48 @@ exports.renewProsasSessionCron = (0, scheduler_1.onSchedule)({
     try {
         const context = await browser.newContext();
         const page = await context.newPage();
-        logger.info('[Prosas Session Cron] Navigating to login page...');
+        logger.info('[Prosas Session Internal] Navigating to login page...');
         await page.goto('https://prosas.com.br/users/sign_in', { waitUntil: 'networkidle' });
-        logger.info('[Prosas Session Cron] Filling credentials...');
+        logger.info('[Prosas Session Internal] Filling credentials...');
         await page.locator('#user_email').last().waitFor({ state: 'visible', timeout: 30000 });
         await page.locator('#user_email').last().fill(username);
         await page.locator('#user_password').last().fill(password);
-        logger.info('[Prosas Session Cron] Submitting form...');
+        logger.info('[Prosas Session Internal] Submitting form...');
         await page.locator('input[type="submit"][name="commit"]').last().click();
         await page.waitForLoadState('networkidle');
         await page.waitForTimeout(5000);
         const outputFile = '/tmp/prosas_session.json';
         await context.storageState({ path: outputFile });
-        logger.info('[Prosas Session Cron] Session extracted. Uploading to GCS...');
+        logger.info('[Prosas Session Internal] Session extracted. Uploading to GCS...');
         const storage = (0, storage_1.getStorage)();
         const bucket = storage.bucket('triade-prosas-session-state');
         await bucket.upload(outputFile, {
             destination: 'prosas_session.json',
             metadata: { contentType: 'application/json' }
         });
-        logger.info('[Prosas Session Cron] Successfully uploaded session state to GCS.');
+        logger.info('[Prosas Session Internal] Successfully uploaded session state to GCS.');
         if (fs.existsSync(outputFile)) {
             fs.unlinkSync(outputFile);
         }
     }
     catch (error) {
-        logger.error('[Prosas Session Cron] Failed to renew session:', error);
+        logger.error('[Prosas Session Internal] Failed to renew session:', error);
         throw error;
     }
     finally {
         await browser.close();
+    }
+}
+exports.renewProsasSessionCron = (0, scheduler_1.onSchedule)({
+    schedule: '0 3 * * *',
+    timeoutSeconds: 300,
+    memory: '2GiB'
+}, async (event) => {
+    try {
+        await renewProsasSessionInternal();
+    }
+    catch (error) {
+        logger.error('[Prosas Session Cron] Cron execution failed:', error);
     }
 });
 exports.prosasBulkDiscoveryWorker = (0, tasks_1.onTaskDispatched)({
@@ -2972,8 +2996,15 @@ exports.prosasBulkDiscoveryWorker = (0, tasks_1.onTaskDispatched)({
         const sessionBucketName = 'triade-prosas-session-state';
         const sessionFileName = 'prosas_session.json';
         logger.info(`[Prosas Bulk Discovery] Downloading session state from gs://${sessionBucketName}/${sessionFileName} directly into memory`);
-        const [fileContent] = await storage.bucket(sessionBucketName).file(sessionFileName).download();
-        const sessionData = JSON.parse(fileContent.toString('utf-8'));
+        let [fileContent] = await storage.bucket(sessionBucketName).file(sessionFileName).download();
+        let sessionData = JSON.parse(fileContent.toString('utf-8'));
+        if (!sessionData.cookies || sessionData.cookies.length === 0) {
+            logger.warn('[Prosas Bulk Discovery] Downloaded session appears invalid (no cookies). Triggering inline renewal...');
+            await renewProsasSessionInternal();
+            const [newFileContent] = await storage.bucket(sessionBucketName).file(sessionFileName).download();
+            fileContent = newFileContent;
+            sessionData = JSON.parse(fileContent.toString('utf-8'));
+        }
         playwright_extra_1.chromium.use((0, puppeteer_extra_plugin_stealth_1.default)());
         browser = await playwright_extra_1.chromium.launch({
             args: chromium_1.default.args,
