@@ -1439,9 +1439,10 @@ exports.processOscChunkWorker = (0, tasks_1.onTaskDispatched)({
     logger.info(`Chunk processing complete. Processed: ${processed}, Imported: ${imported}`);
 });
 exports.ingestOscDataFunction = (0, https_1.onCall)({
-    cors: true,
+    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
     timeoutSeconds: 540,
     memory: '256MiB', // reduced memory since it's just an orchestrator now
+    invoker: 'public',
 }, async (request) => {
     // TODO: Re-enable auth checks once Auth is implemented.
     // if (!request.auth) {
