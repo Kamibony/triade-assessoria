@@ -22,6 +22,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: 'npm'
 
       - name: Install Frontend Dependencies
         run: npm ci
@@ -62,9 +63,6 @@ jobs:
         run: npx firebase-tools deploy --only hosting,storage --project triade-assessoria --force
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-
-      - name: Install Playwright
-        run: cd functions && npx playwright install chromium --with-deps
 
       - name: Deploy Functions
         run: node functions/scripts/deploy-changed.js

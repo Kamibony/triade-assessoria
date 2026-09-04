@@ -63,12 +63,17 @@ try {
 
   console.log('Deploying functions:', functionsToDeploy);
 
-  // Batch deployments (5 at a time)
-  for (let i = 0; i < functionsToDeploy.length; i += 5) {
-    const batch = functionsToDeploy.slice(i, i + 5);
-    const deployString = batch.map(f => `functions:${f}`).join(',');
-    console.log(`Deploying batch: ${deployString}`);
-    execSync(`npx firebase-tools deploy --only ${deployString} --project triade-assessoria --force`, { stdio: 'inherit' });
+  if (functionsToDeploy.length === allFunctions.length) {
+    console.log('Deploying all functions at once using the optimized CLI command.');
+    execSync(`npx firebase-tools deploy --only functions --project triade-assessoria --force`, { stdio: 'inherit' });
+  } else {
+    // Batch deployments (5 at a time) to avoid API rate limits
+    for (let i = 0; i < functionsToDeploy.length; i += 5) {
+      const batch = functionsToDeploy.slice(i, i + 5);
+      const deployString = batch.map(f => `functions:${f}`).join(',');
+      console.log(`Deploying batch: ${deployString}`);
+      execSync(`npx firebase-tools deploy --only ${deployString} --project triade-assessoria --force`, { stdio: 'inherit' });
+    }
   }
 
 } catch (error) {
