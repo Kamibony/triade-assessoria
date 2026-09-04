@@ -373,4 +373,5 @@ export declare const onSearchCreated: import("firebase-functions/core").CloudFun
 }>>;
 export declare const renewProsasSessionCron: import("firebase-functions/v2/scheduler").ScheduleFunction;
 export declare const prosasBulkDiscoveryWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
+export declare const testExtractionEndpoint: import("firebase-functions/v2/https").HttpsFunction;
 //# sourceMappingURL=index.d.ts.map
