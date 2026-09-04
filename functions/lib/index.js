@@ -36,8 +36,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = void 0;
+exports.testExtractionEndpoint = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.scoreMatch = void 0;
 exports.formatGenkitError = formatGenkitError;
+exports.fetchAndExtractText = fetchAndExtractText;
+exports.enqueueEditalExtraction = enqueueEditalExtraction;
 process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const fs = __importStar(require("fs"));
@@ -73,7 +75,7 @@ function formatGenkitError(error, defaultMessage = "Erro interno desconhecido.")
     return new https_1.HttpsError("internal", message);
 }
 const zod_1 = require("zod");
-const vertexai_1 = require("@genkit-ai/vertexai");
+const google_genai_1 = require("@genkit-ai/google-genai");
 const https_1 = require("firebase-functions/v2/https");
 const tasks_1 = require("firebase-functions/v2/tasks");
 const logger = __importStar(require("firebase-functions/logger"));
@@ -123,7 +125,7 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
 }
 admin.initializeApp();
 const ai = (0, genkit_1.genkit)({
-    plugins: [(0, vertexai_1.vertexAI)({ projectId: 'triade-assessoria', location: 'us-central1' })],
+    plugins: [(0, google_genai_1.googleAI)()],
 });
 const parsePdfToProfile = ai.defineFlow({
     name: 'parsePdfToProfile',
@@ -154,7 +156,7 @@ Sempre retorne os dados em português do Brasil (pt-BR).`;
         }
     }
     const response = await ai.generate({
-        model: 'vertexai/gemini-2.5-flash',
+        model: 'googleai/gemini-2.5-flash',
         messages: [
             { role: 'user', content: content }
         ],
@@ -165,7 +167,7 @@ Sempre retorne os dados em português do Brasil (pt-BR).`;
     }
     return response.output;
 });
-const scoreMatch = ai.defineFlow({
+exports.scoreMatch = ai.defineFlow({
     name: 'scoreMatch',
     inputSchema: zod_1.z.object({
         osc: schemas_js_1.ngoProfileSchema,
@@ -215,7 +217,7 @@ Se a ONG for INELEGÍVEL (0 de score) não gere actionPlan nem reasoning. Se for
 Responda estritamente em português do Brasil (pt-BR).
 `;
     const response = await ai.generate({
-        model: 'vertexai/gemini-2.5-flash',
+        model: 'googleai/gemini-2.5-flash',
         prompt: prompt,
         output: { schema: schemas_js_1.matchSchema }
     });
@@ -297,7 +299,7 @@ Identifique e retorne APENAS os links que são altamente prováveis de apontar p
 Ignore links genéricos de navegação.
 Retorne um array com as URLs selecionadas.`;
     const response = await ai.generate({
-        model: 'vertexai/gemini-2.5-flash',
+        model: 'googleai/gemini-2.5-flash',
         messages: [{ role: 'user', content: [{ text: prompt }, { text: JSON.stringify(input.links) }] }],
         output: { schema: zod_1.z.object({ selectedLinks: zod_1.z.array(zod_1.z.string()) }) }
     });
@@ -306,7 +308,7 @@ Retorne um array com as URLs selecionadas.`;
     }
     return response.output;
 });
-const extractEditalRules = ai.defineFlow({
+exports.extractEditalRules = ai.defineFlow({
     name: 'extractEditalRules',
     inputSchema: zod_1.z.object({
         text: zod_1.z.string().optional().describe("Texto bruto do edital"),
@@ -343,7 +345,7 @@ Sempre retorne os dados no formato estruturado solicitado em português do Brasi
         content.push({ text: `Texto do edital:\n\n${truncatedText}` });
     }
     const response = await ai.generate({
-        model: 'vertexai/gemini-2.5-flash',
+        model: 'googleai/gemini-2.5-flash',
         messages: [
             { role: 'user', content: content }
         ],
@@ -374,7 +376,7 @@ Rejeite apenas artigos genéricos de opinião, notícias exclusivas sobre result
     prompt += `\nResponda com isValidEdital = true se for um edital, landing page ou anúncio oficial de grant E (se houver consulta) se alinhar perfeitamente com a consulta.
 Provide NO reasoning, NO explanations, and NO thinking steps. Output ONLY the raw JSON.`;
     const response = await ai.generate({
-        model: 'vertexai/gemini-2.5-flash',
+        model: 'googleai/gemini-2.5-flash',
         messages: [
             { role: 'user', content: [
                     { text: prompt },
@@ -417,7 +419,7 @@ exports.extractEditalRulesWorker = (0, tasks_1.onTaskDispatched)({
     const db = (0, firestore_1.getFirestore)();
     const trackingRef = db.collection('pdf_extractions').doc(trackingId);
     try {
-        const result = await extractEditalRules(data);
+        const result = await (0, exports.extractEditalRules)(data);
         await trackingRef.set({
             status: 'completed',
             result: result,
@@ -506,7 +508,7 @@ Missão: ${input.osc.mission || 'Não especificada'}
 
 Retorne apenas as queries geradas no array.`;
     const response = await ai.generate({
-        model: 'vertexai/gemini-2.5-flash',
+        model: 'googleai/gemini-2.5-flash',
         messages: [
             { role: 'user', content: [{ text: prompt }] }
         ],
@@ -539,7 +541,7 @@ function cosineSimilarity(vecA, vecB) {
 async function generateTextEmbedding(text) {
     try {
         const response = await ai.embed({
-            embedder: vertexai_1.textEmbedding004,
+            embedder: 'googleai/text-embedding-004',
             content: text.substring(0, 5000)
         });
         if (Array.isArray(response)) {
@@ -702,7 +704,7 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
         };
     }
     else {
-        matchResult = await scoreMatch({
+        matchResult = await (0, exports.scoreMatch)({
             osc: oscData,
             edital: editalData,
             oscId: oscId,
@@ -1356,7 +1358,7 @@ exports.processOscChunkWorker = (0, tasks_1.onTaskDispatched)({
                     }).join('\n');
                     const llmPrompt = `You are a strict, ruthless data filter. Evaluate NGOs strictly based on explicit textual evidence in their Name or CNAE. Do NOT assume generic religious organizations (igrejas, congregações) or generic neighborhood associations (moradores) run niche programs unless their name explicitly states it. If the user asks for a specific niche and the NGO is generic, EXCLUDE IT. When in doubt, EXCLUDE. User's request: ${aiPrompt}. Here are ${chunk.length} NGOs (Name + CNAE descriptions):\n${promptData}\nAnalyze their semantic alignment with the request. Return a raw JSON array containing ONLY the string CNPJs of the NGOs that genuinely match the profile.`;
                     const response = await ai.generate({
-                        model: 'vertexai/gemini-2.5-flash',
+                        model: 'googleai/gemini-2.5-flash',
                         prompt: llmPrompt,
                         config: { temperature: 0.0 },
                         output: { schema: zod_1.z.array(zod_1.z.string()) }
@@ -1876,7 +1878,7 @@ Após obter os dados, analise-os e selecione as ONGs que melhor atendem ao pedid
 Além disso, rascunhe uma mensagem de contato (email ou WhatsApp) engajadora para essas ONGs.
 Responda estritamente no formato do schema em português do Brasil (pt-BR).`;
     const response = await ai.generate({
-        model: 'vertexai/gemini-2.5-flash',
+        model: 'googleai/gemini-2.5-flash',
         tools: [searchDatabaseTool],
         messages: [
             { role: 'system', content: [{ text: systemPrompt }] },
@@ -2299,7 +2301,7 @@ exports.extractionWorker = (0, tasks_1.onTaskDispatched)({
         if (!text) {
             throw new Error(`Content document ${contentId} has no text.`);
         }
-        const editalResult = await extractEditalRules({ text });
+        const editalResult = await (0, exports.extractEditalRules)({ text });
         const parseResult = schemas_js_1.editalSchema.safeParse(editalResult);
         if (parseResult.success) {
             let embedding = [];
@@ -3079,6 +3081,32 @@ exports.prosasBulkDiscoveryWorker = (0, tasks_1.onTaskDispatched)({
         if (browser) {
             await browser.close();
         }
+    }
+});
+const https_2 = require("firebase-functions/v2/https");
+exports.testExtractionEndpoint = (0, https_2.onRequest)(async (req, res) => {
+    const payload = {
+        text: `EDITAL DE FOMENTO À CULTURA 2024
+
+O INSTITUTO CULTURAL, com sede em São Paulo/SP, lança o presente edital.
+O valor total de investimento é de R$ 1.500.000,00 (um milhão e quinhentos mil reais).
+Prazo limite de inscrições: 31 de Dezembro de 2024.
+Data de publicação: 10 de Janeiro de 2024.
+
+CRITÉRIOS DE ELEGIBILIDADE:
+- Podem participar ONGs (Organizações da Sociedade Civil) com no mínimo 3 (três) anos de atividade comprovada.
+- Abrangência: Projetos de atuação na região Nordeste e estado de São Paulo (SP).
+- É obrigatória a apresentação do CNPJ e Estatuto Social.
+- O foco deve ser exclusivamente nas áreas de Educação e Cultura.`
+    };
+    try {
+        const result = await (0, exports.extractEditalRules)(payload);
+        res.json({ success: true, result });
+    }
+    catch (error) {
+        console.error("Extraction endpoint failed:", error);
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        res.status(500).json({ success: false, error: errorMessage });
     }
 });
 //# sourceMappingURL=index.js.map

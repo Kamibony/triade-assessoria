@@ -30,7 +30,7 @@ export function formatGenkitError(error: unknown, defaultMessage: string = "Erro
     return new HttpsError("internal", message);
 }
 import { z } from 'zod';
-import { vertexAI, textEmbedding004 } from '@genkit-ai/vertexai';
+import { googleAI } from '@genkit-ai/google-genai';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import * as logger from 'firebase-functions/logger';
@@ -86,7 +86,7 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 
 admin.initializeApp();
 
 const ai = genkit({
-    plugins: [vertexAI({ projectId: 'triade-assessoria', location: 'us-central1' })],
+    plugins: [googleAI()],
 });
 
 const parsePdfToProfile = ai.defineFlow(
@@ -121,7 +121,7 @@ Sempre retorne os dados em português do Brasil (pt-BR).`;
         }
 
         const response = await ai.generate({
-            model: 'vertexai/gemini-2.5-flash',
+            model: 'googleai/gemini-2.5-flash',
             messages: [
                 { role: 'user', content: content }
             ],
@@ -137,7 +137,7 @@ Sempre retorne os dados em português do Brasil (pt-BR).`;
 
 
 
-const scoreMatch = ai.defineFlow(
+export const scoreMatch = ai.defineFlow(
     {
         name: 'scoreMatch',
         inputSchema: z.object({
@@ -190,7 +190,7 @@ Responda estritamente em português do Brasil (pt-BR).
 `;
 
         const response = await ai.generate({
-            model: 'vertexai/gemini-2.5-flash',
+            model: 'googleai/gemini-2.5-flash',
             prompt: prompt,
             output: { schema: matchSchema }
         });
@@ -285,7 +285,7 @@ Identifique e retorne APENAS os links que são altamente prováveis de apontar p
 Ignore links genéricos de navegação.
 Retorne um array com as URLs selecionadas.`;
         const response = await ai.generate({
-            model: 'vertexai/gemini-2.5-flash',
+            model: 'googleai/gemini-2.5-flash',
             messages: [{ role: 'user', content: [{ text: prompt }, { text: JSON.stringify(input.links) }] }],
             output: { schema: z.object({ selectedLinks: z.array(z.string()) }) }
         });
@@ -296,7 +296,7 @@ Retorne um array com as URLs selecionadas.`;
     }
 );
 
-const extractEditalRules = ai.defineFlow(
+export const extractEditalRules = ai.defineFlow(
     {
         name: 'extractEditalRules',
         inputSchema: z.object({
@@ -337,7 +337,7 @@ Sempre retorne os dados no formato estruturado solicitado em português do Brasi
         }
 
         const response = await ai.generate({
-            model: 'vertexai/gemini-2.5-flash',
+            model: 'googleai/gemini-2.5-flash',
             messages: [
                 { role: 'user', content: content }
             ],
@@ -377,7 +377,7 @@ Rejeite apenas artigos genéricos de opinião, notícias exclusivas sobre result
 Provide NO reasoning, NO explanations, and NO thinking steps. Output ONLY the raw JSON.`;
 
         const response = await ai.generate({
-            model: 'vertexai/gemini-2.5-flash',
+            model: 'googleai/gemini-2.5-flash',
             messages: [
                 { role: 'user', content: [
                     { text: prompt },
@@ -395,7 +395,7 @@ Provide NO reasoning, NO explanations, and NO thinking steps. Output ONLY the ra
 );
 
 
-async function fetchAndExtractText(url: string): Promise<string> {
+export async function fetchAndExtractText(url: string): Promise<string> {
     try {
         const response = await fetch(url);
         if (!response.ok) {
@@ -530,7 +530,7 @@ Missão: ${input.osc.mission || 'Não especificada'}
 Retorne apenas as queries geradas no array.`;
 
         const response = await ai.generate({
-            model: 'vertexai/gemini-2.5-flash',
+            model: 'googleai/gemini-2.5-flash',
             messages: [
                 { role: 'user', content: [{ text: prompt }] }
             ],
@@ -566,7 +566,7 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
 async function generateTextEmbedding(text: string): Promise<number[]> {
     try {
         const response = await ai.embed({
-            embedder: textEmbedding004,
+            embedder: 'googleai/text-embedding-004',
             content: text.substring(0, 5000)
         });
         if (Array.isArray(response)) {
@@ -1472,7 +1472,7 @@ export const processOscChunkWorker = onTaskDispatched({
                     const llmPrompt = `You are a strict, ruthless data filter. Evaluate NGOs strictly based on explicit textual evidence in their Name or CNAE. Do NOT assume generic religious organizations (igrejas, congregações) or generic neighborhood associations (moradores) run niche programs unless their name explicitly states it. If the user asks for a specific niche and the NGO is generic, EXCLUDE IT. When in doubt, EXCLUDE. User's request: ${aiPrompt}. Here are ${chunk.length} NGOs (Name + CNAE descriptions):\n${promptData}\nAnalyze their semantic alignment with the request. Return a raw JSON array containing ONLY the string CNPJs of the NGOs that genuinely match the profile.`;
 
                     const response = await ai.generate({
-                        model: 'vertexai/gemini-2.5-flash',
+                        model: 'googleai/gemini-2.5-flash',
                         prompt: llmPrompt,
                         config: { temperature: 0.0 },
                         output: { schema: z.array(z.string()) }
@@ -1734,7 +1734,7 @@ async function routeEditalUrl(url: string, sourceContext: string, searchId?: str
     }
 }
 
-async function enqueueEditalExtraction(link: string, text: string, reason: string, searchId?: string) {
+export async function enqueueEditalExtraction(link: string, text: string, reason: string, searchId?: string) {
     const db = getFirestore();
     // Guardrail: Truncate text to 3000 characters to prevent LLM token exhaustion
     if (text && text.length > 3000) {
@@ -2095,7 +2095,7 @@ Além disso, rascunhe uma mensagem de contato (email ou WhatsApp) engajadora par
 Responda estritamente no formato do schema em português do Brasil (pt-BR).`;
 
         const response = await ai.generate({
-            model: 'vertexai/gemini-2.5-flash',
+            model: 'googleai/gemini-2.5-flash',
             tools: [searchDatabaseTool],
             messages: [
                 { role: 'system', content: [{ text: systemPrompt }] },
@@ -3440,5 +3440,33 @@ export const prosasBulkDiscoveryWorker = onTaskDispatched({
         if (browser) {
             await browser.close();
         }
+    }
+});
+
+import { onRequest } from 'firebase-functions/v2/https';
+
+export const testExtractionEndpoint = onRequest(async (req, res) => {
+    const payload = {
+        text: `EDITAL DE FOMENTO À CULTURA 2024
+
+O INSTITUTO CULTURAL, com sede em São Paulo/SP, lança o presente edital.
+O valor total de investimento é de R$ 1.500.000,00 (um milhão e quinhentos mil reais).
+Prazo limite de inscrições: 31 de Dezembro de 2024.
+Data de publicação: 10 de Janeiro de 2024.
+
+CRITÉRIOS DE ELEGIBILIDADE:
+- Podem participar ONGs (Organizações da Sociedade Civil) com no mínimo 3 (três) anos de atividade comprovada.
+- Abrangência: Projetos de atuação na região Nordeste e estado de São Paulo (SP).
+- É obrigatória a apresentação do CNPJ e Estatuto Social.
+- O foco deve ser exclusivamente nas áreas de Educação e Cultura.`
+    };
+
+    try {
+        const result = await extractEditalRules(payload);
+        res.json({ success: true, result });
+    } catch (error: unknown) {
+        console.error("Extraction endpoint failed:", error);
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        res.status(500).json({ success: false, error: errorMessage });
     }
 });
