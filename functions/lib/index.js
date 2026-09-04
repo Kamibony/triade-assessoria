@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.testExtractionEndpoint = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.scoreMatch = void 0;
+exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.scoreMatch = void 0;
 exports.formatGenkitError = formatGenkitError;
 exports.fetchAndExtractText = fetchAndExtractText;
 exports.enqueueEditalExtraction = enqueueEditalExtraction;
@@ -3081,32 +3081,6 @@ exports.prosasBulkDiscoveryWorker = (0, tasks_1.onTaskDispatched)({
         if (browser) {
             await browser.close();
         }
-    }
-});
-const https_2 = require("firebase-functions/v2/https");
-exports.testExtractionEndpoint = (0, https_2.onRequest)({ invoker: 'public', cors: true }, async (req, res) => {
-    const payload = {
-        text: `EDITAL DE FOMENTO À CULTURA 2024
-
-O INSTITUTO CULTURAL, com sede em São Paulo/SP, lança o presente edital.
-O valor total de investimento é de R$ 1.500.000,00 (um milhão e quinhentos mil reais).
-Prazo limite de inscrições: 31 de Dezembro de 2024.
-Data de publicação: 10 de Janeiro de 2024.
-
-CRITÉRIOS DE ELEGIBILIDADE:
-- Podem participar ONGs (Organizações da Sociedade Civil) com no mínimo 3 (três) anos de atividade comprovada.
-- Abrangência: Projetos de atuação na região Nordeste e estado de São Paulo (SP).
-- É obrigatória a apresentação do CNPJ e Estatuto Social.
-- O foco deve ser exclusivamente nas áreas de Educação e Cultura.`
-    };
-    try {
-        const result = await (0, exports.extractEditalRules)(payload);
-        res.json({ success: true, result });
-    }
-    catch (error) {
-        console.error("Extraction endpoint failed:", error);
-        const errorMessage = error instanceof Error ? error.message : "Unknown error";
-        res.status(500).json({ success: false, error: errorMessage });
     }
 });
 //# sourceMappingURL=index.js.map

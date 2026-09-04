@@ -3443,30 +3443,3 @@ export const prosasBulkDiscoveryWorker = onTaskDispatched({
     }
 });
 
-import { onRequest } from 'firebase-functions/v2/https';
-
-export const testExtractionEndpoint = onRequest({ invoker: 'public', cors: true }, async (req, res) => {
-    const payload = {
-        text: `EDITAL DE FOMENTO À CULTURA 2024
-
-O INSTITUTO CULTURAL, com sede em São Paulo/SP, lança o presente edital.
-O valor total de investimento é de R$ 1.500.000,00 (um milhão e quinhentos mil reais).
-Prazo limite de inscrições: 31 de Dezembro de 2024.
-Data de publicação: 10 de Janeiro de 2024.
-
-CRITÉRIOS DE ELEGIBILIDADE:
-- Podem participar ONGs (Organizações da Sociedade Civil) com no mínimo 3 (três) anos de atividade comprovada.
-- Abrangência: Projetos de atuação na região Nordeste e estado de São Paulo (SP).
-- É obrigatória a apresentação do CNPJ e Estatuto Social.
-- O foco deve ser exclusivamente nas áreas de Educação e Cultura.`
-    };
-
-    try {
-        const result = await extractEditalRules(payload);
-        res.json({ success: true, result });
-    } catch (error: unknown) {
-        console.error("Extraction endpoint failed:", error);
-        const errorMessage = error instanceof Error ? error.message : "Unknown error";
-        res.status(500).json({ success: false, error: errorMessage });
-    }
-});
