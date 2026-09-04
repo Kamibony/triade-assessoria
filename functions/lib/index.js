@@ -75,7 +75,7 @@ function formatGenkitError(error, defaultMessage = "Erro interno desconhecido.")
     return new https_1.HttpsError("internal", message);
 }
 const zod_1 = require("zod");
-const vertexai_1 = require("@genkit-ai/vertexai");
+const google_genai_1 = require("@genkit-ai/google-genai");
 const https_1 = require("firebase-functions/v2/https");
 const tasks_1 = require("firebase-functions/v2/tasks");
 const logger = __importStar(require("firebase-functions/logger"));
@@ -125,7 +125,7 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
 }
 admin.initializeApp();
 const ai = (0, genkit_1.genkit)({
-    plugins: [(0, vertexai_1.vertexAI)({ location: 'us-central1' })],
+    plugins: [(0, google_genai_1.vertexAI)({ location: 'us-central1' })],
 });
 const parsePdfToProfile = ai.defineFlow({
     name: 'parsePdfToProfile',
