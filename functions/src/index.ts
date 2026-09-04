@@ -137,7 +137,7 @@ Sempre retorne os dados em português do Brasil (pt-BR).`;
 
 
 
-const scoreMatch = ai.defineFlow(
+export const scoreMatch = ai.defineFlow(
     {
         name: 'scoreMatch',
         inputSchema: z.object({
@@ -296,7 +296,7 @@ Retorne um array com as URLs selecionadas.`;
     }
 );
 
-const extractEditalRules = ai.defineFlow(
+export const extractEditalRules = ai.defineFlow(
     {
         name: 'extractEditalRules',
         inputSchema: z.object({
@@ -395,7 +395,7 @@ Provide NO reasoning, NO explanations, and NO thinking steps. Output ONLY the ra
 );
 
 
-async function fetchAndExtractText(url: string): Promise<string> {
+export async function fetchAndExtractText(url: string): Promise<string> {
     try {
         const response = await fetch(url);
         if (!response.ok) {
@@ -1734,7 +1734,7 @@ async function routeEditalUrl(url: string, sourceContext: string, searchId?: str
     }
 }
 
-async function enqueueEditalExtraction(link: string, text: string, reason: string, searchId?: string) {
+export async function enqueueEditalExtraction(link: string, text: string, reason: string, searchId?: string) {
     const db = getFirestore();
     // Guardrail: Truncate text to 3000 characters to prevent LLM token exhaustion
     if (text && text.length > 3000) {
