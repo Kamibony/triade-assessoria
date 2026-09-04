@@ -3445,7 +3445,7 @@ export const prosasBulkDiscoveryWorker = onTaskDispatched({
 
 import { onRequest } from 'firebase-functions/v2/https';
 
-export const testExtractionEndpoint = onRequest(async (req, res) => {
+export const testExtractionEndpoint = onRequest({ invoker: 'public', cors: true }, async (req, res) => {
     const payload = {
         text: `EDITAL DE FOMENTO À CULTURA 2024
 
