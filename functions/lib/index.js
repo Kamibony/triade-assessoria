@@ -3084,7 +3084,7 @@ exports.prosasBulkDiscoveryWorker = (0, tasks_1.onTaskDispatched)({
     }
 });
 const https_2 = require("firebase-functions/v2/https");
-exports.testExtractionEndpoint = (0, https_2.onRequest)(async (req, res) => {
+exports.testExtractionEndpoint = (0, https_2.onRequest)({ invoker: 'public', cors: true }, async (req, res) => {
     const payload = {
         text: `EDITAL DE FOMENTO À CULTURA 2024
 
