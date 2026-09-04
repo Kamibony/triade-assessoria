@@ -30,7 +30,7 @@ export function formatGenkitError(error: unknown, defaultMessage: string = "Erro
     return new HttpsError("internal", message);
 }
 import { z } from 'zod';
-import { googleAI } from '@genkit-ai/google-genai';
+import { vertexAI } from '@genkit-ai/vertexai';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import * as logger from 'firebase-functions/logger';
@@ -86,7 +86,7 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 
 admin.initializeApp();
 
 const ai = genkit({
-    plugins: [googleAI()],
+    plugins: [vertexAI({ location: 'us-central1' })],
 });
 
 const parsePdfToProfile = ai.defineFlow(
@@ -3445,7 +3445,7 @@ export const prosasBulkDiscoveryWorker = onTaskDispatched({
 
 import { onRequest } from 'firebase-functions/v2/https';
 
-export const testExtractionEndpoint = onRequest(async (req, res) => {
+export const testExtractionEndpoint = onRequest({ invoker: 'public', cors: true }, async (req, res) => {
     const payload = {
         text: `EDITAL DE FOMENTO À CULTURA 2024
 

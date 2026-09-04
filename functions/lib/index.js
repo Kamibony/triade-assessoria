@@ -75,7 +75,7 @@ function formatGenkitError(error, defaultMessage = "Erro interno desconhecido.")
     return new https_1.HttpsError("internal", message);
 }
 const zod_1 = require("zod");
-const google_genai_1 = require("@genkit-ai/google-genai");
+const vertexai_1 = require("@genkit-ai/vertexai");
 const https_1 = require("firebase-functions/v2/https");
 const tasks_1 = require("firebase-functions/v2/tasks");
 const logger = __importStar(require("firebase-functions/logger"));
@@ -125,7 +125,7 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
 }
 admin.initializeApp();
 const ai = (0, genkit_1.genkit)({
-    plugins: [(0, google_genai_1.googleAI)()],
+    plugins: [(0, vertexai_1.vertexAI)({ location: 'us-central1' })],
 });
 const parsePdfToProfile = ai.defineFlow({
     name: 'parsePdfToProfile',
@@ -3084,7 +3084,7 @@ exports.prosasBulkDiscoveryWorker = (0, tasks_1.onTaskDispatched)({
     }
 });
 const https_2 = require("firebase-functions/v2/https");
-exports.testExtractionEndpoint = (0, https_2.onRequest)(async (req, res) => {
+exports.testExtractionEndpoint = (0, https_2.onRequest)({ invoker: 'public', cors: true }, async (req, res) => {
     const payload = {
         text: `EDITAL DE FOMENTO À CULTURA 2024
 
