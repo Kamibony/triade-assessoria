@@ -36,8 +36,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = void 0;
+exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.scoreMatch = void 0;
 exports.formatGenkitError = formatGenkitError;
+exports.fetchAndExtractText = fetchAndExtractText;
+exports.enqueueEditalExtraction = enqueueEditalExtraction;
 process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const fs = __importStar(require("fs"));
@@ -165,7 +167,7 @@ Sempre retorne os dados em português do Brasil (pt-BR).`;
     }
     return response.output;
 });
-const scoreMatch = ai.defineFlow({
+exports.scoreMatch = ai.defineFlow({
     name: 'scoreMatch',
     inputSchema: zod_1.z.object({
         osc: schemas_js_1.ngoProfileSchema,
@@ -306,7 +308,7 @@ Retorne um array com as URLs selecionadas.`;
     }
     return response.output;
 });
-const extractEditalRules = ai.defineFlow({
+exports.extractEditalRules = ai.defineFlow({
     name: 'extractEditalRules',
     inputSchema: zod_1.z.object({
         text: zod_1.z.string().optional().describe("Texto bruto do edital"),
@@ -417,7 +419,7 @@ exports.extractEditalRulesWorker = (0, tasks_1.onTaskDispatched)({
     const db = (0, firestore_1.getFirestore)();
     const trackingRef = db.collection('pdf_extractions').doc(trackingId);
     try {
-        const result = await extractEditalRules(data);
+        const result = await (0, exports.extractEditalRules)(data);
         await trackingRef.set({
             status: 'completed',
             result: result,
@@ -702,7 +704,7 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
         };
     }
     else {
-        matchResult = await scoreMatch({
+        matchResult = await (0, exports.scoreMatch)({
             osc: oscData,
             edital: editalData,
             oscId: oscId,
@@ -2299,7 +2301,7 @@ exports.extractionWorker = (0, tasks_1.onTaskDispatched)({
         if (!text) {
             throw new Error(`Content document ${contentId} has no text.`);
         }
-        const editalResult = await extractEditalRules({ text });
+        const editalResult = await (0, exports.extractEditalRules)({ text });
         const parseResult = schemas_js_1.editalSchema.safeParse(editalResult);
         if (parseResult.success) {
             let embedding = [];
