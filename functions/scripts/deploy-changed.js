@@ -10,7 +10,7 @@ const allFunctions = [
   'manualTriggerRssSyncFunction', 'scheduledMatchSweeper', 'onMatchGenerated',
   'triggerAgenticSearch', 'autonomousSearchWorker', 'triggerScrapingWorker',
   'seedScrapingTargets', 'extractionWorker', 'processScrapingTargetWorker',
-  'onSearchCreated', 'prosasAuthenticatedWorker', 'renewProsasSessionCron', 'prosasBulkDiscoveryWorker', 'testExtractionEndpoint'
+  'onSearchCreated', 'prosasAuthenticatedWorker', 'renewProsasSessionCron', 'prosasBulkDiscoveryWorker'
 ];
 
 try {
