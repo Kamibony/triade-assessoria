@@ -121,7 +121,7 @@ Sempre retorne os dados em português do Brasil (pt-BR).`;
         }
 
         const response = await ai.generate({
-            model: 'googleai/gemini-2.5-flash',
+            model: 'vertexai/gemini-2.5-flash',
             messages: [
                 { role: 'user', content: content }
             ],
@@ -190,7 +190,7 @@ Responda estritamente em português do Brasil (pt-BR).
 `;
 
         const response = await ai.generate({
-            model: 'googleai/gemini-2.5-flash',
+            model: 'vertexai/gemini-2.5-flash',
             prompt: prompt,
             output: { schema: matchSchema }
         });
@@ -285,7 +285,7 @@ Identifique e retorne APENAS os links que são altamente prováveis de apontar p
 Ignore links genéricos de navegação.
 Retorne um array com as URLs selecionadas.`;
         const response = await ai.generate({
-            model: 'googleai/gemini-2.5-flash',
+            model: 'vertexai/gemini-2.5-flash',
             messages: [{ role: 'user', content: [{ text: prompt }, { text: JSON.stringify(input.links) }] }],
             output: { schema: z.object({ selectedLinks: z.array(z.string()) }) }
         });
@@ -337,7 +337,7 @@ Sempre retorne os dados no formato estruturado solicitado em português do Brasi
         }
 
         const response = await ai.generate({
-            model: 'googleai/gemini-2.5-flash',
+            model: 'vertexai/gemini-2.5-flash',
             messages: [
                 { role: 'user', content: content }
             ],
@@ -377,7 +377,7 @@ Rejeite apenas artigos genéricos de opinião, notícias exclusivas sobre result
 Provide NO reasoning, NO explanations, and NO thinking steps. Output ONLY the raw JSON.`;
 
         const response = await ai.generate({
-            model: 'googleai/gemini-2.5-flash',
+            model: 'vertexai/gemini-2.5-flash',
             messages: [
                 { role: 'user', content: [
                     { text: prompt },
@@ -530,7 +530,7 @@ Missão: ${input.osc.mission || 'Não especificada'}
 Retorne apenas as queries geradas no array.`;
 
         const response = await ai.generate({
-            model: 'googleai/gemini-2.5-flash',
+            model: 'vertexai/gemini-2.5-flash',
             messages: [
                 { role: 'user', content: [{ text: prompt }] }
             ],
@@ -566,7 +566,7 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
 async function generateTextEmbedding(text: string): Promise<number[]> {
     try {
         const response = await ai.embed({
-            embedder: 'googleai/text-embedding-004',
+            embedder: 'vertexai/text-embedding-004',
             content: text.substring(0, 5000)
         });
         if (Array.isArray(response)) {
@@ -1472,7 +1472,7 @@ export const processOscChunkWorker = onTaskDispatched({
                     const llmPrompt = `You are a strict, ruthless data filter. Evaluate NGOs strictly based on explicit textual evidence in their Name or CNAE. Do NOT assume generic religious organizations (igrejas, congregações) or generic neighborhood associations (moradores) run niche programs unless their name explicitly states it. If the user asks for a specific niche and the NGO is generic, EXCLUDE IT. When in doubt, EXCLUDE. User's request: ${aiPrompt}. Here are ${chunk.length} NGOs (Name + CNAE descriptions):\n${promptData}\nAnalyze their semantic alignment with the request. Return a raw JSON array containing ONLY the string CNPJs of the NGOs that genuinely match the profile.`;
 
                     const response = await ai.generate({
-                        model: 'googleai/gemini-2.5-flash',
+                        model: 'vertexai/gemini-2.5-flash',
                         prompt: llmPrompt,
                         config: { temperature: 0.0 },
                         output: { schema: z.array(z.string()) }
@@ -2095,7 +2095,7 @@ Além disso, rascunhe uma mensagem de contato (email ou WhatsApp) engajadora par
 Responda estritamente no formato do schema em português do Brasil (pt-BR).`;
 
         const response = await ai.generate({
-            model: 'googleai/gemini-2.5-flash',
+            model: 'vertexai/gemini-2.5-flash',
             tools: [searchDatabaseTool],
             messages: [
                 { role: 'system', content: [{ text: systemPrompt }] },
