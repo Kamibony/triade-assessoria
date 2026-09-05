@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scrapingTargetSchema = exports.copilotResponseSchema = exports.triageSchema = exports.matchSchema = exports.editalSchema = exports.ngoProfileSchema = void 0;
+exports.scrapingTargetSchema = exports.copilotResponseSchema = exports.triageSchema = exports.matchSchema = exports.bureaucracySchema = exports.editalSchema = exports.ngoProfileSchema = void 0;
 const zod_1 = require("zod");
 exports.ngoProfileSchema = zod_1.z.object({
     name: zod_1.z.string().describe("Nome da ONG"),
@@ -27,6 +27,10 @@ exports.editalSchema = zod_1.z.object({
         allowedActivities: zod_1.z.array(zod_1.z.string()).describe("Lista de atividades permitidas ou focos de atuação"),
     }).describe("Critérios de elegibilidade do edital"),
     embedding: zod_1.z.array(zod_1.z.number()).optional().describe("Vetor de embedding para busca semântica")
+});
+exports.bureaucracySchema = zod_1.z.object({
+    passesBureaucracy: zod_1.z.boolean().describe("Se a ONG passa nas regras burocráticas (tempo, localização, documentos, prazo)"),
+    rejectionReason: zod_1.z.string().nullable().optional().describe("Se rejeitada, o motivo claro. Se aprovada, null.")
 });
 exports.matchSchema = zod_1.z.object({
     editalId: zod_1.z.string().describe("ID do edital analisado"),

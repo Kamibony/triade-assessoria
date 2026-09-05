@@ -28,6 +28,11 @@ export const editalSchema = z.object({
     embedding: z.array(z.number()).optional().describe("Vetor de embedding para busca semântica")
 });
 
+export const bureaucracySchema = z.object({
+    passesBureaucracy: z.boolean().describe("Se a ONG passa nas regras burocráticas (tempo, localização, documentos, prazo)"),
+    rejectionReason: z.string().nullable().optional().describe("Se rejeitada, o motivo claro. Se aprovada, null.")
+});
+
 export const matchSchema = z.object({
     editalId: z.string().describe("ID do edital analisado"),
     oscId: z.string().describe("ID da ONG analisada"),

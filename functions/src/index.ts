@@ -34,7 +34,7 @@ import { vertexAI } from '@genkit-ai/google-genai';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import * as logger from 'firebase-functions/logger';
-import { ngoProfileSchema, editalSchema, matchSchema, triageSchema, copilotResponseSchema } from './shared/schemas.js';
+import { ngoProfileSchema, editalSchema, matchSchema, bureaucracySchema, triageSchema, copilotResponseSchema } from './shared/schemas.js';
 import * as cheerio from 'cheerio';
 import Parser from 'rss-parser';
 
@@ -137,9 +137,48 @@ Sempre retorne os dados em português do Brasil (pt-BR).`;
 
 
 
-export const scoreMatch = ai.defineFlow(
+export const bureaucracyAgentFlow = ai.defineFlow(
     {
-        name: 'scoreMatch',
+        name: 'bureaucracyAgentFlow',
+        inputSchema: z.object({
+            osc: ngoProfileSchema,
+            edital: editalSchema,
+        }),
+        outputSchema: bureaucracySchema,
+    },
+    async (input) => {
+        const currentDate = new Date().toISOString();
+        const prompt = `Você é um Agente de Burocracia estrito avaliando a elegibilidade de uma ONG para um Edital.
+Seu trabalho é APENAS olhar para restrições e regras rígidas. Você não avalia alinhamento de projeto, missão ou tema.
+
+Data atual do sistema: ${currentDate}.
+
+Regras de Ouro:
+1. Prazos: Se a data limite do edital (${input.edital.deadline}) for anterior à data atual, a ONG é INELEGÍVEL.
+2. Localização: Se o edital exige localizações específicas (${input.edital.eligibilityCriteria.requiredLocations.join(', ')}) e a ONG (${input.osc.location}) não está nelas (ou se a abrangência não for nacional/ampla o suficiente para incluí-la), a ONG é INELEGÍVEL.
+3. Idade da ONG: Calcule os anos desde a data de fundação (${input.osc.foundationDate}) até hoje. Se for menor que o mínimo exigido pelo edital (${input.edital.eligibilityCriteria.minYearsActive}), a ONG é INELEGÍVEL.
+
+Retorne { passesBureaucracy: false, rejectionReason: '...' } se falhar em ALGUMA dessas regras.
+Retorne { passesBureaucracy: true, rejectionReason: null } se passar por TODAS as regras.
+Responda APENAS com o JSON. NÃO explique o seu pensamento.`;
+
+        const response = await ai.generate({
+            model: 'vertexai/gemini-2.5-flash',
+            prompt: prompt,
+            config: { temperature: 0.0 }, // Hard constraints require deterministic output
+            output: { schema: bureaucracySchema }
+        });
+
+        if (!response.output) {
+            throw new Error("Falha na avaliação burocrática");
+        }
+        return response.output;
+    }
+);
+
+export const thematicAgentFlow = ai.defineFlow(
+    {
+        name: 'thematicAgentFlow',
         inputSchema: z.object({
             osc: ngoProfileSchema,
             edital: editalSchema,
@@ -149,45 +188,30 @@ export const scoreMatch = ai.defineFlow(
         outputSchema: matchSchema,
     },
     async (input) => {
-        const currentDate = new Date().toISOString();
-        const prompt = `Você é um agente especialista em avaliação de projetos culturais para leis de incentivo no Brasil, atuando pela Tríade Assessoria.
-
-Contexto de Data do Sistema:
-A data atual de hoje é ${currentDate}. Tenha isso em mente ao avaliar prazos e datas de encerramento.
-
-A sua tarefa é cruzar os dados de uma ONG com as regras e critérios de elegibilidade de um Edital específico e determinar o Match (compatibilidade) aplicando um Processo Estrito de Avaliação de Duas Fases (Two-Gate Evaluation Process).
-
-Fase 1 (Gate 1): Validação Temporal / Status
-Verifique agressivamente se o edital já passou do prazo final (ex: "inscrições encerradas", ou se a data limite de inscrição já passou em relação à data atual do sistema fornecida acima).
-Check the current date. If the edital's application deadline has passed, or if the page indicates 'Encerrado', 'Resultados', or 'Prorrogado' (for a past date), you MUST immediately halt evaluation, assign a final score of 0%, and set the status to 'Inelegível'. Do NOT average the score with thematic fit.
-SE O EDITAL ESTIVER ENCERRADO OU COM PRAZO EXPIRADO, você DEVE gerar um 'matchScore' de 0, determinar 'eligibility' como false. IMPORTANTE: Nesse caso, retorne 'reasoning: null' e NÃO gere um 'actionPlan' para poupar tokens, pule a Fase 2.
-
-Fase 2 (Gate 2): Alinhamento Temático (Apenas se passar pela Fase 1)
-Avalie os critérios de elegibilidade abaixo cruzando a ONG com o Edital e gere um 'matchScore' de 0 a 100 indicando o grau de compatibilidade (Alinhamento Temático), se e somente se o edital for considerado Válido / Aberto na Fase 1. Determine 'eligibility' (true ou false).
+        const prompt = `Você é um Analista de Alinhamento Temático e Semântico, atuando pela Tríade Assessoria.
+Esta ONG já passou pela triagem burocrática e é elegível em termos de localização, tempo e prazo.
+Sua tarefa agora é cruzar o perfil da ONG com as regras temáticas e o objetivo do Edital para determinar o grau de alinhamento (Match Score).
 
 Perfil da ONG:
 Nome: ${input.osc.name}
-Data de Fundação: ${input.osc.foundationDate}
-Localização: ${input.osc.location}
-Status da Documentação: ${input.osc.documentationStatus}
-Projetos Culturais Anteriores: ${input.osc.previousProjectsApproved ? 'Sim' : 'Não'}
+Missão: ${input.osc.mission || 'Não especificada'}
+Projetos Anteriores: ${input.osc.previousProjectsApproved ? 'Sim' : 'Não'}
 Atividades Principais: ${(input.osc.coreActivities || []).join(', ')}
 
-Regras do Edital:
+Objetivo/Tema do Edital:
 Título: ${input.edital.title}
 Emissor: ${input.edital.issuer}
-Critérios de Elegibilidade:
-- Anos mínimos de atividade: ${input.edital.eligibilityCriteria.minYearsActive}
-- Localizações exigidas: ${input.edital.eligibilityCriteria.requiredLocations.join(', ')}
-- Documentação exigida: ${input.edital.eligibilityCriteria.requiredDocumentation.join(', ')}
-- Atividades permitidas: ${input.edital.eligibilityCriteria.allowedActivities.join(', ')}
+Atividades Permitidas/Foco: ${input.edital.eligibilityCriteria.allowedActivities.join(', ')}
 
-Se a ONG for ELEGÍVEL e o score for > 0, forneça um 'reasoning' (justificativa detalhada).
-Forneça um 'aiSummary' (um resumo de 1-2 frases destacando os pontos fortes ou fracos).
-Forneça um 'badges' (2 a 3 tags curtas que categorizam o match, ex: 'Alta Aderência', 'Desafio Financeiro', 'Foco Regional').
-Se a ONG for INELEGÍVEL (0 de score) não gere actionPlan nem reasoning. Se for elegível e com score baixo mas passível de melhora, gere o actionPlan.
-Responda estritamente em português do Brasil (pt-BR).
-`;
+Instruções:
+- Gere um 'matchScore' de 0 a 100 indicando o grau de compatibilidade (Alinhamento Temático).
+- Determine 'eligibility' como true.
+- Forneça um 'reasoning' detalhado justificando o score com base no alinhamento da missão e atividades da ONG com o foco do edital.
+- Forneça um 'aiSummary' (um resumo de 1-2 frases destacando os pontos fortes).
+- Forneça 'badges' (2 a 3 tags curtas, ex: 'Alinhamento Perfeito', 'Missão Similar').
+- Forneça um 'actionPlan' focado em como a ONG deve abordar a proposta baseada nas suas atividades.
+
+Responda estritamente em português do Brasil (pt-BR).`;
 
         const response = await ai.generate({
             model: 'vertexai/gemini-2.5-flash',
@@ -196,14 +220,14 @@ Responda estritamente em português do Brasil (pt-BR).
         });
 
         if (!response.output) {
-            throw new Error("Falha ao gerar resultado de match");
+            throw new Error("Falha ao gerar avaliação temática");
         }
 
-        // Garante que os IDs repassados na entrada retornem na saída
         return {
             ...response.output,
             editalId: input.editalId,
-            oscId: input.oscId
+            oscId: input.oscId,
+            eligibility: true // It passed bureaucracy, so it is inherently eligible, the score just reflects fit
         };
     }
 );
@@ -732,8 +756,12 @@ async function processMatchEvaluation(oscId: string, editalId: string, forceReca
 
     let matchResult: unknown;
 
-    if (similarityScore < 0.70) {
-        console.log(`Silently rejecting match for OSC ${oscId} and Edital ${editalId} due to low similarity score (${similarityScore} < 0.70)`);
+    // Dynamically adjust pre-filter threshold based on profile density to avoid false negatives for sparse data
+    const isSparseProfile = (!oscData.mission || oscData.mission.length < 20) && (oscData.coreActivities.length <= 2);
+    const dynamicThreshold = isSparseProfile ? 0.50 : 0.70;
+
+    if (similarityScore < dynamicThreshold) {
+        console.log(`Silently rejecting match for OSC ${oscId} and Edital ${editalId} due to low similarity score (${similarityScore} < ${dynamicThreshold})`);
         matchResult = {
             matchScore: 0,
             eligibility: false,
@@ -743,12 +771,35 @@ async function processMatchEvaluation(oscId: string, editalId: string, forceReca
             reasoning: null
         };
     } else {
-        matchResult = await scoreMatch({
+        // Multi-Agent Pipeline
+        console.log(`Similarity passed (${similarityScore}). Invoking Bureaucracy Agent...`);
+        const bureaucracyResult = await bureaucracyAgentFlow({
             osc: oscData,
-            edital: editalData,
-            oscId: oscId,
-            editalId: editalId
+            edital: editalData
         });
+
+        if (!bureaucracyResult.passesBureaucracy) {
+            console.log(`Bureaucracy Agent rejected match: ${bureaucracyResult.rejectionReason}`);
+            matchResult = {
+                matchScore: 0,
+                eligibility: false,
+                status: 'Inelegível',
+                badges: ['Restrição Burocrática'],
+                aiSummary: 'A ONG não atende aos requisitos burocráticos do edital (prazos, localização ou idade).',
+                reasoning: bureaucracyResult.rejectionReason,
+                actionPlan: null
+            };
+        } else {
+            console.log(`Bureaucracy Agent passed. Invoking Thematic Agent...`);
+            matchResult = await thematicAgentFlow({
+                osc: oscData,
+                edital: editalData,
+                oscId: oscId,
+                editalId: editalId
+            });
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (matchResult as any).status = 'Elegível';
+        }
     }
 
     const matchRef = existingMatchRef || db.collection('matches').doc();
@@ -1520,9 +1571,18 @@ export const processOscChunkWorker = onTaskDispatched({
             const oscDoc = await oscRef.get();
             const now = FieldValue.serverTimestamp();
 
+            let embedding: number[] | null = null;
+            try {
+                 const oscText = `Missão: ${parseResult.data.mission || ''}. Foco: ${(parseResult.data.coreActivities || []).join(', ')}. Nome: ${parseResult.data.name || ''}`;
+                 embedding = await generateTextEmbedding(oscText);
+            } catch (embedError) {
+                 console.warn(`Failed to generate embedding for newly ingested OSC ${cleanCnpj}:`, embedError);
+            }
+
             const upsertData = {
                 ...parseResult.data,
                 cnpj: cleanCnpj,
+                embedding: embedding,
                 updatedAt: now,
             };
 
@@ -1530,7 +1590,10 @@ export const processOscChunkWorker = onTaskDispatched({
                 Object.assign(upsertData, { createdAt: now });
             }
 
-            await oscRef.set(upsertData, { merge: true });
+            // Clean undefined values from object before Firestore save to avoid errors
+            const finalUpsertData = Object.fromEntries(Object.entries(upsertData).filter(([_, v]) => v !== undefined));
+
+            await oscRef.set(finalUpsertData, { merge: true });
             imported++;
         } catch (error: unknown) {
             console.error(`Error transforming and upserting OSC ${osc.cleanCnpj}:`, error);
@@ -1940,13 +2003,26 @@ export const ingestManualOscFunction = onCall({
 
         const profileData = await parsePdfToProfile({ pdfBase64s });
 
-        // Save to Firestore
-        const oscRef = await getFirestore().collection('oscs').add({
+        let embedding: number[] | null = null;
+        try {
+            const oscText = `Missão: ${profileData.mission || ''}. Foco: ${(profileData.coreActivities || []).join(', ')}. Nome: ${profileData.name || ''}`;
+            embedding = await generateTextEmbedding(oscText);
+        } catch (embedError) {
+            console.warn("Failed to generate embedding for manually ingested OSC:", embedError);
+        }
+
+        const dataToSave = {
             ...profileData,
+            embedding: embedding,
             createdAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp(),
             source: 'manual_ingest'
-        });
+        };
+
+        const finalDataToSave = Object.fromEntries(Object.entries(dataToSave).filter(([_, v]) => v !== undefined));
+
+        // Save to Firestore
+        const oscRef = await getFirestore().collection('oscs').add(finalDataToSave);
 
         // Cleanup: Delete temporary files
         for (const path of storagePaths) {
