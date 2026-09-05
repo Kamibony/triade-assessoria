@@ -103,10 +103,12 @@ Eu enviarei o Estatuto Social, Cartão CNPJ e/ou ATA de uma ONG.
 Extraia as informações necessárias e preencha o perfil da ONG (ngoProfileSchema) com precisão.
 Você DEVE extrair o CNPJ, Nome (Legal Name), Missão/Foco de atuação (do Estatuto) e a Validade da Diretoria (da ATA).
 Se o documento não mencionar o status da documentação, presuma 'Pendente'. Se não houver clareza sobre projetos anteriores, presuma falso.
-Sempre retorne os dados em português do Brasil (pt-BR).`;
+Sempre retorne os dados em português do Brasil (pt-BR).
+CRÍTICO: Do NOT invent or generate example data. Se o texto fornecido for insuficiente, vazio ou não contiver dados reais de OSC, NÃO crie dados fictícios.`;
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const content: any[] = [{ text: prompt }];
+        let totalExtractedLength = 0;
 
         for (let i = 0; i < input.pdfBase64s.length; i++) {
             try {
@@ -114,10 +116,17 @@ Sempre retorne os dados em português do Brasil (pt-BR).`;
                 if (!base64String) continue;
                 const pdfBuffer = Buffer.from(base64String, 'base64');
                 const pdfData = await pdfParse(pdfBuffer, { max: 10 });
-                content.push({ text: `Conteúdo do Documento ${i + 1}:\n\n${pdfData.text.substring(0, 15000)}` });
+                const extractedText = pdfData.text.substring(0, 15000);
+                totalExtractedLength += extractedText.length;
+                console.log(`Extracted ${extractedText.length} characters from PDF ${i + 1}`);
+                content.push({ text: `Conteúdo do Documento ${i + 1}:\n\n${extractedText}` });
             } catch (error) {
                 console.warn(`Falha ao analisar o PDF base64 no índice ${i}:`, error);
             }
+        }
+
+        if (totalExtractedLength < 50) {
+            throw new Error("Falha ao extrair texto do(s) PDF(s) (texto insuficiente ou vazio).");
         }
 
         const response = await ai.generate({
@@ -131,7 +140,24 @@ Sempre retorne os dados em português do Brasil (pt-BR).`;
         if (!response.output) {
             throw new Error("Falha ao extrair dados do PDF");
         }
-        return response.output;
+
+        const output = response.output;
+
+        // Strict Fallback Validation
+        const fakeCnpjs = ['12.345.678/0001-90', '00.000.000/0001-00', '11.111.111/1111-11'];
+        const fakeNameTokens = ['exemplo', 'nome da ong', 'associação de cultura e arte sem fronteiras'];
+
+        const lowerName = (output.name || '').toLowerCase();
+
+        if (output.cnpj && fakeCnpjs.includes(output.cnpj)) {
+             throw new Error("Fake data hallucinated by LLM: Invalid CNPJ detected.");
+        }
+
+        if (fakeNameTokens.some(token => lowerName.includes(token))) {
+             throw new Error("Fake data hallucinated by LLM: Fake name detected.");
+        }
+
+        return output;
     }
 );
 
