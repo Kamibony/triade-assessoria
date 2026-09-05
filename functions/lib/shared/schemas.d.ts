@@ -103,6 +103,7 @@ export declare const matchSchema: z.ZodObject<{
     aiSummary: z.ZodOptional<z.ZodString>;
     badges: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     actionPlan: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    actionState: z.ZodDefault<z.ZodOptional<z.ZodEnum<["Pendente", "Aprovado", "Rejeitado", "Revisao"]>>>;
 }, "strip", z.ZodTypeAny, {
     editalId: string;
     oscId: string;
@@ -113,6 +114,7 @@ export declare const matchSchema: z.ZodObject<{
     aiSummary?: string | undefined;
     badges?: string[] | undefined;
     actionPlan?: string[] | undefined;
+    actionState: "Aprovado" | "Pendente" | "Rejeitado" | "Revisao";
 }, {
     editalId: string;
     oscId: string;
@@ -123,6 +125,7 @@ export declare const matchSchema: z.ZodObject<{
     aiSummary?: string | undefined;
     badges?: string[] | undefined;
     actionPlan?: string[] | undefined;
+    actionState?: "Aprovado" | "Pendente" | "Rejeitado" | "Revisao" | undefined;
 }>;
 export declare const triageSchema: z.ZodObject<{
     isValidEdital: z.ZodBoolean;

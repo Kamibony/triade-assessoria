@@ -41,7 +41,8 @@ exports.matchSchema = zod_1.z.object({
     reasoning: zod_1.z.string().nullable().optional().describe("Justificativa detalhada do AI para o score e elegibilidade (nulo se falhar no portão 1 ou inelegível)"),
     aiSummary: zod_1.z.string().optional().describe("Um resumo conciso de 1-2 frases sobre a compatibilidade"),
     badges: zod_1.z.array(zod_1.z.string()).optional().describe("Lista de tags ou selos (ex: 'Alto Alinhamento', 'Prazo Curto', 'Regional')"),
-    actionPlan: zod_1.z.array(zod_1.z.string()).optional().describe("Plano de Ação sugerido caso a ONG não seja elegível ou tenha score baixo (opcional/pular para poupar tokens se inelegível claro)")
+    actionPlan: zod_1.z.array(zod_1.z.string()).optional().describe("Plano de Ação sugerido caso a ONG não seja elegível ou tenha score baixo (opcional/pular para poupar tokens se inelegível claro)"),
+    actionState: zod_1.z.enum(['Pendente', 'Aprovado', 'Rejeitado', 'Revisao']).optional().default('Pendente').describe("Estado de feedback humano sobre o match")
 });
 exports.triageSchema = zod_1.z.object({
     isValidEdital: zod_1.z.boolean().describe("True se a página contiver as regras de um edital ou for o documento oficial do edital. False se for apenas uma notícia SOBRE o edital.")
