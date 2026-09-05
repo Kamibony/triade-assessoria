@@ -83,6 +83,16 @@ export declare const editalSchema: z.ZodObject<{
     };
     embedding?: number[] | undefined;
 }>;
+export declare const bureaucracySchema: z.ZodObject<{
+    passesBureaucracy: z.ZodBoolean;
+    rejectionReason: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+}, "strip", z.ZodTypeAny, {
+    passesBureaucracy: boolean;
+    rejectionReason?: string | null | undefined;
+}, {
+    passesBureaucracy: boolean;
+    rejectionReason?: string | null | undefined;
+}>;
 export declare const matchSchema: z.ZodObject<{
     editalId: z.ZodString;
     oscId: z.ZodString;
