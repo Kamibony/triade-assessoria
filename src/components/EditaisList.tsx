@@ -94,6 +94,23 @@ export function EditaisList() {
         return new Date(time).toLocaleDateString('pt-BR');
     };
 
+    const totalBudget = editais.reduce((sum, e) => sum + (Number(e.totalBudget) || 0), 0);
+
+    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    const editaisClosingSoon = editais.filter(e => {
+        if (!e.deadline) return false;
+        let deadlineMs;
+        if (e.deadline.includes('/')) {
+             const [day, month, year] = e.deadline.split('/');
+             deadlineMs = new Date(`${year}-${month}-${day}T00:00:00`).getTime();
+        } else {
+             deadlineMs = new Date(e.deadline + (e.deadline.length === 10 ? 'T00:00:00' : '')).getTime();
+        }
+        if (isNaN(deadlineMs)) return false;
+        return deadlineMs >= now && (deadlineMs - now) <= thirtyDaysMs;
+    }).length;
+
     return (
         <div className="container mx-auto p-8 max-w-7xl">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
@@ -113,6 +130,23 @@ export function EditaisList() {
                     onChange={(e) => setSearchTerm(e.target.value)}
                   />
               </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div className="bg-card border rounded-lg p-6 shadow-sm flex flex-col items-center justify-center text-center">
+                    <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Total de Editais Ativos</p>
+                    <p className="text-3xl font-bold mt-1 text-primary">{editais.length}</p>
+                </div>
+                <div className="bg-card border rounded-lg p-6 shadow-sm flex flex-col items-center justify-center text-center">
+                    <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Orçamento Disponível</p>
+                    <p className="text-3xl font-bold mt-1 text-emerald-500">
+                        R$ {totalBudget.toLocaleString('pt-BR')}
+                    </p>
+                </div>
+                <div className="bg-card border rounded-lg p-6 shadow-sm flex flex-col items-center justify-center text-center">
+                    <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Encerram em 30 Dias</p>
+                    <p className="text-3xl font-bold mt-1 text-amber-500">{editaisClosingSoon}</p>
+                </div>
             </div>
 
             {filteredEditais.length === 0 ? (

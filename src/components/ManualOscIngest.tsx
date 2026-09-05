@@ -214,7 +214,7 @@ export function ManualOscIngest() {
                   alert("Houve um erro ao iniciar a busca. Você pode tentar novamente na dashboard.");
                 } finally {
                   setIsSearching(false);
-                  navigate(`/admin/matches?oscId=${result.oscId}`);
+                  navigate(`/admin/radar?oscId=${result.oscId}`);
                 }
               }}
             >
