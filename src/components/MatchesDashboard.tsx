@@ -19,7 +19,7 @@ export function MatchesDashboard() {
   const [expandedMatch, setExpandedMatch] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [groupBy, setGroupBy] = useState<'none' | 'edital' | 'osc'>('none');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('hide-rejected');
 
   useEffect(() => {
     const db = getFirestore();
@@ -121,7 +121,12 @@ export function MatchesDashboard() {
           match.editalId.toLowerCase().includes(searchTerm.toLowerCase());
 
       const matchesOscFilter = filterOscId ? match.oscId === filterOscId : true;
-      const matchesStatus = statusFilter === 'all' ? true : (match.actionState || 'Pendente') === statusFilter;
+
+      const matchesStatus = statusFilter === 'all'
+          ? true
+          : statusFilter === 'hide-rejected'
+              ? match.actionState !== 'Rejeitado' && match.eligibility !== false
+              : (match.actionState || 'Pendente') === statusFilter;
 
       return matchesSearch && matchesOscFilter && matchesStatus;
   });
@@ -143,6 +148,31 @@ export function MatchesDashboard() {
          <p className="text-muted-foreground mt-2">
             Resultados da avaliação multi-agente. Valide os matches gerados pela IA para refinar os futuros resultados.
          </p>
+       </div>
+
+       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+           <div className="bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center">
+               <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Total Matches</p>
+               <p className="text-3xl font-bold mt-1">{matches.length}</p>
+           </div>
+           <div className="bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center">
+               <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Pendentes</p>
+               <p className="text-3xl font-bold mt-1 text-amber-500">
+                   {matches.filter(m => !m.actionState || m.actionState === 'Pendente').length}
+               </p>
+           </div>
+           <div className="bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center">
+               <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Aprovados</p>
+               <p className="text-3xl font-bold mt-1 text-emerald-500">
+                   {matches.filter(m => m.actionState === 'Aprovado').length}
+               </p>
+           </div>
+           <div className="bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center">
+               <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Reprovados</p>
+               <p className="text-3xl font-bold mt-1 text-red-500">
+                   {matches.filter(m => m.actionState === 'Rejeitado' || m.eligibility === false).length}
+               </p>
+           </div>
        </div>
 
        <MatchFilters

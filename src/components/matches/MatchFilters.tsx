@@ -36,6 +36,7 @@ export function MatchFilters({ searchTerm, setSearchTerm, groupBy, setGroupBy, s
                         className="rounded-md border border-input bg-background py-1.5 px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                         <option value="all">Todos</option>
+                        <option value="hide-rejected">Ocultar Reprovados</option>
                         <option value="Pendente">Pendente</option>
                         <option value="Aprovado">Aprovado</option>
                         <option value="Rejeitado">Rejeitado</option>
