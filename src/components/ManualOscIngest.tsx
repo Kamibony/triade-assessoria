@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { functions, storage } from '../lib/firebase';
 import { ref, uploadBytes } from 'firebase/storage';
@@ -10,8 +10,11 @@ export function ManualOscIngest() {
   const navigate = useNavigate();
   const [files, setFiles] = useState<File[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [result, setResult] = useState<{type: 'success' | 'error', message: string, profile?: any, oscId?: string} | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -24,6 +27,13 @@ export function ManualOscIngest() {
   const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
   }, []);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const selectedFiles = Array.from(e.target.files).filter(file => file.type === 'application/pdf');
+      setFiles(prev => [...prev, ...selectedFiles]);
+    }
+  };
 
   const removeFile = (indexToRemove: number) => {
     setFiles(files.filter((_, index) => index !== indexToRemove));
@@ -94,10 +104,20 @@ export function ManualOscIngest() {
             <div
               onDrop={handleDrop}
               onDragOver={handleDragOver}
+              onClick={() => fileInputRef.current?.click()}
               className={`border-2 border-dashed rounded-lg p-12 text-center transition-colors cursor-pointer ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'hover:bg-muted/50 border-border'}`}
             >
+              <input
+                type="file"
+                multiple
+                accept="application/pdf"
+                ref={fileInputRef}
+                onChange={handleFileSelect}
+                className="hidden"
+                style={{ display: 'none' }}
+              />
               <UploadCloud className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-              <p className="text-lg font-medium">Arraste e solte seus PDFs aqui</p>
+              <p className="text-lg font-medium">Arraste e solte seus PDFs aqui ou clique para procurar</p>
               <p className="text-sm text-muted-foreground mt-1">Apenas arquivos .pdf são suportados</p>
             </div>
 
@@ -183,20 +203,29 @@ export function ManualOscIngest() {
 
             <Button
               className="w-full mt-6 text-lg py-6 bg-brand-orange hover:bg-brand-orange/90 text-white"
-              onClick={() => {
+              disabled={isSearching}
+              onClick={async () => {
+                setIsSearching(true);
                 try {
-                  const triggerMatchOrchestrator = httpsCallable(functions, 'triggerMatchOrchestrator');
-                  // Fire and forget to avoid blocking the UI
-                  triggerMatchOrchestrator({ oscId: result.oscId }).catch(error => {
-                    console.error("Error triggering match orchestrator:", error);
-                  });
+                  const triggerAgenticSearch = httpsCallable(functions, 'triggerAgenticSearch');
+                  await triggerAgenticSearch({ oscId: result.oscId });
                 } catch (error) {
-                  console.error("Error setting up match orchestrator call:", error);
+                  console.error("Error triggering agentic search:", error);
+                  alert("Houve um erro ao iniciar a busca. Você pode tentar novamente na dashboard.");
+                } finally {
+                  setIsSearching(false);
+                  navigate(`/admin/matches?oscId=${result.oscId}`);
                 }
-                navigate(`/admin/matches?oscId=${result.oscId}`);
               }}
             >
-              Encontrar Editais Compatíveis
+              {isSearching ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                  Analisando Editais...
+                </>
+              ) : (
+                'Encontrar Editais Compatíveis'
+              )}
             </Button>
           </div>
         )}
