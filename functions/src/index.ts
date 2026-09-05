@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { chromium } from 'playwright-extra';
 import chromiumSparticuz from '@sparticuz/chromium';
-const pdfParse = require('pdf-parse');
+const { PDFParse } = require('pdf-parse');
 import stealth from 'puppeteer-extra-plugin-stealth';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
@@ -93,7 +93,7 @@ const parsePdfToProfile = ai.defineFlow(
     {
         name: 'parsePdfToProfile',
         inputSchema: z.object({
-            pdfBase64s: z.array(z.string()).describe("Arquivos PDF codificados em Base64"),
+            storagePaths: z.array(z.string()).describe("Caminhos no Storage para os arquivos PDF"),
         }),
         outputSchema: ngoProfileSchema,
     },
@@ -110,18 +110,32 @@ CRÍTICO: Do NOT invent or generate example data. Se o texto fornecido for insuf
         const content: any[] = [{ text: prompt }];
         let totalExtractedLength = 0;
 
-        for (let i = 0; i < input.pdfBase64s.length; i++) {
+        const bucket = getStorage().bucket();
+
+        for (let i = 0; i < input.storagePaths.length; i++) {
             try {
-                const base64String = input.pdfBase64s[i] || '';
-                if (!base64String) continue;
-                const pdfBuffer = Buffer.from(base64String, 'base64');
-                const pdfData = await pdfParse(pdfBuffer, { max: 10 });
+                const path = input.storagePaths[i];
+                if (!path) continue;
+
+                const file = bucket.file(path);
+                const [exists] = await file.exists();
+                if (!exists) {
+                    console.warn(`Arquivo não encontrado no Storage: ${path}`);
+                    continue;
+                }
+
+                const [buffer] = await file.download();
+                const uint8Array = new Uint8Array(buffer);
+                const parser = new PDFParse(uint8Array, { max: 10 });
+                const pdfData = await parser.getText();
+
                 const extractedText = pdfData.text.substring(0, 15000);
                 totalExtractedLength += extractedText.length;
                 console.log(`Extracted ${extractedText.length} characters from PDF ${i + 1}`);
                 content.push({ text: `Conteúdo do Documento ${i + 1}:\n\n${extractedText}` });
             } catch (error) {
-                console.warn(`Falha ao analisar o PDF base64 no índice ${i}:`, error);
+                console.warn(`Falha ao analisar o PDF no índice ${i}:`, error);
+                // Allow process to continue even if one PDF fails.
             }
         }
 
@@ -265,12 +279,12 @@ export const parsePdfProfileWorker = onTaskDispatched({
     timeoutSeconds: 540,
     memory: '2GiB'
 }, async (request) => {
-    const { pdfBase64s, trackingId } = request.data as { pdfBase64s: string[], trackingId: string };
+    const { storagePaths, trackingId } = request.data as { storagePaths: string[], trackingId: string };
     const db = getFirestore();
     const trackingRef = db.collection('pdf_extractions').doc(trackingId);
 
     try {
-        const result = await parsePdfToProfile({ pdfBase64s });
+        const result = await parsePdfToProfile({ storagePaths });
         await trackingRef.set({
             status: 'completed',
             result: result,
@@ -295,11 +309,9 @@ export const parsePdfProfileFunction = onCall({
     //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
     // }
 
-    const pdfBase64s = request.data.pdfBase64 ? [request.data.pdfBase64] : request.data.pdfBase64s || [];
-    for (const b64 of pdfBase64s) {
-        if (typeof b64 === 'string' && b64.length > 7000000) {
-            throw new HttpsError('invalid-argument', 'Um dos arquivos PDF excede o limite máximo permitido (aproximadamente 5MB).');
-        }
+    const { storagePaths } = request.data as { storagePaths?: string[] };
+    if (!storagePaths || !Array.isArray(storagePaths) || storagePaths.length === 0) {
+        throw new HttpsError('invalid-argument', 'Pelo menos um caminho de Storage é necessário.');
     }
 
     const db = getFirestore();
@@ -312,7 +324,7 @@ export const parsePdfProfileFunction = onCall({
 
     const queue = getFunctions().taskQueue('parsePdfProfileWorker');
     await queue.enqueue({
-        pdfBase64s: pdfBase64s,
+        storagePaths: storagePaths,
         trackingId: trackingRef.id
     });
 
@@ -374,7 +386,9 @@ Sempre retorne os dados no formato estruturado solicitado em português do Brasi
         if (input.pdfBase64) {
             try {
                 const pdfBuffer = Buffer.from(input.pdfBase64, 'base64');
-                const pdfData = await pdfParse(pdfBuffer, { max: 10 });
+                const uint8Array = new Uint8Array(pdfBuffer);
+                const parser = new PDFParse(uint8Array, { max: 10 });
+                const pdfData = await parser.getText();
                 const extractedText = pdfData.text.substring(0, 15000);
                 content.push({ text: `Texto extraído do PDF:\n\n${extractedText}` });
             } catch (error) {
@@ -2013,21 +2027,9 @@ export const ingestManualOscFunction = onCall({
     }
 
     const bucket = getStorage().bucket();
-    const pdfBase64s: string[] = [];
 
     try {
-        // Download and convert PDFs to Base64
-        for (const path of storagePaths) {
-            const file = bucket.file(path);
-            const [exists] = await file.exists();
-            if (!exists) {
-                throw new Error(`Arquivo não encontrado no Storage: ${path}`);
-            }
-            const [buffer] = await file.download();
-            pdfBase64s.push(buffer.toString('base64'));
-        }
-
-        const profileData = await parsePdfToProfile({ pdfBase64s });
+        const profileData = await parsePdfToProfile({ storagePaths });
 
         if (!profileData.name || profileData.name.trim().length < 3 || !profileData.cnpj) {
             throw new HttpsError('invalid-argument', 'Não foi possível extrair Nome e CNPJ válidos dos documentos.');
@@ -2923,7 +2925,9 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
 
                         let parsedText = '';
                         try {
-                            const pdfData = await pdfParse(buffer, { max: 5 });
+                            const uint8Array = new Uint8Array(buffer);
+                            const parser = new PDFParse(uint8Array, { max: 5 });
+                            const pdfData = await parser.getText();
                             parsedText = pdfData.text;
                         } catch (parseErr) {
                             logger.error(`[Prosas Auth Worker] Error parsing PDF text for ${pdfUrl}:`, parseErr);
