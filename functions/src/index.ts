@@ -2003,6 +2003,15 @@ export const ingestManualOscFunction = onCall({
 
         const profileData = await parsePdfToProfile({ pdfBase64s });
 
+        if (!profileData.name || profileData.name.trim().length < 3 || !profileData.cnpj) {
+            throw new HttpsError('invalid-argument', 'Não foi possível extrair Nome e CNPJ válidos dos documentos.');
+        }
+
+        const cleanCnpj = profileData.cnpj.replace(/\D/g, '');
+        if (cleanCnpj.length !== 14) {
+            throw new HttpsError('invalid-argument', 'CNPJ extraído é inválido.');
+        }
+
         let embedding: number[] | null = null;
         try {
             const oscText = `Missão: ${profileData.mission || ''}. Foco: ${(profileData.coreActivities || []).join(', ')}. Nome: ${profileData.name || ''}`;
@@ -2022,7 +2031,7 @@ export const ingestManualOscFunction = onCall({
         const finalDataToSave = Object.fromEntries(Object.entries(dataToSave).filter(([_, v]) => v !== undefined));
 
         // Save to Firestore
-        const oscRef = await getFirestore().collection('oscs').add(finalDataToSave);
+        await getFirestore().collection('oscs').doc(cleanCnpj).set(finalDataToSave);
 
         // Cleanup: Delete temporary files
         for (const path of storagePaths) {
@@ -2035,10 +2044,10 @@ export const ingestManualOscFunction = onCall({
 
         return {
             success: true,
-            oscId: oscRef.id,
+            oscId: cleanCnpj,
             profile: {
                 ...profileData,
-                id: oscRef.id
+                id: cleanCnpj
             }
         };
     } catch (error: unknown) {
