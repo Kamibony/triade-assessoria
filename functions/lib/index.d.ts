@@ -306,6 +306,7 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
     aiSummary: z.ZodOptional<z.ZodString>;
     badges: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     actionPlan: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    actionState: z.ZodDefault<z.ZodOptional<z.ZodEnum<["Pendente", "Aprovado", "Rejeitado", "Revisao"]>>>;
 }, "strip", z.ZodTypeAny, {
     editalId: string;
     oscId: string;
@@ -316,6 +317,7 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
     aiSummary?: string | undefined;
     badges?: string[] | undefined;
     actionPlan?: string[] | undefined;
+    actionState: "Aprovado" | "Pendente" | "Rejeitado" | "Revisao";
 }, {
     editalId: string;
     oscId: string;
@@ -326,6 +328,7 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
     aiSummary?: string | undefined;
     badges?: string[] | undefined;
     actionPlan?: string[] | undefined;
+    actionState?: "Aprovado" | "Pendente" | "Rejeitado" | "Revisao" | undefined;
 }>, z.ZodTypeAny, any, z.ZodTypeAny>;
 export declare const parsePdfProfileWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
 export declare const parsePdfProfileFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
