@@ -114,7 +114,8 @@ export function EditaisList() {
 
     const prosasCount = editais.filter(e => e.discoverySource === 'PROSAS_AUTH').length;
     const iaCount = editais.filter(e => e.discoverySource === 'VERTEX_SEARCH').length;
-    const outrosCount = editais.length - prosasCount - iaCount;
+    const manualCount = editais.filter(e => e.discoverySource === 'MANUAL').length;
+    const legadoCount = editais.length - prosasCount - iaCount - manualCount;
 
     return (
         <div className="container mx-auto p-8 max-w-7xl">
@@ -157,7 +158,8 @@ export function EditaisList() {
                     <div className="space-y-1 w-full">
                         <div className="flex justify-between items-center text-sm"><span className="text-muted-foreground">Prosas:</span> <span className="font-bold">{prosasCount}</span></div>
                         <div className="flex justify-between items-center text-sm"><span className="text-muted-foreground">IA/Busca:</span> <span className="font-bold">{iaCount}</span></div>
-                        <div className="flex justify-between items-center text-sm"><span className="text-muted-foreground">Manual:</span> <span className="font-bold">{outrosCount}</span></div>
+                        <div className="flex justify-between items-center text-sm"><span className="text-muted-foreground">Manual:</span> <span className="font-bold">{manualCount}</span></div>
+                        <div className="flex justify-between items-center text-sm"><span className="text-muted-foreground">Legado:</span> <span className="font-bold">{legadoCount}</span></div>
                     </div>
                 </div>
             </div>
@@ -207,8 +209,10 @@ export function EditaisList() {
                                   <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded">PROSAS</span>
                               ) : edital.discoverySource === 'VERTEX_SEARCH' ? (
                                   <span className="bg-purple-100 text-purple-800 text-[10px] font-bold px-2 py-0.5 rounded">BUSCA IA</span>
-                              ) : (
+                              ) : edital.discoverySource === 'MANUAL' ? (
                                   <span className="bg-gray-100 text-gray-800 text-[10px] font-bold px-2 py-0.5 rounded">MANUAL</span>
+                              ) : (
+                                  <span className="bg-orange-100 text-orange-800 text-[10px] font-bold px-2 py-0.5 rounded">LEGADO</span>
                               )}
                             </td>
                             <td className="px-6 py-4 text-right">
