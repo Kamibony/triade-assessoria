@@ -1253,7 +1253,7 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                 fullTextToAnalyze = fullTextToAnalyze.substring(0, 3000); // Truncate to reduce token cost
                 const triageResult = await triageEditalWebpage({ text: fullTextToAnalyze, searchQuery: r.query });
                 if (triageResult.isValidEdital) {
-                    await enqueueEditalExtraction(link, fullTextToAnalyze, "Edital válido", jobId || `AGENTIC_${oscId}`);
+                    await enqueueEditalExtraction(link, fullTextToAnalyze, "Edital válido", jobId || `AGENTIC_${oscId}`, "VERTEX_SEARCH");
                     console.log(`Successfully enqueued agentic extraction for ${link}`);
                     totalValidEditaisEnqueued++;
                     methodBreakdown.web++;
@@ -1624,7 +1624,7 @@ exports.ingestOscDataFunction = (0, https_1.onCall)({
         enqueuedTasks: enqueuedTasks
     };
 });
-async function routeEditalUrl(url, sourceContext, searchId, options) {
+async function routeEditalUrl(url, sourceContext, searchId, options, discoverySource) {
     if (url.toLowerCase().includes('prosas.com.br')) {
         logger.info(`[Smart Router] Routing Prosas link to authenticated worker: ${url}`);
         await (0, functions_1.getFunctions)().taskQueue('prosasAuthenticatedWorker').enqueue({ url, searchId: searchId || sourceContext });
@@ -1645,7 +1645,7 @@ async function routeEditalUrl(url, sourceContext, searchId, options) {
         const triageResult = await triageEditalWebpage({ text, searchQuery: options?.searchQuery });
         if (triageResult.isValidEdital) {
             // Only fall back to sourceContext if searchId is strictly undefined
-            await enqueueEditalExtraction(url, text, "Edital válido", searchId !== undefined ? searchId : sourceContext);
+            await enqueueEditalExtraction(url, text, "Edital válido", searchId !== undefined ? searchId : sourceContext, discoverySource);
             return { success: true, message: "Edital válido" };
         }
         else {
@@ -1657,7 +1657,7 @@ async function routeEditalUrl(url, sourceContext, searchId, options) {
         return { success: false, message: error instanceof Error ? error.message : "Erro desconhecido" };
     }
 }
-async function enqueueEditalExtraction(link, text, reason, searchId) {
+async function enqueueEditalExtraction(link, text, reason, searchId, discoverySource) {
     const db = (0, firestore_1.getFirestore)();
     // Guardrail: Truncate text to 3000 characters to prevent LLM token exhaustion
     if (text && text.length > 3000) {
@@ -1671,6 +1671,7 @@ async function enqueueEditalExtraction(link, text, reason, searchId) {
     await tempContentRef.set({
         url: link,
         text: text,
+        discoverySource: discoverySource || null,
         createdAt: firestore_1.FieldValue.serverTimestamp(),
         expireAt: expireAt
     });
@@ -1679,7 +1680,8 @@ async function enqueueEditalExtraction(link, text, reason, searchId) {
         searchId: searchId || null,
         link: link,
         contentId: tempContentRef.id,
-        reason: reason
+        reason: reason,
+        discoverySource: discoverySource || null
     });
     return tempContentRef.id;
 }
@@ -1785,7 +1787,7 @@ async function processRssFeeds() {
                 }
                 processedCount++;
                 console.log(`Processing link: ${item.link}`);
-                const routeResult = await routeEditalUrl(item.link, "RSS");
+                const routeResult = await routeEditalUrl(item.link, "RSS", undefined, undefined, "PROSAS_RSS");
                 console.log(`Router result for ${item.link}: success=${routeResult.success}, message=${routeResult.message}`);
                 if (routeResult.success) {
                     savedCount++;
@@ -1887,7 +1889,7 @@ exports.ingestManualEditalFunction = (0, https_1.onCall)({
         throw new https_1.HttpsError('invalid-argument', 'A valid URL is required.');
     }
     try {
-        const routeResult = await routeEditalUrl(url, "MANUAL");
+        const routeResult = await routeEditalUrl(url, "MANUAL", undefined, undefined, "MANUAL");
         if (!routeResult.success) {
             return { success: false, message: `O conteúdo não parece ser um edital válido. Motivo: ${routeResult.message}` };
         }
@@ -2375,7 +2377,7 @@ exports.extractionWorker = (0, tasks_1.onTaskDispatched)({
     timeoutSeconds: 540,
     memory: '1GiB'
 }, async (request) => {
-    const { searchId, link, contentId, reason } = request.data;
+    const { searchId, link, contentId, reason, discoverySource } = request.data;
     if (!link || !contentId) {
         console.error("Invalid task payload: missing link, or contentId.");
         return;
@@ -2409,6 +2411,7 @@ exports.extractionWorker = (0, tasks_1.onTaskDispatched)({
                 rawText: text.substring(0, 5000),
                 sourceUrl: link,
                 embedding: embedding.length > 0 ? embedding : null,
+                discoverySource: discoverySource || contentDoc.data()?.discoverySource || null,
                 createdAt: firestore_1.FieldValue.serverTimestamp(),
             };
             const docRef = await db.collection('editais').add(editalDocData);
@@ -2608,7 +2611,7 @@ exports.prosasAuthenticatedWorker = (0, tasks_1.onTaskDispatched)({
                 logger.info(`[Prosas Auth Worker] No PDF links found on page.`);
             }
             // 4. Push to Claim Check (Lake of Editais)
-            await enqueueEditalExtraction(url, combinedText, "Authenticated Prosas Scraping", searchId);
+            await enqueueEditalExtraction(url, combinedText, "Authenticated Prosas Scraping", searchId, "PROSAS_AUTH");
             logger.info(`[Prosas Auth Worker] Enqueued extraction for ${url}`);
         }
         finally {
@@ -2920,7 +2923,7 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                 continue;
             }
             try {
-                const routeResult = await routeEditalUrl(link, searchId, searchId, { searchQuery: query });
+                const routeResult = await routeEditalUrl(link, searchId, searchId, { searchQuery: query }, "VERTEX_SEARCH");
                 const safeReason = routeResult.message ? routeResult.message.substring(0, 200) : '';
                 if (routeResult.success) {
                     await searchRef.update({
