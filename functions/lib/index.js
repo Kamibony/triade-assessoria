@@ -1827,10 +1827,6 @@ async function processRssFeeds(runId) {
     console.log(`Ingestion complete. Processed ${processedCount} items, saved ${savedCount} valid editais.`);
     return { processedCount, savedCount };
 }
-// Deprecated in favor of scheduledGlobalIngestion
-// export const ingestGoogleAlertsRss = onSchedule('0 2 * * *', async () => {
-//     await processRssFeeds();
-// });
 exports.ingestManualOscFunction = (0, https_1.onCall)({
     cors: true,
     timeoutSeconds: 540,

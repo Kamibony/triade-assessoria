@@ -5,7 +5,7 @@ const path = require('path');
 const allFunctions = [
   'parsePdfProfileFunction', 'extractEditalRulesFunction', 'agenticSearchWorker',
   'matchEvaluatorWorker', 'processOscChunkWorker', 'ingestOscDataFunction',
-  'triggerMatchOrchestrator', 'onOscUpdated', 'ingestGoogleAlertsRss',
+  'triggerMatchOrchestrator', 'onOscUpdated',
   'ingestManualOscFunction', 'ingestManualEditalFunction', 'askCopilotFunction',
   'manualTriggerRssSyncFunction', 'scheduledMatchSweeper', 'onMatchGenerated',
   'triggerAgenticSearch', 'autonomousSearchWorker', 'triggerScrapingWorker',
