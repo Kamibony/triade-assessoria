@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestGoogleAlertsRss = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
+exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
 exports.formatGenkitError = formatGenkitError;
 exports.fetchAndExtractText = fetchAndExtractText;
 exports.enqueueEditalExtraction = enqueueEditalExtraction;
@@ -1752,7 +1752,7 @@ exports.onOscUpdated = (0, firestore_2.onDocumentUpdated)('oscs/{oscId}', async 
     // or via a decoupled slow-burn cron queue.
     console.log(`OSC ${oscId} updated successfully. Automated match cascades are disabled.`);
 });
-async function processRssFeeds() {
+async function processRssFeeds(runId) {
     const RSS_URLS = [
         // Mock Google Alerts RSS URLs
         "https://news.google.com/rss/search?q=edital+ONG+OR+OSC+brasil",
@@ -1768,6 +1768,11 @@ async function processRssFeeds() {
         try {
             console.log(`Fetching RSS feed: ${feedUrl}`);
             const feed = await parser.parseURL(feedUrl);
+            if (runId) {
+                await db.collection('ingestion_runs').doc(runId).update({
+                    'phases.rssAndQueries.feedsProcessed': firestore_1.FieldValue.increment(1)
+                });
+            }
             // Limit to top 5 items per feed to prevent token leaks
             const topItems = feed.items.slice(0, 5);
             for (const item of topItems) {
@@ -1791,19 +1796,41 @@ async function processRssFeeds() {
                 console.log(`Router result for ${item.link}: success=${routeResult.success}, message=${routeResult.message}`);
                 if (routeResult.success) {
                     savedCount++;
+                    if (runId) {
+                        await db.collection('ingestion_runs').doc(runId).update({
+                            'phases.rssAndQueries.newEditaisEnqueued': firestore_1.FieldValue.increment(1)
+                        });
+                    }
+                }
+                if (runId) {
+                    await db.collection('ingestion_runs').doc(runId).update({
+                        'phases.rssAndQueries.urlsDiscovered': firestore_1.FieldValue.increment(1),
+                        'totalUrlsScanned': firestore_1.FieldValue.increment(1)
+                    });
                 }
             }
         }
         catch (error) {
             console.error(`Error fetching or parsing RSS feed ${feedUrl}:`, error);
+            if (runId) {
+                await db.collection('ingestion_runs').doc(runId).update({
+                    'phases.rssAndQueries.errors': firestore_1.FieldValue.arrayUnion(`Error on feed ${feedUrl}: ${error.message}`)
+                });
+            }
         }
+    }
+    if (runId) {
+        await db.collection('ingestion_runs').doc(runId).update({
+            'phases.rssAndQueries.status': 'COMPLETED'
+        });
     }
     console.log(`Ingestion complete. Processed ${processedCount} items, saved ${savedCount} valid editais.`);
     return { processedCount, savedCount };
 }
-exports.ingestGoogleAlertsRss = (0, scheduler_1.onSchedule)('0 2 * * *', async () => {
-    await processRssFeeds();
-});
+// Deprecated in favor of scheduledGlobalIngestion
+// export const ingestGoogleAlertsRss = onSchedule('0 2 * * *', async () => {
+//     await processRssFeeds();
+// });
 exports.ingestManualOscFunction = (0, https_1.onCall)({
     cors: true,
     timeoutSeconds: 540,
@@ -2043,6 +2070,7 @@ exports.manualTriggerRssSyncFunction = (0, https_1.onCall)({
     //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
     // }
     try {
+        // Will still run standalone without tracking for this old manual test endpoint if used directly
         const result = await processRssFeeds();
         return result;
     }
@@ -2682,7 +2710,7 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
     memory: '1GiB'
 }, async (request) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { searchId, target, query, page = 1, linksQueue = [] } = request.data;
+    const { searchId, target, query, page = 1, linksQueue = [], runId } = request.data;
     if (!searchId || !target) {
         console.error("Invalid task payload: missing searchId or target.");
         return;
@@ -2696,6 +2724,11 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
         let isNewFetch = false;
         if (candidateLinks.length === 0) {
             isNewFetch = true;
+            if (runId && page === 1) {
+                await db.collection('ingestion_runs').doc(runId).update({
+                    'phases.internalFontes.targetsProcessed': firestore_1.FieldValue.increment(1)
+                });
+            }
             try {
                 let fetchUrl = target.url;
                 const isProsas = target.name?.toLowerCase().includes('prosas') || fetchUrl.toLowerCase().includes('prosas.com.br');
@@ -2929,10 +2962,21 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                     await searchRef.update({
                         logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Em Processamento (Extração)', reason: safeReason })
                     });
+                    if (runId) {
+                        await db.collection('ingestion_runs').doc(runId).update({
+                            'phases.internalFontes.newEditaisEnqueued': firestore_1.FieldValue.increment(1)
+                        });
+                    }
                 }
                 else {
                     await searchRef.update({
                         logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Ignorado/Rejeitado', reason: safeReason })
+                    });
+                }
+                if (runId) {
+                    await db.collection('ingestion_runs').doc(runId).update({
+                        'phases.internalFontes.urlsDiscovered': firestore_1.FieldValue.increment(1),
+                        'totalUrlsScanned': firestore_1.FieldValue.increment(1)
                     });
                 }
             }
@@ -2954,7 +2998,8 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                 target,
                 query,
                 page,
-                linksQueue: remainingLinks
+                linksQueue: remainingLinks,
+                runId
             });
         }
         else if (candidateLinks.length > 0 && target.strategy !== 'RSS' && page < 100) {
@@ -2964,7 +3009,8 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                 target,
                 query,
                 page: page + 1,
-                linksQueue: []
+                linksQueue: [],
+                runId
             });
         }
         else if (remainingLinks.length === 0) {
@@ -2981,6 +3027,11 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
     }
     catch (error) {
         console.error('Error during autonomous search target worker:', error);
+        if (runId) {
+            await db.collection('ingestion_runs').doc(runId).update({
+                'phases.internalFontes.errors': firestore_1.FieldValue.arrayUnion(`Target ${target.name} failed: ${error.message}`)
+            });
+        }
     }
 });
 exports.onSearchCreated = (0, firestore_2.onDocumentCreated)({ document: 'searches/{searchId}' }, async (event) => {
@@ -3083,7 +3134,7 @@ exports.prosasBulkDiscoveryWorker = (0, tasks_1.onTaskDispatched)({
     timeoutSeconds: 1800,
     memory: '2GiB'
 }, async (request) => {
-    let { page = 1, consecutiveZeroNewCount = 0 } = request.data;
+    let { page = 1, consecutiveZeroNewCount = 0, runId, maxPages = 5 } = request.data;
     const db = (0, firestore_1.getFirestore)();
     const queue = (0, functions_1.getFunctions)().taskQueue('prosasAuthenticatedWorker');
     logger.info(`[Prosas Bulk Discovery] Starting processing for page ${page}`);
@@ -3134,6 +3185,11 @@ exports.prosasBulkDiscoveryWorker = (0, tasks_1.onTaskDispatched)({
         });
         if (candidateLinks.length === 0) {
             logger.info(`[Prosas Bulk Discovery] No unique edital links found for Prosas on page ${page}. Stopping pagination.`);
+            if (runId) {
+                await db.collection('ingestion_runs').doc(runId).update({
+                    'phases.prosas.status': 'COMPLETED',
+                });
+            }
             return;
         }
         logger.info(`[Prosas Bulk Discovery] Discovered ${candidateLinks.length} unique edital links on Page ${page}`);
@@ -3154,23 +3210,42 @@ exports.prosasBulkDiscoveryWorker = (0, tasks_1.onTaskDispatched)({
             }
         }
         logger.info(`[Prosas Bulk Discovery] Enqueued ${newCount} new editais for authenticated scraping.`);
+        if (runId) {
+            await db.collection('ingestion_runs').doc(runId).update({
+                'phases.prosas.pagesScanned': firestore_1.FieldValue.increment(1),
+                'phases.prosas.urlsDiscovered': firestore_1.FieldValue.increment(candidateLinks.length),
+                'phases.prosas.newEditaisEnqueued': firestore_1.FieldValue.increment(newCount),
+                'totalUrlsScanned': firestore_1.FieldValue.increment(candidateLinks.length),
+            });
+        }
         if (newCount === 0) {
             consecutiveZeroNewCount++;
         }
         else {
             consecutiveZeroNewCount = 0;
         }
-        if (consecutiveZeroNewCount >= 3) {
-            logger.info(`[Prosas Bulk Discovery] Encountered 3 consecutive pages with 0 new editais. Early exit triggered.`);
+        if (consecutiveZeroNewCount >= 3 || page >= maxPages) {
+            logger.info(`[Prosas Bulk Discovery] Encountered 3 consecutive pages with 0 new editais, or reached maxPages (${maxPages}). Early exit triggered.`);
+            if (runId) {
+                await db.collection('ingestion_runs').doc(runId).update({
+                    'phases.prosas.status': 'COMPLETED',
+                });
+            }
             return;
         }
         // Enqueue next page
         const discoveryQueue = (0, functions_1.getFunctions)().taskQueue('prosasBulkDiscoveryWorker');
-        await discoveryQueue.enqueue({ page: page + 1, consecutiveZeroNewCount });
+        await discoveryQueue.enqueue({ page: page + 1, consecutiveZeroNewCount, runId, maxPages });
         logger.info(`[Prosas Bulk Discovery] Enqueued page ${page + 1} for discovery.`);
     }
     catch (e) {
         logger.error(`[Prosas Bulk Discovery] Prosas API fetch failed: ${e.message}`);
+        if (runId) {
+            await db.collection('ingestion_runs').doc(runId).update({
+                'phases.prosas.status': 'FAILED',
+                'phases.prosas.errors': firestore_1.FieldValue.arrayUnion(e.message)
+            });
+        }
         throw e;
     }
     finally {
@@ -3178,5 +3253,125 @@ exports.prosasBulkDiscoveryWorker = (0, tasks_1.onTaskDispatched)({
             await browser.close();
         }
     }
+});
+exports.triggerGlobalIngestion = (0, https_1.onCall)({
+    cors: true,
+    timeoutSeconds: 540,
+}, async (request) => {
+    // TODO: Require admin auth
+    const db = (0, firestore_1.getFirestore)();
+    const runId = `RUN-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    await db.collection('ingestion_runs').doc(runId).set({
+        id: runId,
+        triggerSource: 'MANUAL_ADMIN',
+        triggeredBy: request.auth?.uid || 'unknown',
+        startTime: firestore_1.FieldValue.serverTimestamp(),
+        endTime: null,
+        status: 'RUNNING',
+        totalUrlsScanned: 0,
+        totalValidEditaisFound: 0,
+        totalErrors: 0,
+        phases: {
+            prosas: { status: 'RUNNING', pagesScanned: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
+            internalFontes: { status: 'RUNNING', targetsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
+            rssAndQueries: { status: 'RUNNING', feedsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] }
+        }
+    });
+    // Phase 1: Prosas Bulk Discovery
+    try {
+        const discoveryQueue = (0, functions_1.getFunctions)().taskQueue('prosasBulkDiscoveryWorker');
+        await discoveryQueue.enqueue({ page: 1, consecutiveZeroNewCount: 0, runId, maxPages: 5 });
+    }
+    catch (e) {
+        await db.collection('ingestion_runs').doc(runId).update({
+            'phases.prosas.status': 'FAILED',
+            'phases.prosas.errors': firestore_1.FieldValue.arrayUnion(`Failed to enqueue: ${e.message}`)
+        });
+    }
+    // Phase 2: Internal Fontes
+    try {
+        const targetsSnapshot = await db.collection('scraping_targets').get(); // Assume all are active for now, or filter if status field exists
+        const queue = (0, functions_1.getFunctions)().taskQueue('processScrapingTargetWorker');
+        for (const doc of targetsSnapshot.docs) {
+            const targetData = { id: doc.id, ...doc.data() };
+            // Optional: Create a search tracking doc per target as we do manually, or just use runId. We will just enqueue for runId tracking here.
+            await queue.enqueue({
+                searchId: 'GLOBAL_RUN',
+                target: targetData,
+                query: '',
+                runId
+            });
+        }
+    }
+    catch (e) {
+        await db.collection('ingestion_runs').doc(runId).update({
+            'phases.internalFontes.status': 'FAILED',
+            'phases.internalFontes.errors': firestore_1.FieldValue.arrayUnion(`Failed to enqueue: ${e.message}`)
+        });
+    }
+    // Phase 3: RSS
+    // Run it inline or create a worker. processRssFeeds is async. We can run it in background to return quickly.
+    processRssFeeds(runId).catch(async (e) => {
+        await db.collection('ingestion_runs').doc(runId).update({
+            'phases.rssAndQueries.status': 'FAILED',
+            'phases.rssAndQueries.errors': firestore_1.FieldValue.arrayUnion(`RSS Process failed: ${e.message}`)
+        });
+    });
+    return { success: true, runId };
+});
+exports.scheduledGlobalIngestion = (0, scheduler_1.onSchedule)('0 2 * * *', async () => {
+    const db = (0, firestore_1.getFirestore)();
+    const runId = `RUN-CRON-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    await db.collection('ingestion_runs').doc(runId).set({
+        id: runId,
+        triggerSource: 'CRON',
+        triggeredBy: 'system',
+        startTime: firestore_1.FieldValue.serverTimestamp(),
+        endTime: null,
+        status: 'RUNNING',
+        totalUrlsScanned: 0,
+        totalValidEditaisFound: 0,
+        totalErrors: 0,
+        phases: {
+            prosas: { status: 'RUNNING', pagesScanned: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
+            internalFontes: { status: 'RUNNING', targetsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
+            rssAndQueries: { status: 'RUNNING', feedsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] }
+        }
+    });
+    try {
+        const discoveryQueue = (0, functions_1.getFunctions)().taskQueue('prosasBulkDiscoveryWorker');
+        await discoveryQueue.enqueue({ page: 1, consecutiveZeroNewCount: 0, runId, maxPages: 5 });
+    }
+    catch (e) {
+        await db.collection('ingestion_runs').doc(runId).update({
+            'phases.prosas.status': 'FAILED',
+            'phases.prosas.errors': firestore_1.FieldValue.arrayUnion(`Failed to enqueue: ${e.message}`)
+        });
+    }
+    try {
+        const targetsSnapshot = await db.collection('scraping_targets').get();
+        const queue = (0, functions_1.getFunctions)().taskQueue('processScrapingTargetWorker');
+        for (const doc of targetsSnapshot.docs) {
+            const targetData = { id: doc.id, ...doc.data() };
+            await queue.enqueue({
+                searchId: 'GLOBAL_RUN',
+                target: targetData,
+                query: '',
+                runId
+            });
+        }
+    }
+    catch (e) {
+        await db.collection('ingestion_runs').doc(runId).update({
+            'phases.internalFontes.status': 'FAILED',
+            'phases.internalFontes.errors': firestore_1.FieldValue.arrayUnion(`Failed to enqueue: ${e.message}`)
+        });
+    }
+    processRssFeeds(runId).catch(async (e) => {
+        await db.collection('ingestion_runs').doc(runId).update({
+            'phases.rssAndQueries.status': 'FAILED',
+            'phases.rssAndQueries.errors': firestore_1.FieldValue.arrayUnion(`RSS Process failed: ${e.message}`)
+        });
+    });
 });
 //# sourceMappingURL=index.js.map
