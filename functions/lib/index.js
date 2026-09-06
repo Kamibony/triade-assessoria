@@ -82,7 +82,7 @@ const tasks_1 = require("firebase-functions/v2/tasks");
 const logger = __importStar(require("firebase-functions/logger"));
 const schemas_js_1 = require("./shared/schemas.js");
 const cheerio = __importStar(require("cheerio"));
-const rss_parser_1 = __importDefault(require("rss-parser"));
+const Parser = require('rss-parser');
 const braveApiKeyString = (0, params_1.defineString)('BRAVE_SEARCH_API_KEY');
 const vertexAiSearchEngineIdString = (0, params_1.defineString)('VERTEX_AI_SEARCH_ENGINE_ID');
 const vertexAiSearchLocationString = (0, params_1.defineString)('VERTEX_AI_SEARCH_LOCATION');
@@ -1924,7 +1924,7 @@ async function processRssFeeds(runId) {
         // Prosas RSS with regional filters for Nordeste and Paraiba
         "https://blog.prosas.com.br/categoria/editais/feed/?tag=nordeste,paraiba"
     ];
-    const parser = new rss_parser_1.default();
+    const parser = new Parser();
     const db = (0, firestore_1.getFirestore)();
     let processedCount = 0;
     let savedCount = 0;
@@ -2878,11 +2878,6 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
         let isNewFetch = false;
         if (candidateLinks.length === 0) {
             isNewFetch = true;
-            if (runId && page === 1) {
-                await db.collection('ingestion_runs').doc(runId).update({
-                    'phases.internalFontes.targetsProcessed': firestore_1.FieldValue.increment(1)
-                });
-            }
             try {
                 let fetchUrl = target.url;
                 const isProsas = target.name?.toLowerCase().includes('prosas') || fetchUrl.toLowerCase().includes('prosas.com.br');
@@ -2932,9 +2927,9 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                     }
                 }
                 else if (target.strategy === 'RSS') {
-                    const parser = new rss_parser_1.default();
+                    const parser = new Parser();
                     const feed = await parser.parseURL(fetchUrl);
-                    candidateLinks = feed.items.map(item => item.link).filter(link => !!link);
+                    candidateLinks = feed.items.map((item) => item.link).filter((link) => !!link);
                 }
                 else if (target.strategy === 'API') {
                     const controller = new AbortController();
@@ -3003,9 +2998,9 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                     const isRss = fetchUrl.toLowerCase().endsWith('.xml') || fetchUrl.toLowerCase().includes('feed');
                     if (isRss) {
                         try {
-                            const parser = new rss_parser_1.default();
+                            const parser = new Parser();
                             const feed = await parser.parseURL(fetchUrl);
-                            candidateLinks = feed.items.map(item => item.link).filter(link => !!link);
+                            candidateLinks = feed.items.map((item) => item.link).filter((link) => !!link);
                         }
                         catch {
                             logger.warn(`Direct RSS parsing failed for ${fetchUrl}`);
@@ -3037,9 +3032,9 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                         if (isOk) {
                             if (contentType.includes('xml') || contentType.includes('rss')) {
                                 try {
-                                    const parser = new rss_parser_1.default();
+                                    const parser = new Parser();
                                     const feed = await parser.parseString(html);
-                                    candidateLinks = feed.items.map(item => item.link).filter(link => !!link);
+                                    candidateLinks = feed.items.map((item) => item.link).filter((link) => !!link);
                                 }
                                 catch {
                                     logger.warn(`Failed to parse XML response as RSS for ${fetchUrl}`);
@@ -3051,9 +3046,9 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                                 if (rssLink) {
                                     try {
                                         const absoluteRssUrl = new URL(rssLink, fetchUrl).href;
-                                        const parser = new rss_parser_1.default();
+                                        const parser = new Parser();
                                         const feed = await parser.parseURL(absoluteRssUrl);
-                                        candidateLinks = feed.items.map(item => item.link).filter(link => !!link);
+                                        candidateLinks = feed.items.map((item) => item.link).filter((link) => !!link);
                                     }
                                     catch {
                                         logger.warn(`Failed to parse discovered RSS feed`);
@@ -3184,6 +3179,7 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                         await db.collection('ingestion_runs').doc(runId).update({
                             'phases.internalFontes.status': 'COMPLETED'
                         });
+                        await checkAndUpdateGlobalRunStatus(runId);
                     }
                 }
             }

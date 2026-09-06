@@ -36,7 +36,7 @@ import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import * as logger from 'firebase-functions/logger';
 import { ngoProfileSchema, editalSchema, matchSchema, bureaucracySchema, triageSchema, copilotResponseSchema } from './shared/schemas.js';
 import * as cheerio from 'cheerio';
-import Parser from 'rss-parser';
+const Parser = require('rss-parser');
 
 const braveApiKeyString = defineString('BRAVE_SEARCH_API_KEY');
 const vertexAiSearchEngineIdString = defineString('VERTEX_AI_SEARCH_ENGINE_ID');
@@ -3243,11 +3243,6 @@ export const processScrapingTargetWorker = onTaskDispatched({
 
         if (candidateLinks.length === 0) {
             isNewFetch = true;
-            if (runId && page === 1) {
-                await db.collection('ingestion_runs').doc(runId).update({
-                    'phases.internalFontes.targetsProcessed': FieldValue.increment(1)
-                });
-            }
             try {
                 let fetchUrl = target.url;
                 const isProsas = target.name?.toLowerCase().includes('prosas') || fetchUrl.toLowerCase().includes('prosas.com.br');
@@ -3298,7 +3293,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
                 } else if (target.strategy === 'RSS') {
                     const parser = new Parser();
                     const feed = await parser.parseURL(fetchUrl);
-                    candidateLinks = feed.items.map(item => item.link).filter(link => !!link) as string[];
+                    candidateLinks = feed.items.map((item: any) => item.link).filter((link: any) => !!link) as string[];
                 } else if (target.strategy === 'API') {
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -3368,7 +3363,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
                         try {
                             const parser = new Parser();
                             const feed = await parser.parseURL(fetchUrl);
-                            candidateLinks = feed.items.map(item => item.link).filter(link => !!link) as string[];
+                            candidateLinks = feed.items.map((item: any) => item.link).filter((link: any) => !!link) as string[];
                         } catch {
                             logger.warn(`Direct RSS parsing failed for ${fetchUrl}`);
                         }
@@ -3405,7 +3400,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
                                 try {
                                     const parser = new Parser();
                                     const feed = await parser.parseString(html);
-                                    candidateLinks = feed.items.map(item => item.link).filter(link => !!link) as string[];
+                                    candidateLinks = feed.items.map((item: any) => item.link).filter((link: any) => !!link) as string[];
                                 } catch {
                                     logger.warn(`Failed to parse XML response as RSS for ${fetchUrl}`);
                                 }
@@ -3417,7 +3412,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
                                         const absoluteRssUrl = new URL(rssLink, fetchUrl).href;
                                         const parser = new Parser();
                                         const feed = await parser.parseURL(absoluteRssUrl);
-                                        candidateLinks = feed.items.map(item => item.link).filter(link => !!link) as string[];
+                                        candidateLinks = feed.items.map((item: any) => item.link).filter((link: any) => !!link) as string[];
                                     } catch {
                                         logger.warn(`Failed to parse discovered RSS feed`);
                                     }
@@ -3551,6 +3546,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
                         await db.collection('ingestion_runs').doc(runId).update({
                             'phases.internalFontes.status': 'COMPLETED'
                         });
+                        await checkAndUpdateGlobalRunStatus(runId);
                     }
                 }
             }
