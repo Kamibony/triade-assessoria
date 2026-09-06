@@ -2038,14 +2038,19 @@ async function processRssFeeds(runId?: string) {
 }
 
 export const ingestManualOscFunction = onCall({
-    cors: true,
+    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
+    invoker: 'public',
     timeoutSeconds: 540,
     memory: '1GiB',
 }, async (request) => {
-    // TODO: Re-enable auth checks once Auth is implemented.
-    // if (!request.auth) {
-    //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
-    // }
+    if (!request.auth) {
+        throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    }
+    const db = getFirestore();
+    const userDoc = await db.collection('users').doc(request.auth.uid).get();
+    if (userDoc.data()?.role !== 'admin') {
+        throw new HttpsError('permission-denied', 'User must be an admin.');
+    }
 
     const { storagePaths } = request.data as { storagePaths?: string[] };
     if (!storagePaths || !Array.isArray(storagePaths) || storagePaths.length === 0) {
@@ -2304,18 +2309,23 @@ export const askCopilotFunction = onCall({
 });
 
 export const manualTriggerRssSyncFunction = onCall({
-    cors: true,
+    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
+    invoker: 'public',
     timeoutSeconds: 540,
-}, async () => {
-    // TODO: Re-enable auth checks once Auth is implemented.
-    // if (!request.auth) {
-    //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
-    // }
+}, async (request) => {
+    if (!request.auth) {
+        throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    }
+    const db = getFirestore();
+    const userDoc = await db.collection('users').doc(request.auth.uid).get();
+    if (userDoc.data()?.role !== 'admin') {
+        throw new HttpsError('permission-denied', 'User must be an admin.');
+    }
 
     try {
-        // Will still run standalone without tracking for this old manual test endpoint if used directly
-        const result = await processRssFeeds();
-        return result;
+        const rssQueue = getFunctions().taskQueue('rssWorker');
+        await rssQueue.enqueue({});
+        return { success: true, message: 'RSS sync triggered' };
     } catch (error: unknown) {
         console.error('Error in manualTriggerRssSyncFunction:', error);
         const errorMessage = error instanceof Error ? error.message : 'Internal error during manual RSS sync.';
@@ -3637,17 +3647,25 @@ export const prosasBulkDiscoveryWorker = onTaskDispatched({
 
 
 export const triggerGlobalIngestion = onCall({
-    cors: true,
+    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
+    invoker: 'public',
     timeoutSeconds: 540,
 }, async (request) => {
-    // TODO: Require admin auth
+    if (!request.auth) {
+        throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    }
     const db = getFirestore();
+    const userDoc = await db.collection('users').doc(request.auth.uid).get();
+    if (userDoc.data()?.role !== 'admin') {
+        throw new HttpsError('permission-denied', 'User must be an admin.');
+    }
+
     const runId = `RUN-${new Date().toISOString().replace(/[:.]/g, '-')}`;
 
     await db.collection('ingestion_runs').doc(runId).set({
         id: runId,
         triggerSource: 'MANUAL_ADMIN',
-        triggeredBy: request.auth?.uid || 'unknown',
+        triggeredBy: request.auth.uid,
         startTime: FieldValue.serverTimestamp(),
         endTime: null,
         status: 'RUNNING',
@@ -3694,13 +3712,15 @@ export const triggerGlobalIngestion = onCall({
     }
 
     // Phase 3: RSS
-    // Run it inline or create a worker. processRssFeeds is async. We can run it in background to return quickly.
-    processRssFeeds(runId).catch(async (e: any) => {
+    try {
+        const rssQueue = getFunctions().taskQueue('rssWorker');
+        await rssQueue.enqueue({ runId });
+    } catch (e: any) {
         await db.collection('ingestion_runs').doc(runId).update({
             'phases.rssAndQueries.status': 'FAILED',
-            'phases.rssAndQueries.errors': FieldValue.arrayUnion(`RSS Process failed: ${e.message}`)
+            'phases.rssAndQueries.errors': FieldValue.arrayUnion(`Failed to enqueue RSS worker: ${e.message}`)
         });
-    });
+    }
 
     return { success: true, runId };
 });
@@ -3761,4 +3781,17 @@ export const scheduledGlobalIngestion = onSchedule('0 2 * * *', async () => {
              'phases.rssAndQueries.errors': FieldValue.arrayUnion(`RSS Process failed: ${e.message}`)
          });
      });
+});
+
+export const rssWorker = onTaskDispatched({
+    retryConfig: {
+        maxAttempts: 3,
+        minBackoffSeconds: 60,
+    },
+    rateLimits: {
+        maxConcurrentDispatches: 1,
+    }
+}, async (request) => {
+    const runId = request.data.runId;
+    await processRssFeeds(runId);
 });
