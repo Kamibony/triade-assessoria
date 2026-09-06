@@ -452,6 +452,7 @@ export declare const triggerMatchOrchestrator: import("firebase-functions/v2/htt
 export declare const onOscUpdated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").Change<import("firebase-functions/v2/firestore").QueryDocumentSnapshot> | undefined, {
     oscId: string;
 }>>;
+export declare function checkAndUpdateGlobalRunStatus(runId: string): Promise<void>;
 export declare const ingestManualOscFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
     oscId: string;

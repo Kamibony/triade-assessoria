@@ -1992,9 +1992,14 @@ async function processPredefinedQueries(runId?: string) {
     try {
         client = await auth.getClient();
         accessToken = await client.getAccessToken();
-    } catch(e) {
+    } catch(e: any) {
         console.error("Failed to authenticate with GoogleAuth:", e);
-        throw e;
+        if (runId) {
+            await db.collection('ingestion_runs').doc(runId).update({
+                'phases.rssAndQueries.errors': FieldValue.arrayUnion(`GoogleAuth authentication failed: ${e.message}`)
+            });
+        }
+        return { processedCount: 0, savedCount: 0 };
     }
 
     const vertexUrl = `https://discoveryengine.googleapis.com/v1/projects/${vertexProjectId}/locations/${vertexLocation}/collections/default_collection/engines/${vertexEngineId}/servingConfigs/default_search:search`;
@@ -2065,19 +2070,10 @@ async function processPredefinedQueries(runId?: string) {
                  const routeResult = await routeEditalUrl(link, "VERTEX_SEARCH", undefined, { searchQuery: query }, "VERTEX_SEARCH");
                  if (routeResult.success) {
                      savedCount++;
-                     if (runId) {
-                         await db.collection('ingestion_runs').doc(runId).update({
-                             'phases.rssAndQueries.newEditaisEnqueued': FieldValue.increment(1)
-                         });
-                     }
+
                  }
 
-                 if (runId) {
-                     await db.collection('ingestion_runs').doc(runId).update({
-                         'phases.rssAndQueries.urlsDiscovered': FieldValue.increment(1),
-                         'totalUrlsScanned': FieldValue.increment(1)
-                     });
-                 }
+
             }
         } catch (error: any) {
             console.error(`Error processing predefined query ${query}:`, error);
@@ -2092,6 +2088,50 @@ async function processPredefinedQueries(runId?: string) {
     return { processedCount, savedCount };
 }
 
+
+
+export async function checkAndUpdateGlobalRunStatus(runId: string) {
+    if (!runId) return;
+    const db = getFirestore();
+
+    const runRef = db.collection('ingestion_runs').doc(runId);
+
+    try {
+        await db.runTransaction(async (transaction) => {
+            const runDoc = await transaction.get(runRef);
+            if (!runDoc.exists) return;
+
+            const data = runDoc.data();
+            if (!data || data.status !== 'RUNNING') return; // Already finished or something
+
+            const phases = data.phases || {};
+            const prosasStatus = phases.prosas?.status || 'COMPLETED'; // Treat missing as completed for safety
+            const internalStatus = phases.internalFontes?.status || 'COMPLETED';
+            const rssStatus = phases.rssAndQueries?.status || 'COMPLETED';
+
+            const isTerminal = (status: string) => ['COMPLETED', 'FAILED', 'TIMEOUT'].includes(status);
+
+            if (isTerminal(prosasStatus) && isTerminal(internalStatus) && isTerminal(rssStatus)) {
+                // All child phases are in a terminal state
+
+                // Aggregate errors to determine final state
+                const anyFailures =
+                    prosasStatus === 'FAILED' ||
+                    internalStatus === 'FAILED' ||
+                    rssStatus === 'FAILED';
+
+                transaction.update(runRef, {
+                    status: anyFailures ? 'FAILED' : 'COMPLETED',
+                    endTime: FieldValue.serverTimestamp()
+                });
+
+                console.log(`[Global Run Aggregator] Run ${runId} finalized as ${anyFailures ? 'FAILED' : 'COMPLETED'}`);
+            }
+        });
+    } catch (e) {
+        console.error(`[Global Run Aggregator] Failed to check status for run ${runId}:`, e);
+    }
+}
 async function processRssFeeds(runId?: string) {
     const RSS_URLS = [
         // Mock Google Alerts RSS URLs
@@ -2145,19 +2185,10 @@ async function processRssFeeds(runId?: string) {
 
                 if (routeResult.success) {
                      savedCount++;
-                     if (runId) {
-                         await db.collection('ingestion_runs').doc(runId).update({
-                             'phases.rssAndQueries.newEditaisEnqueued': FieldValue.increment(1)
-                         });
-                     }
+
                 }
 
-                if (runId) {
-                     await db.collection('ingestion_runs').doc(runId).update({
-                         'phases.rssAndQueries.urlsDiscovered': FieldValue.increment(1),
-                         'totalUrlsScanned': FieldValue.increment(1)
-                     });
-                }
+
             }
         } catch (error: any) {
             console.error(`Error fetching or parsing RSS feed ${feedUrl}:`, error);
@@ -3547,6 +3578,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
                     await db.collection('ingestion_runs').doc(runId).update({
                         'phases.internalFontes.status': 'COMPLETED'
                     });
+                    await checkAndUpdateGlobalRunStatus(runId);
                 }
             }
         }
@@ -3739,6 +3771,7 @@ export const prosasBulkDiscoveryWorker = onTaskDispatched({
                 await db.collection('ingestion_runs').doc(runId).update({
                     'phases.prosas.status': 'COMPLETED',
                 });
+                await checkAndUpdateGlobalRunStatus(runId);
             }
             return;
         }
@@ -3786,6 +3819,7 @@ export const prosasBulkDiscoveryWorker = onTaskDispatched({
                 await db.collection('ingestion_runs').doc(runId).update({
                     'phases.prosas.status': 'COMPLETED',
                 });
+                await checkAndUpdateGlobalRunStatus(runId);
             }
             return;
         }
@@ -3802,6 +3836,7 @@ export const prosasBulkDiscoveryWorker = onTaskDispatched({
                 'phases.prosas.status': 'FAILED',
                 'phases.prosas.errors': FieldValue.arrayUnion(e.message)
             });
+            await checkAndUpdateGlobalRunStatus(runId);
         }
         throw e;
     } finally {
@@ -3973,13 +4008,21 @@ export const rssWorker = onTaskDispatched({
     try {
         console.log(`[RSS & Queries Worker] Starting Phase 3 for run ${runId}`);
 
-        await processRssFeeds(runId);
-        await processPredefinedQueries(runId);
+        const rssResult = await processRssFeeds(runId);
+        const queryResult = await processPredefinedQueries(runId);
 
         if (runId) {
+            const totalDiscovered = (rssResult?.processedCount || 0) + (queryResult?.processedCount || 0);
+            const totalEnqueued = (rssResult?.savedCount || 0) + (queryResult?.savedCount || 0);
+
             await db.collection('ingestion_runs').doc(runId).update({
-                'phases.rssAndQueries.status': 'COMPLETED'
+                'phases.rssAndQueries.status': 'COMPLETED',
+                'phases.rssAndQueries.urlsDiscovered': FieldValue.increment(totalDiscovered),
+                'phases.rssAndQueries.newEditaisEnqueued': FieldValue.increment(totalEnqueued),
+                'totalUrlsScanned': FieldValue.increment(totalDiscovered),
+                'totalValidEditaisFound': FieldValue.increment(totalEnqueued)
             });
+            await checkAndUpdateGlobalRunStatus(runId);
         }
     } catch (e: any) {
         console.error(`[RSS & Queries Worker] Failed for run ${runId}:`, e);
@@ -3988,6 +4031,7 @@ export const rssWorker = onTaskDispatched({
                  'phases.rssAndQueries.status': 'FAILED',
                  'phases.rssAndQueries.errors': FieldValue.arrayUnion(`Worker failed: ${e.message}`)
              });
+             await checkAndUpdateGlobalRunStatus(runId);
         }
     }
 });
