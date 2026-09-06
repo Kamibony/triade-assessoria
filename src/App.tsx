@@ -19,6 +19,7 @@ import { OscImporter } from './components/OscImporter';
 import { OscProfileView } from './components/OscProfileView';
 import { ManualIngest } from './components/ManualIngest';
 import { ScrapingTargetsManager } from './components/ScrapingTargetsManager';
+import { IngestionRadar } from './components/IngestionRadar';
 import { ManualOscIngest } from './components/ManualOscIngest';
 import { Login } from './components/Login';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -89,6 +90,7 @@ function App() {
               <Route path="matches" element={<MatchesDashboard />} />
               <Route path="editais" element={<EditaisList />} />
               <Route path="sources" element={<ScrapingTargetsManager />} />
+              <Route path="ingestion-radar" element={<IngestionRadar />} />
             </Route>
           </Route>
 

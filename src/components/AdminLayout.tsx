@@ -25,6 +25,7 @@ export function AdminLayout() {
       title: 'ECOSSISTEMA DE DADOS',
       items: [
         { name: 'Fontes de Dados', path: '/admin/sources', icon: Database },
+        { name: 'Radar de Ingestão', path: '/admin/ingestion-radar', icon: Database },
         { name: 'Ingestão Manual', path: '/admin/manual-ingest', icon: Database },
       ],
     },
