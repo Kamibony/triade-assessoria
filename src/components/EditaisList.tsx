@@ -11,6 +11,7 @@ interface Edital {
     publicationDate: string;
     deadline: string;
     totalBudget: number;
+    discoverySource?: string;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     createdAt?: any;
 }
@@ -111,6 +112,10 @@ export function EditaisList() {
         return deadlineMs >= now && (deadlineMs - now) <= thirtyDaysMs;
     }).length;
 
+    const prosasCount = editais.filter(e => e.discoverySource === 'PROSAS_AUTH').length;
+    const iaCount = editais.filter(e => e.discoverySource === 'VERTEX_SEARCH').length;
+    const outrosCount = editais.length - prosasCount - iaCount;
+
     return (
         <div className="container mx-auto p-8 max-w-7xl">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
@@ -132,7 +137,7 @@ export function EditaisList() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
                 <div className="bg-card border rounded-lg p-6 shadow-sm flex flex-col items-center justify-center text-center">
                     <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Total de Editais Ativos</p>
                     <p className="text-3xl font-bold mt-1 text-primary">{editais.length}</p>
@@ -146,6 +151,14 @@ export function EditaisList() {
                 <div className="bg-card border rounded-lg p-6 shadow-sm flex flex-col items-center justify-center text-center">
                     <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Encerram em 30 Dias</p>
                     <p className="text-3xl font-bold mt-1 text-amber-500">{editaisClosingSoon}</p>
+                </div>
+                <div className="bg-card border rounded-lg p-4 shadow-sm flex flex-col justify-center">
+                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide text-center mb-2">Fontes de Descoberta</p>
+                    <div className="space-y-1 w-full">
+                        <div className="flex justify-between items-center text-sm"><span className="text-muted-foreground">Prosas:</span> <span className="font-bold">{prosasCount}</span></div>
+                        <div className="flex justify-between items-center text-sm"><span className="text-muted-foreground">IA/Busca:</span> <span className="font-bold">{iaCount}</span></div>
+                        <div className="flex justify-between items-center text-sm"><span className="text-muted-foreground">Manual:</span> <span className="font-bold">{outrosCount}</span></div>
+                    </div>
                 </div>
             </div>
 
@@ -162,6 +175,7 @@ export function EditaisList() {
                           <th className="px-6 py-4 font-medium">Prazo</th>
                           <th className="px-6 py-4 font-medium">Orçamento</th>
                           <th className="px-6 py-4 font-medium">Adicionado em</th>
+                          <th className="px-6 py-4 font-medium text-center">Fonte</th>
                           <th className="px-6 py-4 font-medium text-right">Ações</th>
                         </tr>
                       </thead>
@@ -187,6 +201,15 @@ export function EditaisList() {
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-muted-foreground">
                               {formatDate(edital.createdAt)}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-center">
+                              {edital.discoverySource === 'PROSAS_AUTH' ? (
+                                  <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded">PROSAS</span>
+                              ) : edital.discoverySource === 'VERTEX_SEARCH' ? (
+                                  <span className="bg-purple-100 text-purple-800 text-[10px] font-bold px-2 py-0.5 rounded">BUSCA IA</span>
+                              ) : (
+                                  <span className="bg-gray-100 text-gray-800 text-[10px] font-bold px-2 py-0.5 rounded">MANUAL</span>
+                              )}
                             </td>
                             <td className="px-6 py-4 text-right">
                                <button onClick={() => openModal(edital)} className="text-primary hover:text-primary/80 font-medium text-sm cursor-pointer">
