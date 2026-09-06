@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
+exports.scheduledIngestionTimeoutSweeper = exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
 exports.formatGenkitError = formatGenkitError;
 exports.fetchAndExtractText = fetchAndExtractText;
 exports.enqueueEditalExtraction = enqueueEditalExtraction;
@@ -1752,6 +1752,139 @@ exports.onOscUpdated = (0, firestore_2.onDocumentUpdated)('oscs/{oscId}', async 
     // or via a decoupled slow-burn cron queue.
     console.log(`OSC ${oscId} updated successfully. Automated match cascades are disabled.`);
 });
+async function processPredefinedQueries(runId) {
+    const db = (0, firestore_1.getFirestore)();
+    const PREDEFINED_QUERIES = [
+        "edital ONG 2024",
+        "fomento cultura terceiro setor",
+        "financiamento projetos sociais brasil",
+        "chamada publica para osc",
+        "edital projetos ambientais ong"
+    ];
+    let processedCount = 0;
+    let savedCount = 0;
+    let vertexProjectId = process.env.VERTEX_AI_SEARCH_PROJECT_ID;
+    if (!vertexProjectId) {
+        try {
+            vertexProjectId = vertexAiSearchProjectIdString.value();
+        }
+        catch (e) { /* ignore */ }
+    }
+    vertexProjectId = vertexProjectId || "566889139686";
+    let vertexLocation = process.env.VERTEX_AI_SEARCH_LOCATION;
+    if (!vertexLocation) {
+        try {
+            vertexLocation = vertexAiSearchLocationString.value();
+        }
+        catch (e) { /* ignore */ }
+    }
+    vertexLocation = vertexLocation || "global";
+    let vertexEngineId = process.env.VERTEX_AI_SEARCH_ENGINE_ID;
+    if (!vertexEngineId) {
+        try {
+            vertexEngineId = vertexAiSearchEngineIdString.value();
+        }
+        catch (e) { /* ignore */ }
+    }
+    vertexEngineId = vertexEngineId || "triade-sniper-search_1787960465651";
+    if (!vertexEngineId || !vertexLocation || !vertexProjectId) {
+        console.warn("Vertex AI Search config missing for processPredefinedQueries.");
+        return { processedCount: 0, savedCount: 0 };
+    }
+    const auth = new google_auth_library_1.GoogleAuth({ scopes: 'https://www.googleapis.com/auth/cloud-platform' });
+    let client, accessToken;
+    try {
+        client = await auth.getClient();
+        accessToken = await client.getAccessToken();
+    }
+    catch (e) {
+        console.error("Failed to authenticate with GoogleAuth:", e);
+        throw e;
+    }
+    const vertexUrl = `https://discoveryengine.googleapis.com/v1/projects/${vertexProjectId}/locations/${vertexLocation}/collections/default_collection/engines/${vertexEngineId}/servingConfigs/default_search:search`;
+    for (const query of PREDEFINED_QUERIES) {
+        try {
+            console.log(`[Predefined Queries] Executing Vertex AI Search for query: "${query}"`);
+            let vertexResponse;
+            let attempt = 0;
+            const maxAttempts = 3;
+            while (attempt < maxAttempts) {
+                vertexResponse = await fetch(vertexUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken.token}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ query: query, pageSize: 10 })
+                });
+                if (vertexResponse.ok)
+                    break;
+                if (vertexResponse.status === 429 || vertexResponse.status >= 500) {
+                    attempt++;
+                    console.warn(`Vertex AI API failed with status ${vertexResponse.status}. Retrying ${attempt}/${maxAttempts}...`);
+                    await new Promise(res => setTimeout(res, 1000 * Math.pow(2, attempt)));
+                }
+                else {
+                    break;
+                }
+            }
+            if (!vertexResponse || !vertexResponse.ok) {
+                const status = vertexResponse ? vertexResponse.status : 'unknown';
+                console.error(`Vertex AI API failed permanently for query "${query}" with status: ${status}`);
+                if (runId) {
+                    await db.collection('ingestion_runs').doc(runId).update({
+                        'phases.rssAndQueries.errors': firestore_1.FieldValue.arrayUnion(`Vertex AI API falhou permanentemente para "${query}": ${status}`)
+                    });
+                }
+                continue;
+            }
+            if (runId) {
+                await db.collection('ingestion_runs').doc(runId).update({
+                    'phases.rssAndQueries.feedsProcessed': firestore_1.FieldValue.increment(1) // Treating query as a 'feed' for UI purposes
+                });
+            }
+            const vertexData = await vertexResponse.json();
+            const results = vertexData.results || [];
+            for (const result of results) {
+                const derivedStructData = result.document?.derivedStructData;
+                if (!derivedStructData || !derivedStructData.link)
+                    continue;
+                const link = derivedStructData.link;
+                const existingEdital = await db.collection('editais').where('sourceUrl', '==', link).limit(1).get();
+                if (!existingEdital.empty)
+                    continue;
+                const existingQueue = await db.collection('scraping_contents').where('url', '==', link).limit(1).get();
+                if (!existingQueue.empty)
+                    continue;
+                processedCount++;
+                const routeResult = await routeEditalUrl(link, "VERTEX_SEARCH", undefined, { searchQuery: query }, "VERTEX_SEARCH");
+                if (routeResult.success) {
+                    savedCount++;
+                    if (runId) {
+                        await db.collection('ingestion_runs').doc(runId).update({
+                            'phases.rssAndQueries.newEditaisEnqueued': firestore_1.FieldValue.increment(1)
+                        });
+                    }
+                }
+                if (runId) {
+                    await db.collection('ingestion_runs').doc(runId).update({
+                        'phases.rssAndQueries.urlsDiscovered': firestore_1.FieldValue.increment(1),
+                        'totalUrlsScanned': firestore_1.FieldValue.increment(1)
+                    });
+                }
+            }
+        }
+        catch (error) {
+            console.error(`Error processing predefined query ${query}:`, error);
+            if (runId) {
+                await db.collection('ingestion_runs').doc(runId).update({
+                    'phases.rssAndQueries.errors': firestore_1.FieldValue.arrayUnion(`Error on query ${query}: ${error.message}`)
+                });
+            }
+        }
+    }
+    return { processedCount, savedCount };
+}
 async function processRssFeeds(runId) {
     const RSS_URLS = [
         // Mock Google Alerts RSS URLs
@@ -1818,11 +1951,6 @@ async function processRssFeeds(runId) {
                 });
             }
         }
-    }
-    if (runId) {
-        await db.collection('ingestion_runs').doc(runId).update({
-            'phases.rssAndQueries.status': 'COMPLETED'
-        });
     }
     console.log(`Ingestion complete. Processed ${processedCount} items, saved ${savedCount} valid editais.`);
     return { processedCount, savedCount };
@@ -3024,6 +3152,21 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
             await searchRef.update({
                 completedTargets: firestore_1.FieldValue.increment(1)
             });
+            if (runId) {
+                await db.collection('ingestion_runs').doc(runId).update({
+                    'phases.internalFontes.targetsProcessed': firestore_1.FieldValue.increment(1)
+                });
+                // Check if we are done with all targets
+                const runDoc = await db.collection('ingestion_runs').doc(runId).get();
+                const runData = runDoc.data();
+                if (runData && runData.phases && runData.phases.internalFontes) {
+                    if (runData.phases.internalFontes.targetsProcessed >= runData.phases.internalFontes.totalTargets) {
+                        await db.collection('ingestion_runs').doc(runId).update({
+                            'phases.internalFontes.status': 'COMPLETED'
+                        });
+                    }
+                }
+            }
         }
         if (totalProcessed > 0) {
             await searchRef.update({
@@ -3035,8 +3178,19 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
         console.error('Error during autonomous search target worker:', error);
         if (runId) {
             await db.collection('ingestion_runs').doc(runId).update({
-                'phases.internalFontes.errors': firestore_1.FieldValue.arrayUnion(`Target ${target.name} failed: ${error.message}`)
+                'phases.internalFontes.errors': firestore_1.FieldValue.arrayUnion(`Target ${target.name} failed: ${error.message}`),
+                'phases.internalFontes.targetsProcessed': firestore_1.FieldValue.increment(1)
             });
+            // Check if we are done with all targets
+            const runDoc = await db.collection('ingestion_runs').doc(runId).get();
+            const runData = runDoc.data();
+            if (runData && runData.phases && runData.phases.internalFontes) {
+                if (runData.phases.internalFontes.targetsProcessed >= runData.phases.internalFontes.totalTargets) {
+                    await db.collection('ingestion_runs').doc(runId).update({
+                        'phases.internalFontes.status': 'COMPLETED'
+                    });
+                }
+            }
         }
     }
 });
@@ -3286,7 +3440,7 @@ exports.triggerGlobalIngestion = (0, https_1.onCall)({
         totalErrors: 0,
         phases: {
             prosas: { status: 'RUNNING', pagesScanned: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
-            internalFontes: { status: 'RUNNING', targetsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
+            internalFontes: { status: 'RUNNING', targetsProcessed: 0, totalTargets: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
             rssAndQueries: { status: 'RUNNING', feedsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] }
         }
     });
@@ -3303,7 +3457,10 @@ exports.triggerGlobalIngestion = (0, https_1.onCall)({
     }
     // Phase 2: Internal Fontes
     try {
-        const targetsSnapshot = await db.collection('scraping_targets').get(); // Assume all are active for now, or filter if status field exists
+        const targetsSnapshot = await db.collection('scraping_targets').get();
+        await db.collection('ingestion_runs').doc(runId).update({
+            'phases.internalFontes.totalTargets': targetsSnapshot.docs.length
+        });
         const queue = (0, functions_1.getFunctions)().taskQueue('processScrapingTargetWorker');
         for (const doc of targetsSnapshot.docs) {
             const targetData = { id: doc.id, ...doc.data() };
@@ -3350,7 +3507,7 @@ exports.scheduledGlobalIngestion = (0, scheduler_1.onSchedule)('0 2 * * *', asyn
         totalErrors: 0,
         phases: {
             prosas: { status: 'RUNNING', pagesScanned: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
-            internalFontes: { status: 'RUNNING', targetsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
+            internalFontes: { status: 'RUNNING', targetsProcessed: 0, totalTargets: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
             rssAndQueries: { status: 'RUNNING', feedsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] }
         }
     });
@@ -3366,6 +3523,9 @@ exports.scheduledGlobalIngestion = (0, scheduler_1.onSchedule)('0 2 * * *', asyn
     }
     try {
         const targetsSnapshot = await db.collection('scraping_targets').get();
+        await db.collection('ingestion_runs').doc(runId).update({
+            'phases.internalFontes.totalTargets': targetsSnapshot.docs.length
+        });
         const queue = (0, functions_1.getFunctions)().taskQueue('processScrapingTargetWorker');
         for (const doc of targetsSnapshot.docs) {
             const targetData = { id: doc.id, ...doc.data() };
@@ -3383,12 +3543,16 @@ exports.scheduledGlobalIngestion = (0, scheduler_1.onSchedule)('0 2 * * *', asyn
             'phases.internalFontes.errors': firestore_1.FieldValue.arrayUnion(`Failed to enqueue: ${e.message}`)
         });
     }
-    processRssFeeds(runId).catch(async (e) => {
+    try {
+        const rssQueue = (0, functions_1.getFunctions)().taskQueue('rssWorker');
+        await rssQueue.enqueue({ runId });
+    }
+    catch (e) {
         await db.collection('ingestion_runs').doc(runId).update({
             'phases.rssAndQueries.status': 'FAILED',
-            'phases.rssAndQueries.errors': firestore_1.FieldValue.arrayUnion(`RSS Process failed: ${e.message}`)
+            'phases.rssAndQueries.errors': firestore_1.FieldValue.arrayUnion(`Failed to enqueue RSS worker: ${e.message}`)
         });
-    });
+    }
 });
 exports.rssWorker = (0, tasks_1.onTaskDispatched)({
     retryConfig: {
@@ -3400,6 +3564,56 @@ exports.rssWorker = (0, tasks_1.onTaskDispatched)({
     }
 }, async (request) => {
     const runId = request.data.runId;
-    await processRssFeeds(runId);
+    const db = (0, firestore_1.getFirestore)();
+    try {
+        console.log(`[RSS & Queries Worker] Starting Phase 3 for run ${runId}`);
+        await processRssFeeds(runId);
+        await processPredefinedQueries(runId);
+        if (runId) {
+            await db.collection('ingestion_runs').doc(runId).update({
+                'phases.rssAndQueries.status': 'COMPLETED'
+            });
+        }
+    }
+    catch (e) {
+        console.error(`[RSS & Queries Worker] Failed for run ${runId}:`, e);
+        if (runId) {
+            await db.collection('ingestion_runs').doc(runId).update({
+                'phases.rssAndQueries.status': 'FAILED',
+                'phases.rssAndQueries.errors': firestore_1.FieldValue.arrayUnion(`Worker failed: ${e.message}`)
+            });
+        }
+    }
+});
+exports.scheduledIngestionTimeoutSweeper = (0, scheduler_1.onSchedule)('*/30 * * * *', async () => {
+    const db = (0, firestore_1.getFirestore)();
+    const now = Date.now();
+    const timeoutMs = 45 * 60 * 1000; // 45 minutes
+    const snapshot = await db.collection('ingestion_runs')
+        .where('status', '==', 'RUNNING')
+        .get();
+    for (const doc of snapshot.docs) {
+        const data = doc.data();
+        const startTime = data.startTime?.toMillis() || now;
+        if (now - startTime > timeoutMs) {
+            console.log(`Timeout Sweeper: Marking run ${doc.id} as TIMEOUT`);
+            const updates = {
+                status: 'TIMEOUT',
+                endTime: firestore_1.FieldValue.serverTimestamp()
+            };
+            if (data.phases) {
+                if (data.phases.prosas?.status === 'RUNNING') {
+                    updates['phases.prosas.status'] = 'TIMEOUT';
+                }
+                if (data.phases.internalFontes?.status === 'RUNNING') {
+                    updates['phases.internalFontes.status'] = 'TIMEOUT';
+                }
+                if (data.phases.rssAndQueries?.status === 'RUNNING') {
+                    updates['phases.rssAndQueries.status'] = 'TIMEOUT';
+                }
+            }
+            await doc.ref.update(updates);
+        }
+    }
 });
 //# sourceMappingURL=index.js.map
