@@ -39,3 +39,100 @@ Based on the current architecture, the Prosas integration is complex because Pro
 1.  **Analyze Provenance First:** Before building more dedicated scrapers, implement the Data Provenance (Section 1) changes and let it run for a few weeks. Identify which *other* portals (currently being caught by Vertex/Brave) yield the highest number of *valid* editais.
 2.  **Evaluate Target Complexity:** If a high-yield portal does *not* require authentication (e.g., a standard government Diário Oficial or open grant portal), rely on the existing Agentic RSS or Brave API strategies, perhaps tweaking prompts for better extraction. Do not build a dedicated Playwright scraper unless absolutely necessary due to heavy JS rendering.
 3.  **Authentication-gated Portals:** If a major source *does* require authentication (similar to Prosas), then yes, the Prosas architecture (GCS session state + inline Playwright renewal) should be generalized into a reusable `AuthenticatedScraperBase` class/module to support new targets easily.
+## 4. The Orchestrator (`globalIngestionOrchestrator`)
+A central Cloud Function will serve as the conductor for all ingestion activities. It can be triggered both by a nightly Cloud Scheduler (cron) and via an HTTP `onCall` function for manual admin overrides.
+
+### The Three Phases
+The orchestrator will trigger the following phases asynchronously to avoid timeouts, using a tracking document to monitor progress.
+
+**Phase 1: Prosas Bulk Discovery**
+*   **Mechanism:** Enqueue the existing `prosasBulkDiscoveryWorker`.
+*   **Safety Control:** Introduce a strict `maxPages` parameter (e.g., 5 or 10) to the worker payload to prevent runaway infinite pagination during daily runs.
+
+**Phase 2: Internal Fontes (Data Lake)**
+*   **Mechanism:** Query `scraping_targets` where `status == 'active'`.
+*   **Action:** Iterate through active targets and enqueue the `processScrapingTargetWorker` for each.
+
+**Phase 3: Vertex AI & RSS Predefined Queries**
+*   **Mechanism:** Trigger the `processRssFeeds` logic and potentially a predefined set of high-value Agentic Search queries that aren't tied to a specific OSC but run globally (e.g., general "fomento cultura 2024" searches).
+
+### Architecture Flow
+1.  Admin clicks "Force Run Now" OR Cron triggers at 02:00 AM.
+2.  Orchestrator creates a new `ingestion_runs` document in Firestore with status `running`.
+3.  Orchestrator dispatches Cloud Tasks for Phase 1, 2, and 3, passing the `runId`.
+4.  Workers execute, and update the `ingestion_runs` document with their specific metrics (upserting into a subcollection or array).
+5.  When all queues drain (or timeout), a sweeper or the final task updates the status to `completed`.
+
+---
+
+## 5. The Analytical Radar (Database Schema)
+To provide the "Receipt" of execution, we need a durable log of every run. We will create a new root collection: `ingestion_runs`.
+
+**Collection:** `ingestion_runs`
+**Document ID:** Auto-generated (or timestamp-based `YYYYMMDD-HHMMSS`)
+
+```typescript
+interface IngestionRun {
+  id: string; // Document ID
+  triggerSource: 'CRON' | 'MANUAL_ADMIN';
+  triggeredBy: string | null; // Admin UID if manual
+  startTime: Timestamp;
+  endTime: Timestamp | null;
+  status: 'RUNNING' | 'COMPLETED' | 'FAILED' | 'PARTIAL_SUCCESS';
+
+  // High-level Aggregates
+  totalUrlsScanned: number;
+  totalValidEditaisFound: number;
+  totalErrors: number;
+
+  // Granular Metrics per Phase
+  phases: {
+    prosas: {
+      status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+      pagesScanned: number;
+      urlsDiscovered: number;
+      newEditaisEnqueued: number;
+      errors: string[];
+    },
+    internalFontes: {
+      status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+      targetsProcessed: number;
+      urlsDiscovered: number;
+      newEditaisEnqueued: number;
+      errors: string[]; // e.g., "Target ABCR failed: Timeout"
+    },
+    rssAndQueries: {
+      status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+      feedsProcessed: number;
+      urlsDiscovered: number;
+      newEditaisEnqueued: number;
+      errors: string[];
+    }
+  }
+}
+```
+*Note: To avoid the 1MB Firestore limit, we will not store every single URL in this document. We track counts here. If granular URL tracing is required, we can link to the `scraping_contents` collection via a `runId` field.*
+
+---
+
+## 6. Admin Control Center UI
+A new dashboard view will be created at `/admin/ingestion-radar` (or integrated into the existing Data Sources page).
+
+### Components
+1.  **Status & Control Header:**
+    *   Current Status Indicator (e.g., 🟢 Idle, 🔵 Running Phase 2...).
+    *   **"Forçar Sincronização Global" Button:** A prominent button that calls the orchestrator `onCall` function. It disables while a run is active.
+    *   Next Scheduled Run countdown.
+
+2.  **Live Radar (Active Run):**
+    *   If a run is active, display a live progress interface (listening via `onSnapshot` to the active `ingestion_runs` document).
+    *   Show progress bars or spinners for each of the 3 phases.
+
+3.  **Historical Receipts (Data Table):**
+    *   A paginated table listing historical runs from `ingestion_runs`.
+    *   Columns: Date, Trigger (Manual/Cron), URLs Scanned, Valid Found, Errors, Status.
+    *   Clicking a row expands a detailed view showing the breakdown per phase (Prosas vs. Fontes vs. RSS).
+
+### Future Enhancements
+*   Visual charts showing ingestion volume over the last 30 days.
+*   Error highlighting to quickly identify if a specific target in "Internal Fontes" is chronically failing and needs a Circuit Breaker reset.
