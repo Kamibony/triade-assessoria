@@ -1358,7 +1358,7 @@ export const agenticSearchWorker = onTaskDispatched({
                 fullTextToAnalyze = fullTextToAnalyze.substring(0, 3000); // Truncate to reduce token cost
                 const triageResult = await triageEditalWebpage({ text: fullTextToAnalyze, searchQuery: r.query });
                 if (triageResult.isValidEdital) {
-                    await enqueueEditalExtraction(link, fullTextToAnalyze, "Edital válido", jobId || `AGENTIC_${oscId}`);
+                    await enqueueEditalExtraction(link, fullTextToAnalyze, "Edital válido", jobId || `AGENTIC_${oscId}`, "VERTEX_SEARCH");
                     console.log(`Successfully enqueued agentic extraction for ${link}`);
                     totalValidEditaisEnqueued++;
                     methodBreakdown.web++;
@@ -1800,7 +1800,7 @@ export const ingestOscDataFunction = onCall({
 
 
 
-async function routeEditalUrl(url: string, sourceContext: string, searchId?: string, options?: { searchQuery?: string | undefined }): Promise<{ success: boolean, message: string }> {
+async function routeEditalUrl(url: string, sourceContext: string, searchId?: string, options?: { searchQuery?: string | undefined }, discoverySource?: string): Promise<{ success: boolean, message: string }> {
     if (url.toLowerCase().includes('prosas.com.br')) {
         logger.info(`[Smart Router] Routing Prosas link to authenticated worker: ${url}`);
         await getFunctions().taskQueue('prosasAuthenticatedWorker').enqueue({ url, searchId: searchId || sourceContext });
@@ -1826,7 +1826,7 @@ async function routeEditalUrl(url: string, sourceContext: string, searchId?: str
 
         if (triageResult.isValidEdital) {
             // Only fall back to sourceContext if searchId is strictly undefined
-            await enqueueEditalExtraction(url, text, "Edital válido", searchId !== undefined ? searchId : sourceContext);
+            await enqueueEditalExtraction(url, text, "Edital válido", searchId !== undefined ? searchId : sourceContext, discoverySource);
             return { success: true, message: "Edital válido" };
         } else {
             return { success: false, message: "Edital inválido" };
@@ -1837,7 +1837,7 @@ async function routeEditalUrl(url: string, sourceContext: string, searchId?: str
     }
 }
 
-export async function enqueueEditalExtraction(link: string, text: string, reason: string, searchId?: string) {
+export async function enqueueEditalExtraction(link: string, text: string, reason: string, searchId?: string, discoverySource?: string) {
     const db = getFirestore();
     // Guardrail: Truncate text to 3000 characters to prevent LLM token exhaustion
     if (text && text.length > 3000) {
@@ -1853,6 +1853,7 @@ export async function enqueueEditalExtraction(link: string, text: string, reason
     await tempContentRef.set({
         url: link,
         text: text,
+        discoverySource: discoverySource || null,
         createdAt: FieldValue.serverTimestamp(),
         expireAt: expireAt
     });
@@ -1862,7 +1863,8 @@ export async function enqueueEditalExtraction(link: string, text: string, reason
         searchId: searchId || null,
         link: link,
         contentId: tempContentRef.id,
-        reason: reason
+        reason: reason,
+        discoverySource: discoverySource || null
     });
     return tempContentRef.id;
 }
@@ -1990,7 +1992,7 @@ async function processRssFeeds() {
                 processedCount++;
                 console.log(`Processing link: ${item.link}`);
 
-                const routeResult = await routeEditalUrl(item.link, "RSS");
+                const routeResult = await routeEditalUrl(item.link, "RSS", undefined, undefined, "PROSAS_RSS");
                 console.log(`Router result for ${item.link}: success=${routeResult.success}, message=${routeResult.message}`);
 
                 if (routeResult.success) {
@@ -2108,7 +2110,7 @@ export const ingestManualEditalFunction = onCall({
     }
 
     try {
-        const routeResult = await routeEditalUrl(url, "MANUAL");
+        const routeResult = await routeEditalUrl(url, "MANUAL", undefined, undefined, "MANUAL");
 
         if (!routeResult.success) {
              return { success: false, message: `O conteúdo não parece ser um edital válido. Motivo: ${routeResult.message}` };
@@ -2680,7 +2682,7 @@ export const extractionWorker = onTaskDispatched({
     timeoutSeconds: 540,
     memory: '1GiB'
 }, async (request) => {
-    const { searchId, link, contentId, reason } = request.data as { searchId?: string, link: string, contentId: string, reason: string };
+    const { searchId, link, contentId, reason, discoverySource } = request.data as { searchId?: string, link: string, contentId: string, reason: string, discoverySource?: string };
 
     if (!link || !contentId) {
         console.error("Invalid task payload: missing link, or contentId.");
@@ -2720,6 +2722,7 @@ export const extractionWorker = onTaskDispatched({
                 rawText: text.substring(0, 5000),
                 sourceUrl: link,
                 embedding: embedding.length > 0 ? embedding : null,
+                discoverySource: discoverySource || contentDoc.data()?.discoverySource || null,
                 createdAt: FieldValue.serverTimestamp(),
             };
 
@@ -2944,7 +2947,7 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
             }
 
             // 4. Push to Claim Check (Lake of Editais)
-            await enqueueEditalExtraction(url, combinedText, "Authenticated Prosas Scraping", searchId);
+            await enqueueEditalExtraction(url, combinedText, "Authenticated Prosas Scraping", searchId, "PROSAS_AUTH");
             logger.info(`[Prosas Auth Worker] Enqueued extraction for ${url}`);
 
         } finally {
@@ -3264,7 +3267,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
             }
 
             try {
-                const routeResult = await routeEditalUrl(link, searchId, searchId, { searchQuery: query });
+                const routeResult = await routeEditalUrl(link, searchId, searchId, { searchQuery: query }, "VERTEX_SEARCH");
                 const safeReason = routeResult.message ? routeResult.message.substring(0, 200) : '';
 
                 if (routeResult.success) {

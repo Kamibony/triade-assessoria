@@ -112,7 +112,7 @@ export function EditaisList() {
         return deadlineMs >= now && (deadlineMs - now) <= thirtyDaysMs;
     }).length;
 
-    const prosasCount = editais.filter(e => e.discoverySource === 'PROSAS_AUTH').length;
+    const prosasCount = editais.filter(e => e.discoverySource === 'PROSAS_AUTH' || e.discoverySource === 'PROSAS_RSS').length;
     const iaCount = editais.filter(e => e.discoverySource === 'VERTEX_SEARCH').length;
     const manualCount = editais.filter(e => e.discoverySource === 'MANUAL').length;
     const legadoCount = editais.length - prosasCount - iaCount - manualCount;
@@ -205,7 +205,7 @@ export function EditaisList() {
                               {formatDate(edital.createdAt)}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-center">
-                              {edital.discoverySource === 'PROSAS_AUTH' ? (
+                              {edital.discoverySource === 'PROSAS_AUTH' || edital.discoverySource === 'PROSAS_RSS' ? (
                                   <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded">PROSAS</span>
                               ) : edital.discoverySource === 'VERTEX_SEARCH' ? (
                                   <span className="bg-purple-100 text-purple-800 text-[10px] font-bold px-2 py-0.5 rounded">BUSCA IA</span>
