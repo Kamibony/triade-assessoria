@@ -530,4 +530,5 @@ export declare const triggerGlobalIngestion: import("firebase-functions/v2/https
 }>, unknown>;
 export declare const scheduledGlobalIngestion: import("firebase-functions/v2/scheduler").ScheduleFunction;
 export declare const rssWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
+export declare const scheduledIngestionTimeoutSweeper: import("firebase-functions/v2/scheduler").ScheduleFunction;
 //# sourceMappingURL=index.d.ts.map

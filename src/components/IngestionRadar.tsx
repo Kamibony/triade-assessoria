@@ -161,11 +161,11 @@ export function IngestionRadar() {
 
             <div className="bg-card border rounded-lg p-6 space-y-4">
                <div className="flex items-center justify-between">
-                  <h3 className="font-semibold flex items-center gap-2"><Rss className="w-5 h-5 text-orange-500"/> RSS Feeds</h3>
+                  <h3 className="font-semibold flex items-center gap-2"><Rss className="w-5 h-5 text-orange-500"/> RSS & AI Queries</h3>
                   {getStatusBadge(runs[0].phases?.rssAndQueries?.status || 'PENDING')}
                </div>
                <div className="space-y-1 text-sm">
-                  <p className="flex justify-between"><span>Feeds:</span> <strong>{runs[0].phases?.rssAndQueries?.feedsProcessed || 0}</strong></p>
+                  <p className="flex justify-between"><span>Feeds/Queries:</span> <strong>{runs[0].phases?.rssAndQueries?.feedsProcessed || 0}</strong></p>
                   <p className="flex justify-between"><span>URLs:</span> <strong>{runs[0].phases?.rssAndQueries?.urlsDiscovered || 0}</strong></p>
                </div>
             </div>
