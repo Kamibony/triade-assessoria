@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
+exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
 exports.formatGenkitError = formatGenkitError;
 exports.fetchAndExtractText = fetchAndExtractText;
 exports.enqueueEditalExtraction = enqueueEditalExtraction;
@@ -1828,14 +1828,19 @@ async function processRssFeeds(runId) {
     return { processedCount, savedCount };
 }
 exports.ingestManualOscFunction = (0, https_1.onCall)({
-    cors: true,
+    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
+    invoker: 'public',
     timeoutSeconds: 540,
     memory: '1GiB',
 }, async (request) => {
-    // TODO: Re-enable auth checks once Auth is implemented.
-    // if (!request.auth) {
-    //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
-    // }
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'User must be authenticated.');
+    }
+    const db = (0, firestore_1.getFirestore)();
+    const userDoc = await db.collection('users').doc(request.auth.uid).get();
+    if (userDoc.data()?.role !== 'admin') {
+        throw new https_1.HttpsError('permission-denied', 'User must be an admin.');
+    }
     const { storagePaths } = request.data;
     if (!storagePaths || !Array.isArray(storagePaths) || storagePaths.length === 0) {
         throw new https_1.HttpsError('invalid-argument', 'Pelo menos um caminho de Storage é necessário.');
@@ -2058,17 +2063,22 @@ exports.askCopilotFunction = (0, https_1.onCall)({
     }
 });
 exports.manualTriggerRssSyncFunction = (0, https_1.onCall)({
-    cors: true,
+    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
+    invoker: 'public',
     timeoutSeconds: 540,
-}, async () => {
-    // TODO: Re-enable auth checks once Auth is implemented.
-    // if (!request.auth) {
-    //     throw new HttpsError('unauthenticated', 'User must be authenticated.');
-    // }
+}, async (request) => {
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'User must be authenticated.');
+    }
+    const db = (0, firestore_1.getFirestore)();
+    const userDoc = await db.collection('users').doc(request.auth.uid).get();
+    if (userDoc.data()?.role !== 'admin') {
+        throw new https_1.HttpsError('permission-denied', 'User must be an admin.');
+    }
     try {
-        // Will still run standalone without tracking for this old manual test endpoint if used directly
-        const result = await processRssFeeds();
-        return result;
+        const rssQueue = (0, functions_1.getFunctions)().taskQueue('rssWorker');
+        await rssQueue.enqueue({});
+        return { success: true, message: 'RSS sync triggered' };
     }
     catch (error) {
         console.error('Error in manualTriggerRssSyncFunction:', error);
@@ -3251,16 +3261,23 @@ exports.prosasBulkDiscoveryWorker = (0, tasks_1.onTaskDispatched)({
     }
 });
 exports.triggerGlobalIngestion = (0, https_1.onCall)({
-    cors: true,
+    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
+    invoker: 'public',
     timeoutSeconds: 540,
 }, async (request) => {
-    // TODO: Require admin auth
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'User must be authenticated.');
+    }
     const db = (0, firestore_1.getFirestore)();
+    const userDoc = await db.collection('users').doc(request.auth.uid).get();
+    if (userDoc.data()?.role !== 'admin') {
+        throw new https_1.HttpsError('permission-denied', 'User must be an admin.');
+    }
     const runId = `RUN-${new Date().toISOString().replace(/[:.]/g, '-')}`;
     await db.collection('ingestion_runs').doc(runId).set({
         id: runId,
         triggerSource: 'MANUAL_ADMIN',
-        triggeredBy: request.auth?.uid || 'unknown',
+        triggeredBy: request.auth.uid,
         startTime: firestore_1.FieldValue.serverTimestamp(),
         endTime: null,
         status: 'RUNNING',
@@ -3306,13 +3323,16 @@ exports.triggerGlobalIngestion = (0, https_1.onCall)({
         });
     }
     // Phase 3: RSS
-    // Run it inline or create a worker. processRssFeeds is async. We can run it in background to return quickly.
-    processRssFeeds(runId).catch(async (e) => {
+    try {
+        const rssQueue = (0, functions_1.getFunctions)().taskQueue('rssWorker');
+        await rssQueue.enqueue({ runId });
+    }
+    catch (e) {
         await db.collection('ingestion_runs').doc(runId).update({
             'phases.rssAndQueries.status': 'FAILED',
-            'phases.rssAndQueries.errors': firestore_1.FieldValue.arrayUnion(`RSS Process failed: ${e.message}`)
+            'phases.rssAndQueries.errors': firestore_1.FieldValue.arrayUnion(`Failed to enqueue RSS worker: ${e.message}`)
         });
-    });
+    }
     return { success: true, runId };
 });
 exports.scheduledGlobalIngestion = (0, scheduler_1.onSchedule)('0 2 * * *', async () => {
@@ -3369,5 +3389,17 @@ exports.scheduledGlobalIngestion = (0, scheduler_1.onSchedule)('0 2 * * *', asyn
             'phases.rssAndQueries.errors': firestore_1.FieldValue.arrayUnion(`RSS Process failed: ${e.message}`)
         });
     });
+});
+exports.rssWorker = (0, tasks_1.onTaskDispatched)({
+    retryConfig: {
+        maxAttempts: 3,
+        minBackoffSeconds: 60,
+    },
+    rateLimits: {
+        maxConcurrentDispatches: 1,
+    }
+}, async (request) => {
+    const runId = request.data.runId;
+    await processRssFeeds(runId);
 });
 //# sourceMappingURL=index.js.map
