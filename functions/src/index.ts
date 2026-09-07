@@ -610,6 +610,67 @@ export const extractEditalRulesFunction = onCall({
 
 
 import { onDocumentCreated, onDocumentUpdated, onDocumentWritten } from 'firebase-functions/v2/firestore';
+import { onRequest } from 'firebase-functions/v2/https';
+
+export const runVectorMigration = onRequest({
+    timeoutSeconds: 3600, // Long timeout for migration
+    memory: '1GiB'
+}, async (request, response) => {
+    try {
+        const db = getFirestore();
+        const collections = ['editais', 'oscs'];
+        const results: any = {};
+
+        for (const collectionName of collections) {
+            console.log(`Starting migration for ${collectionName}...`);
+            let count = 0;
+            let lastDoc = null;
+            let keepGoing = true;
+
+            while (keepGoing) {
+                let query = db.collection(collectionName).orderBy('__name__').limit(500);
+                if (lastDoc) {
+                    query = query.startAfter(lastDoc);
+                }
+
+                const snapshot = await query.get();
+                if (snapshot.empty) {
+                    keepGoing = false;
+                    break;
+                }
+
+                const batch = db.batch();
+                let batchCount = 0;
+
+                for (const doc of snapshot.docs) {
+                    const data = doc.data();
+
+                    if (data.embedding && Array.isArray(data.embedding) && data.embedding.length > 0) {
+                        batch.update(doc.ref, {
+                            embedding: FieldValue.vector(data.embedding)
+                        });
+                        batchCount++;
+                        count++;
+                    }
+                }
+
+                if (batchCount > 0) {
+                    await batch.commit();
+                    console.log(`Migrated ${batchCount} documents in ${collectionName}. Total: ${count}`);
+                }
+
+                lastDoc = snapshot.docs[snapshot.docs.length - 1];
+            }
+            results[collectionName] = count;
+            console.log(`Finished migrating ${collectionName}. Total updated: ${count}`);
+        }
+
+        response.status(200).json({ success: true, migrated: results });
+    } catch (error) {
+        console.error('Migration failed:', error);
+        response.status(500).json({ success: false, error: String(error) });
+    }
+});
 
 
 
@@ -977,7 +1038,7 @@ export const agenticSearchWorker = onTaskDispatched({
         if (!oscEmbedding) {
             const oscText = `Missão: ${oscData.mission || ''}. Foco: ${(oscData.coreActivities || []).join(', ')}. Nome: ${oscData.name || ''}`;
             oscEmbedding = await generateTextEmbedding(oscText);
-            await db.collection('oscs').doc(oscId).update({ embedding: oscEmbedding });
+            await db.collection('oscs').doc(oscId).update({ embedding: FieldValue.vector(oscEmbedding) });
         }
 
         // Tier 1: Internal Database First
@@ -989,50 +1050,22 @@ export const agenticSearchWorker = onTaskDispatched({
         }
 
         const matchEvaluatorQueue = getFunctions().taskQueue('matchEvaluatorWorker');
-        const internalEditaisSnapshot = await db.collection('editais').limit(100).get();
         let instantMatches = 0;
 
-        // Find internal editais that have high vector similarity
-        const editaisMissingEmbeddings: { docId: string, text: string }[] = [];
-        const validEditaisForSimilarity: { docId: string, embedding: number[] }[] = [];
+        // Use Firestore Vector Search for tier 1 search
+        // Check if oscEmbedding is already a VectorValue (from db) or an array (just generated)
+        const vectorQuery = Array.isArray(oscEmbedding) ? FieldValue.vector(oscEmbedding) : oscEmbedding;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const internalEditaisSnapshot = await (db.collection('editais') as any).findNearest('embedding', vectorQuery, { limit: 30, distanceMeasure: 'COSINE', distanceResultField: 'vectorDistance' }).get();
 
         for (const editalDoc of internalEditaisSnapshot.docs) {
-            const editalData = editalDoc.data();
-            const editalEmbedding = editalData?.embedding || null;
-
-            if (editalEmbedding) {
-                validEditaisForSimilarity.push({ docId: editalDoc.id, embedding: editalEmbedding });
-            } else if (editalData.title) {
-                 const editalText = `Objetivo e Título: ${editalData.title || ''}. Elegibilidade: Atividades permitidas: ${editalData.eligibilityCriteria?.allowedActivities?.join(', ') || ''}.`;
-                 editaisMissingEmbeddings.push({ docId: editalDoc.id, text: editalText });
-            }
-        }
-
-        // Process missing embeddings in chunks of 10 to avoid blocking the thread too long or hitting rate limits
-        const embedChunkSize = 10;
-        for (let i = 0; i < editaisMissingEmbeddings.length; i += embedChunkSize) {
-             const chunk = editaisMissingEmbeddings.slice(i, i + embedChunkSize);
-             await Promise.all(chunk.map(async (item) => {
-                 try {
-                     const embedding = await generateTextEmbedding(item.text);
-                     await db.collection('editais').doc(item.docId).update({ embedding: embedding });
-                     validEditaisForSimilarity.push({ docId: item.docId, embedding: embedding });
-                 } catch (err) {
-                     console.warn(`Failed to generate embedding for internal edital ${item.docId}:`, err);
-                 }
-             }));
-        }
-
-        for (const edital of validEditaisForSimilarity) {
-            if (oscEmbedding) {
-                const similarityScore = cosineSimilarity(oscEmbedding, edital.embedding);
-                if (similarityScore >= 0.70) { // Same strict threshold as the new pre-filter baseline
-                    await matchEvaluatorQueue.enqueue({
-                        oscId: oscId,
-                        editalId: edital.docId
-                    });
-                    instantMatches++;
-                }
+            const vectorDistance = editalDoc.data().vectorDistance;
+            if (vectorDistance !== undefined && vectorDistance <= 0.30) {
+                await matchEvaluatorQueue.enqueue({
+                    oscId: oscId,
+                    editalId: editalDoc.id
+                });
+                instantMatches++;
             }
         }
 
@@ -1691,7 +1724,7 @@ export const processOscChunkWorker = onTaskDispatched({
             const upsertData = {
                 ...parseResult.data,
                 cnpj: cleanCnpj,
-                embedding: embedding,
+                embedding: embedding ? FieldValue.vector(embedding) : null,
                 updatedAt: now,
             };
 
@@ -2427,7 +2460,7 @@ export const ingestManualOscFunction = onCall({
 
         const dataToSave = {
             ...profileData,
-            embedding: embedding,
+            embedding: embedding ? FieldValue.vector(embedding) : null,
             createdAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp(),
             source: 'manual_ingest'
@@ -3103,7 +3136,7 @@ export const extractionWorker = onTaskDispatched({
                 ...parseResult.data,
                 rawText: text.substring(0, 5000),
                 sourceUrl: link,
-                embedding: embedding.length > 0 ? embedding : null,
+                embedding: embedding.length > 0 ? FieldValue.vector(embedding) : null,
                 discoverySource: discoverySource || contentDoc.data()?.discoverySource || null,
                 createdAt: FieldValue.serverTimestamp(),
             };

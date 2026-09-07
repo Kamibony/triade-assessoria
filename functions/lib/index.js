@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scheduledIngestionTimeoutSweeper = exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
+exports.scheduledIngestionTimeoutSweeper = exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.runVectorMigration = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
 exports.formatGenkitError = formatGenkitError;
 exports.fetchAndExtractText = fetchAndExtractText;
 exports.enqueueEditalExtraction = enqueueEditalExtraction;
@@ -571,6 +571,58 @@ exports.extractEditalRulesFunction = (0, https_1.onCall)({
     return { trackingId: trackingRef.id, status: 'pending' };
 });
 const firestore_2 = require("firebase-functions/v2/firestore");
+const https_2 = require("firebase-functions/v2/https");
+exports.runVectorMigration = (0, https_2.onRequest)({
+    timeoutSeconds: 3600, // Long timeout for migration
+    memory: '1GiB'
+}, async (request, response) => {
+    try {
+        const db = (0, firestore_1.getFirestore)();
+        const collections = ['editais', 'oscs'];
+        const results = {};
+        for (const collectionName of collections) {
+            console.log(`Starting migration for ${collectionName}...`);
+            let count = 0;
+            let lastDoc = null;
+            let keepGoing = true;
+            while (keepGoing) {
+                let query = db.collection(collectionName).orderBy('__name__').limit(500);
+                if (lastDoc) {
+                    query = query.startAfter(lastDoc);
+                }
+                const snapshot = await query.get();
+                if (snapshot.empty) {
+                    keepGoing = false;
+                    break;
+                }
+                const batch = db.batch();
+                let batchCount = 0;
+                for (const doc of snapshot.docs) {
+                    const data = doc.data();
+                    if (data.embedding && Array.isArray(data.embedding) && data.embedding.length > 0) {
+                        batch.update(doc.ref, {
+                            embedding: firestore_1.FieldValue.vector(data.embedding)
+                        });
+                        batchCount++;
+                        count++;
+                    }
+                }
+                if (batchCount > 0) {
+                    await batch.commit();
+                    console.log(`Migrated ${batchCount} documents in ${collectionName}. Total: ${count}`);
+                }
+                lastDoc = snapshot.docs[snapshot.docs.length - 1];
+            }
+            results[collectionName] = count;
+            console.log(`Finished migrating ${collectionName}. Total updated: ${count}`);
+        }
+        response.status(200).json({ success: true, migrated: results });
+    }
+    catch (error) {
+        console.error('Migration failed:', error);
+        response.status(500).json({ success: false, error: String(error) });
+    }
+});
 const generateSearchQueries = ai.defineFlow({
     name: 'generateSearchQueries',
     inputSchema: zod_1.z.object({
@@ -907,7 +959,7 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         if (!oscEmbedding) {
             const oscText = `Missão: ${oscData.mission || ''}. Foco: ${(oscData.coreActivities || []).join(', ')}. Nome: ${oscData.name || ''}`;
             oscEmbedding = await generateTextEmbedding(oscText);
-            await db.collection('oscs').doc(oscId).update({ embedding: oscEmbedding });
+            await db.collection('oscs').doc(oscId).update({ embedding: firestore_1.FieldValue.vector(oscEmbedding) });
         }
         // Tier 1: Internal Database First
         if (jobRef) {
@@ -917,47 +969,20 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
             });
         }
         const matchEvaluatorQueue = (0, functions_1.getFunctions)().taskQueue('matchEvaluatorWorker');
-        const internalEditaisSnapshot = await db.collection('editais').limit(100).get();
         let instantMatches = 0;
-        // Find internal editais that have high vector similarity
-        const editaisMissingEmbeddings = [];
-        const validEditaisForSimilarity = [];
+        // Use Firestore Vector Search for tier 1 search
+        // Check if oscEmbedding is already a VectorValue (from db) or an array (just generated)
+        const vectorQuery = Array.isArray(oscEmbedding) ? firestore_1.FieldValue.vector(oscEmbedding) : oscEmbedding;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const internalEditaisSnapshot = await db.collection('editais').findNearest('embedding', vectorQuery, { limit: 30, distanceMeasure: 'COSINE', distanceResultField: 'vectorDistance' }).get();
         for (const editalDoc of internalEditaisSnapshot.docs) {
-            const editalData = editalDoc.data();
-            const editalEmbedding = editalData?.embedding || null;
-            if (editalEmbedding) {
-                validEditaisForSimilarity.push({ docId: editalDoc.id, embedding: editalEmbedding });
-            }
-            else if (editalData.title) {
-                const editalText = `Objetivo e Título: ${editalData.title || ''}. Elegibilidade: Atividades permitidas: ${editalData.eligibilityCriteria?.allowedActivities?.join(', ') || ''}.`;
-                editaisMissingEmbeddings.push({ docId: editalDoc.id, text: editalText });
-            }
-        }
-        // Process missing embeddings in chunks of 10 to avoid blocking the thread too long or hitting rate limits
-        const embedChunkSize = 10;
-        for (let i = 0; i < editaisMissingEmbeddings.length; i += embedChunkSize) {
-            const chunk = editaisMissingEmbeddings.slice(i, i + embedChunkSize);
-            await Promise.all(chunk.map(async (item) => {
-                try {
-                    const embedding = await generateTextEmbedding(item.text);
-                    await db.collection('editais').doc(item.docId).update({ embedding: embedding });
-                    validEditaisForSimilarity.push({ docId: item.docId, embedding: embedding });
-                }
-                catch (err) {
-                    console.warn(`Failed to generate embedding for internal edital ${item.docId}:`, err);
-                }
-            }));
-        }
-        for (const edital of validEditaisForSimilarity) {
-            if (oscEmbedding) {
-                const similarityScore = cosineSimilarity(oscEmbedding, edital.embedding);
-                if (similarityScore >= 0.70) { // Same strict threshold as the new pre-filter baseline
-                    await matchEvaluatorQueue.enqueue({
-                        oscId: oscId,
-                        editalId: edital.docId
-                    });
-                    instantMatches++;
-                }
+            const vectorDistance = editalDoc.data().vectorDistance;
+            if (vectorDistance !== undefined && vectorDistance <= 0.30) {
+                await matchEvaluatorQueue.enqueue({
+                    oscId: oscId,
+                    editalId: editalDoc.id
+                });
+                instantMatches++;
             }
         }
         console.log(`Found ${instantMatches} instant internal matches for OSC ${oscId}.`);
@@ -1546,7 +1571,7 @@ exports.processOscChunkWorker = (0, tasks_1.onTaskDispatched)({
             const upsertData = {
                 ...parseResult.data,
                 cnpj: cleanCnpj,
-                embedding: embedding,
+                embedding: embedding ? firestore_1.FieldValue.vector(embedding) : null,
                 updatedAt: now,
             };
             if (!oscDoc.exists) {
@@ -2188,7 +2213,7 @@ exports.ingestManualOscFunction = (0, https_1.onCall)({
         }
         const dataToSave = {
             ...profileData,
-            embedding: embedding,
+            embedding: embedding ? firestore_1.FieldValue.vector(embedding) : null,
             createdAt: firestore_1.FieldValue.serverTimestamp(),
             updatedAt: firestore_1.FieldValue.serverTimestamp(),
             source: 'manual_ingest'
@@ -2768,7 +2793,7 @@ exports.extractionWorker = (0, tasks_1.onTaskDispatched)({
                 ...parseResult.data,
                 rawText: text.substring(0, 5000),
                 sourceUrl: link,
-                embedding: embedding.length > 0 ? embedding : null,
+                embedding: embedding.length > 0 ? firestore_1.FieldValue.vector(embedding) : null,
                 discoverySource: discoverySource || contentDoc.data()?.discoverySource || null,
                 createdAt: firestore_1.FieldValue.serverTimestamp(),
             };
