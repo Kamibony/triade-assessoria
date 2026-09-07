@@ -922,7 +922,7 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         maxConcurrentDispatches: 2,
     },
     timeoutSeconds: 1800,
-    memory: '4GiB'
+    memory: '1GiB'
 }, async (request) => {
     const { oscId, jobId } = request.data;
     if (!oscId) {
