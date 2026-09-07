@@ -3055,7 +3055,7 @@ async function handleScraperSuccess(db: FirebaseFirestore.Firestore, targetId: s
 }
 
 export const prosasAuthenticatedWorker = onTaskDispatched({
-    retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
+    retryConfig: { maxAttempts: 1, minBackoffSeconds: 30 },
     rateLimits: { maxConcurrentDispatches: 2 },
     timeoutSeconds: 1800,
     memory: '4GiB'
@@ -3258,7 +3258,7 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
 });
 
 export const processScrapingTargetWorker = onTaskDispatched({
-    retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
+    retryConfig: { maxAttempts: 1, minBackoffSeconds: 30 },
     rateLimits: { maxConcurrentDispatches: 5 },
     timeoutSeconds: 540,
     memory: '2GiB'
@@ -3272,7 +3272,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
     }
 
     const db = getFirestore();
-    const searchRef = db.collection('searches').doc(searchId);
+    const searchRef = searchId && !['GLOBAL_RUN', 'BULK_DISCOVERY', 'MANUAL', 'RSS'].includes(searchId) ? db.collection('searches').doc(searchId) : null;
 
     logger.info(`[Scraper] Starting processing for target: ${target.name} | URL: ${target.url} | Page: ${page} | Strategy: ${target.strategy}`);
 
@@ -3515,9 +3515,11 @@ export const processScrapingTargetWorker = onTaskDispatched({
                 const safeReason = routeResult.message ? routeResult.message.substring(0, 200) : '';
 
                 if (routeResult.success) {
-                    await searchRef.update({
-                        logs: FieldValue.arrayUnion({ link, status: 'Em Processamento (Extração)', reason: safeReason })
-                    });
+                    if (searchRef) {
+                        await searchRef.update({
+                            logs: FieldValue.arrayUnion({ link, status: 'Em Processamento (Extração)', reason: safeReason })
+                        });
+                    }
                     if (runId) {
                          try {
                              await db.collection('ingestion_runs').doc(runId).update({
@@ -3528,9 +3530,11 @@ export const processScrapingTargetWorker = onTaskDispatched({
                          }
                     }
                 } else {
-                    await searchRef.update({
-                        logs: FieldValue.arrayUnion({ link, status: 'Ignorado/Rejeitado', reason: safeReason })
-                    });
+                    if (searchRef) {
+                        await searchRef.update({
+                            logs: FieldValue.arrayUnion({ link, status: 'Ignorado/Rejeitado', reason: safeReason })
+                        });
+                    }
                 }
 
                 if (runId) {
@@ -3547,9 +3551,11 @@ export const processScrapingTargetWorker = onTaskDispatched({
                 console.error(`Error processing link ${link} from ${target.name}:`, error);
                 const rawErrorMsg = error instanceof Error ? error.message : 'Erro desconhecido';
                 const safeErrorMsg = rawErrorMsg ? rawErrorMsg.substring(0, 200) : '';
-                await searchRef.update({
-                    logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: safeErrorMsg })
-                });
+                if (searchRef) {
+                    await searchRef.update({
+                        logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: safeErrorMsg })
+                    });
+                }
             }
             totalProcessed++;
         }));
@@ -3580,9 +3586,11 @@ export const processScrapingTargetWorker = onTaskDispatched({
             });
         } else if (remainingLinks.length === 0) {
             // No more links to process, and no next page to fetch (either RSS, reached end, or max pages)
-            await searchRef.update({
-                completedTargets: FieldValue.increment(1)
-            });
+            if (searchRef) {
+                await searchRef.update({
+                    completedTargets: FieldValue.increment(1)
+                });
+            }
             if (runId) {
                 await db.collection('ingestion_runs').doc(runId).update({
                     'phases.internalFontes.targetsProcessed': FieldValue.increment(1)
@@ -3603,9 +3611,11 @@ export const processScrapingTargetWorker = onTaskDispatched({
         }
 
         if (totalProcessed > 0) {
-            await searchRef.update({
-                processedCount: FieldValue.increment(totalProcessed)
-            });
+            if (searchRef) {
+                await searchRef.update({
+                    processedCount: FieldValue.increment(totalProcessed)
+                });
+            }
         }
 
     } catch (error: any) {
@@ -3744,7 +3754,7 @@ export const renewProsasSessionCron = onSchedule({
 
 
 export const prosasBulkDiscoveryWorker = onTaskDispatched({
-    retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
+    retryConfig: { maxAttempts: 1, minBackoffSeconds: 30 },
     rateLimits: { maxConcurrentDispatches: 1 },
     timeoutSeconds: 1800,
     memory: '2GiB'
@@ -4041,7 +4051,7 @@ export const scheduledGlobalIngestion = onSchedule('0 2 * * *', async () => {
 
 export const rssWorker = onTaskDispatched({
     retryConfig: {
-        maxAttempts: 3,
+        maxAttempts: 1,
         minBackoffSeconds: 60,
     },
     rateLimits: {
