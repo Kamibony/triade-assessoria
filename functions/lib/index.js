@@ -1667,12 +1667,14 @@ async function routeEditalUrl(url, sourceContext, searchId, options, discoverySo
             const spaMsg = isSpaLikely ? " (Possível SPA renderizado via JS)" : "";
             return { success: false, message: `Texto muito curto para análise (${text.length} caracteres)${spaMsg}.` };
         }
-        // Heuristic Pre-filter
+        // Heuristic Pre-filter (Stricter AND gate)
         const textLower = text.toLowerCase();
-        const essentialKeywords = ['edital', 'inscrição', 'inscrições', 'prazo', 'cronograma', 'fomento', 'chamada pública', 'financiamento'];
-        const hasKeyword = essentialKeywords.some(kw => textLower.includes(kw));
-        if (!hasKeyword) {
-            return { success: false, message: "Rejeitado pelo filtro heurístico pré-LLM (palavras-chave ausentes no texto extraído)." };
+        const primaryKeywords = ['edital', 'chamada pública', 'processo seletivo', 'fomento', 'regulamento'];
+        const secondaryKeywords = ['inscrições abertas', 'inscrição', 'inscrições', 'prazo', 'cronograma', 'financiamento', 'submissão'];
+        const hasPrimary = primaryKeywords.some(kw => textLower.includes(kw));
+        const hasSecondary = secondaryKeywords.some(kw => textLower.includes(kw));
+        if (!(hasPrimary && hasSecondary)) {
+            return { success: false, message: "Rejeitado pelo filtro heurístico pré-LLM (ausência de combinação primária+secundária de palavras-chave)." };
         }
         const triageResult = await triageEditalWebpage({ text, searchQuery: options?.searchQuery });
         if (triageResult.isValidEdital) {
@@ -1893,6 +1895,9 @@ async function processPredefinedQueries(runId) {
                 const existingQueue = await db.collection('scraping_contents').where('url', '==', link).limit(1).get();
                 if (!existingQueue.empty)
                     continue;
+                const rejectionRef = await db.collection('scraping_cache').where('url', '==', link).limit(1).get();
+                if (!rejectionRef.empty)
+                    continue;
                 processedCount++;
                 const routeResult = await routeEditalUrl(link, "VERTEX_SEARCH", undefined, { searchQuery: query }, "VERTEX_SEARCH");
                 if (routeResult.success) {
@@ -1955,7 +1960,13 @@ async function processRssFeeds(runId) {
         // Prosas RSS with regional filters for Nordeste and Paraiba
         "https://blog.prosas.com.br/categoria/editais/feed/?tag=nordeste,paraiba"
     ];
-    const parser = new Parser();
+    const parser = new Parser({
+        customFields: { item: ['content:encoded', 'creator'] },
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/rss+xml,application/xml;q=0.9,text/xml;q=0.8,text/html;q=0.7,*/*;q=0.1'
+        }
+    });
     const db = (0, firestore_1.getFirestore)();
     let processedCount = 0;
     let savedCount = 0;
@@ -1985,12 +1996,28 @@ async function processRssFeeds(runId) {
                     console.log(`Skipping link already in scraping queue: ${item.link}`);
                     continue;
                 }
+                const rejectionRef = await db.collection('scraping_cache').where('url', '==', item.link).limit(1).get();
+                if (!rejectionRef.empty) {
+                    console.log(`Skipping link in rejection cache: ${item.link}`);
+                    continue;
+                }
                 processedCount++;
                 console.log(`Processing link: ${item.link}`);
                 const routeResult = await routeEditalUrl(item.link, "RSS", undefined, undefined, "PROSAS_RSS");
                 console.log(`Router result for ${item.link}: success=${routeResult.success}, message=${routeResult.message}`);
                 if (routeResult.success) {
                     savedCount++;
+                }
+                else {
+                    const safeReason = routeResult.message ? routeResult.message.substring(0, 200) : '';
+                    const expireAt = new Date();
+                    expireAt.setDate(expireAt.getDate() + 30);
+                    await db.collection('scraping_cache').add({
+                        url: item.link,
+                        reason: safeReason,
+                        createdAt: firestore_1.FieldValue.serverTimestamp(),
+                        expireAt: expireAt
+                    });
                 }
             }
         }
@@ -2895,7 +2922,7 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
     memory: '2GiB'
 }, async (request) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { searchId, target, query, page = 1, linksQueue = [], runId } = request.data;
+    const { searchId, target, query, page = 1, linksQueue = [], runId, consecutiveZeroNewCount = 0 } = request.data;
     if (!searchId || !target) {
         console.error("Invalid task payload: missing searchId or target.");
         return;
@@ -2958,7 +2985,13 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                     }
                 }
                 else if (target.strategy === 'RSS') {
-                    const parser = new Parser();
+                    const parser = new Parser({
+                        customFields: { item: ['content:encoded', 'creator'] },
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                            'Accept': 'application/rss+xml,application/xml;q=0.9,text/xml;q=0.8,text/html;q=0.7,*/*;q=0.1'
+                        }
+                    });
                     const feed = await parser.parseURL(fetchUrl);
                     candidateLinks = feed.items.map((item) => item.link).filter((link) => !!link);
                 }
@@ -3029,7 +3062,13 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                     const isRss = fetchUrl.toLowerCase().endsWith('.xml') || fetchUrl.toLowerCase().includes('feed');
                     if (isRss) {
                         try {
-                            const parser = new Parser();
+                            const parser = new Parser({
+                                customFields: { item: ['content:encoded', 'creator'] },
+                                headers: {
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                                    'Accept': 'application/rss+xml,application/xml;q=0.9,text/xml;q=0.8,text/html;q=0.7,*/*;q=0.1'
+                                }
+                            });
                             const feed = await parser.parseURL(fetchUrl);
                             candidateLinks = feed.items.map((item) => item.link).filter((link) => !!link);
                         }
@@ -3063,7 +3102,13 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                         if (isOk) {
                             if (contentType.includes('xml') || contentType.includes('rss')) {
                                 try {
-                                    const parser = new Parser();
+                                    const parser = new Parser({
+                                        customFields: { item: ['content:encoded', 'creator'] },
+                                        headers: {
+                                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                                            'Accept': 'application/rss+xml,application/xml;q=0.9,text/xml;q=0.8,text/html;q=0.7,*/*;q=0.1'
+                                        }
+                                    });
                                     const feed = await parser.parseString(html);
                                     candidateLinks = feed.items.map((item) => item.link).filter((link) => !!link);
                                 }
@@ -3077,7 +3122,13 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                                 if (rssLink) {
                                     try {
                                         const absoluteRssUrl = new URL(rssLink, fetchUrl).href;
-                                        const parser = new Parser();
+                                        const parser = new Parser({
+                                            customFields: { item: ['content:encoded', 'creator'] },
+                                            headers: {
+                                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                                                'Accept': 'application/rss+xml,application/xml;q=0.9,text/xml;q=0.8,text/html;q=0.7,*/*;q=0.1'
+                                            }
+                                        });
                                         const feed = await parser.parseURL(absoluteRssUrl);
                                         candidateLinks = feed.items.map((item) => item.link).filter((link) => !!link);
                                     }
@@ -3101,9 +3152,9 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                                     });
                                     rawLinks = [...new Set(rawLinks)];
                                     const excludePatterns = [/sobre/i, /contato/i, /\.jpg$/i, /\.png$/i, /facebook\.com/i, /instagram\.com/i, /twitter\.com/i, /mailto:/i, /login/i, /entrar/i];
+                                    const includePatterns = [/\/edital\//i, /\/chamada\//i, /edital/i, /inscricoes/i, /inscrições/i, /processo-seletivo/i, /\.pdf$/i];
                                     const preFiltered = rawLinks.filter(link => !excludePatterns.some(pattern => pattern.test(link)));
-                                    const selectionResult = await selectEditalLinksFlow({ links: preFiltered });
-                                    candidateLinks = selectionResult.selectedLinks;
+                                    candidateLinks = preFiltered.filter(link => includePatterns.some(pattern => pattern.test(link)));
                                 }
                             }
                         }
@@ -3135,6 +3186,12 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                 totalProcessed++;
                 return;
             }
+            // Rejection Cache Deduplication
+            const rejectionRef = await db.collection('scraping_cache').where('url', '==', link).limit(1).get();
+            if (!rejectionRef.empty) {
+                totalProcessed++;
+                return;
+            }
             try {
                 const routeResult = await routeEditalUrl(link, searchId, searchId, { searchQuery: query }, "VERTEX_SEARCH");
                 const safeReason = routeResult.message ? routeResult.message.substring(0, 200) : '';
@@ -3161,6 +3218,15 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                             logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Ignorado/Rejeitado', reason: safeReason })
                         });
                     }
+                    // Save to rejection cache with 30-day TTL
+                    const expireAt = new Date();
+                    expireAt.setDate(expireAt.getDate() + 30);
+                    await db.collection('scraping_cache').add({
+                        url: link,
+                        reason: safeReason,
+                        createdAt: firestore_1.FieldValue.serverTimestamp(),
+                        expireAt: expireAt
+                    });
                 }
                 if (runId) {
                     try {
@@ -3199,16 +3265,50 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                 runId
             });
         }
-        else if (candidateLinks.length > 0 && target.strategy !== 'RSS' && page < 100) {
-            // Finished current page's links, fetch next page
-            await queue.enqueue({
-                searchId,
-                target,
-                query,
-                page: page + 1,
-                linksQueue: [],
-                runId
-            });
+        else if (target.strategy !== 'RSS' && page < 5) {
+            let nextConsecutiveZeroNewCount = consecutiveZeroNewCount;
+            // If we processed links but none were successful, increment. Otherwise, reset if we had successes.
+            // But wait, candidateLinks might be empty, which means no new links found on the page.
+            if (candidateLinks.length === 0 || totalProcessed === 0) {
+                nextConsecutiveZeroNewCount++;
+            }
+            else {
+                nextConsecutiveZeroNewCount = 0;
+            }
+            if (nextConsecutiveZeroNewCount < 2) {
+                await queue.enqueue({
+                    searchId,
+                    target,
+                    query,
+                    page: page + 1,
+                    linksQueue: [],
+                    runId,
+                    consecutiveZeroNewCount: nextConsecutiveZeroNewCount
+                });
+            }
+            else {
+                logger.info(`[Scraper] Stopping pagination for ${target.name}. Found 2 consecutive pages with 0 new links.`);
+                if (searchRef) {
+                    await searchRef.update({
+                        completedTargets: firestore_1.FieldValue.increment(1)
+                    });
+                }
+                if (runId) {
+                    await db.collection('ingestion_runs').doc(runId).update({
+                        'phases.internalFontes.targetsProcessed': firestore_1.FieldValue.increment(1)
+                    });
+                    const runDoc = await db.collection('ingestion_runs').doc(runId).get();
+                    const runData = runDoc.data();
+                    if (runData && runData.phases && runData.phases.internalFontes) {
+                        if (runData.phases.internalFontes.targetsProcessed >= runData.phases.internalFontes.totalTargets) {
+                            await db.collection('ingestion_runs').doc(runId).update({
+                                'phases.internalFontes.status': 'COMPLETED'
+                            });
+                            await checkAndUpdateGlobalRunStatus(runId);
+                        }
+                    }
+                }
+            }
         }
         else if (remainingLinks.length === 0) {
             // No more links to process, and no next page to fetch (either RSS, reached end, or max pages)

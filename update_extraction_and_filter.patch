@@ -1,0 +1,38 @@
+--- functions/src/index.ts
++++ functions/src/index.ts
+@@ -1850,11 +1850,13 @@
+         }
+
+         // Heuristic Pre-filter
+-        const textLower = text.toLowerCase();
+-        const essentialKeywords = ['edital', 'inscrição', 'inscrições', 'prazo', 'cronograma', 'fomento', 'chamada pública', 'financiamento'];
+-        const hasKeyword = essentialKeywords.some(kw => textLower.includes(kw));
++        const textLower = text.toLowerCase();
++        const primaryKeywords = ['edital', 'chamada pública', 'processo seletivo', 'fomento', 'regulamento'];
++        const secondaryKeywords = ['inscrições abertas', 'inscrição', 'inscrições', 'prazo', 'cronograma', 'financiamento', 'submissão'];
++
++        const hasPrimary = primaryKeywords.some(kw => textLower.includes(kw));
++        const hasSecondary = secondaryKeywords.some(kw => textLower.includes(kw));
+
+-        if (!hasKeyword) {
++        if (!(hasPrimary && hasSecondary)) {
+              return { success: false, message: "Rejeitado pelo filtro heurístico pré-LLM (palavras-chave ausentes no texto extraído)." };
+         }
+
+@@ -3412,8 +3414,14 @@
+                                     rawLinks = [...new Set(rawLinks)];
+                                     const excludePatterns = [/sobre/i, /contato/i, /\.jpg$/i, /\.png$/i, /facebook\.com/i, /instagram\.com/i, /twitter\.com/i, /mailto:/i, /login/i, /entrar/i];
++                                    const includePatterns = [/\/edital\//i, /\/chamada\//i, /edital/i, /inscricoes/i, /processo-seletivo/i, /\.pdf$/i];
+                                     const preFiltered = rawLinks.filter(link => !excludePatterns.some(pattern => pattern.test(link)));
+-                                    const selectionResult = await selectEditalLinksFlow({ links: preFiltered });
+-                                    candidateLinks = selectionResult.selectedLinks;
++
++                                    // Fallback: If no links match the strict include patterns, keep all pre-filtered links
++                                    // but we want to be strict to reduce noise. Let's try to match at least one include pattern,
++                                    // or just allow preFiltered if includePatterns is too strict (or maybe we just apply includePatterns).
++                                    const strictFiltered = preFiltered.filter(link => includePatterns.some(pattern => pattern.test(link)));
++
++                                    // If strict filtering removes everything, it's safer to return 0 links than 100 junk links
++                                    candidateLinks = strictFiltered;
+                                 }
+                             }
