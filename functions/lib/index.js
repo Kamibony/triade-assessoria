@@ -47,6 +47,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const playwright_extra_1 = require("playwright-extra");
 const chromium_1 = __importDefault(require("@sparticuz/chromium"));
+// @ts-ignore
 const { PDFParse } = require('pdf-parse');
 const puppeteer_extra_plugin_stealth_1 = __importDefault(require("puppeteer-extra-plugin-stealth"));
 const firestore_1 = require("firebase-admin/firestore");
@@ -440,20 +441,43 @@ Provide NO reasoning, NO explanations, and NO thinking steps. Output ONLY the ra
 });
 async function fetchAndExtractText(url) {
     try {
-        const response = await fetch(url);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        const response = await fetch(url, {
+            signal: controller.signal,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf,*/*;q=0.8',
+            }
+        });
+        clearTimeout(timeoutId);
         if (!response.ok) {
             throw new Error(`Failed to fetch ${url}: ${response.status}`);
+        }
+        const contentType = response.headers.get('content-type') || '';
+        // Handle PDF responses directly
+        if (contentType.toLowerCase().includes('application/pdf') || url.toLowerCase().endsWith('.pdf')) {
+            logger.info(`[fetchAndExtractText] Detected PDF at ${url}. Using pdf-parse.`);
+            const arrayBuffer = await response.arrayBuffer();
+            const uint8Array = new Uint8Array(arrayBuffer);
+            const parser = new PDFParse(uint8Array, { max: 10 });
+            const pdfData = await parser.getText();
+            return pdfData.text.replace(/\s+/g, ' ').trim();
         }
         const html = await response.text();
         const $ = cheerio.load(html);
         // Remove script, style, nav, footer, etc to get main content
-        $('script, style, nav, footer, header, aside, noscript, iframe').remove();
+        $('script, style, nav, footer, header, aside, noscript, iframe, svg').remove();
         const text = $('body').text();
         // Clean up whitespace
-        return text.replace(/\s+/g, ' ').trim();
+        const cleanText = text.replace(/\s+/g, ' ').trim();
+        if (cleanText.length < 150) {
+            logger.warn(`[fetchAndExtractText] Suspiciously short text extracted from HTML (len: ${cleanText.length}). Possible SPA/JS-rendered page: ${url}`);
+        }
+        return cleanText;
     }
     catch (e) {
-        console.error("Error fetching text from URL", url, e);
+        logger.error(`Error fetching text from URL ${url}: ${e.message}`);
         return "";
     }
 }
@@ -1633,15 +1657,20 @@ async function routeEditalUrl(url, sourceContext, searchId, options, discoverySo
     }
     try {
         const text = await fetchAndExtractText(url);
-        if (!text || text.length < 500) {
-            return { success: false, message: "Texto ausente ou muito curto." };
+        if (!text) {
+            return { success: false, message: "Falha ao extrair texto (vazio ou erro de requisição/PDF inválido)." };
+        }
+        if (text.length < 500) {
+            const isSpaLikely = text.length < 150;
+            const spaMsg = isSpaLikely ? " (Possível SPA renderizado via JS)" : "";
+            return { success: false, message: `Texto muito curto para análise (${text.length} caracteres)${spaMsg}.` };
         }
         // Heuristic Pre-filter
         const textLower = text.toLowerCase();
         const essentialKeywords = ['edital', 'inscrição', 'inscrições', 'prazo', 'cronograma', 'fomento', 'chamada pública', 'financiamento'];
         const hasKeyword = essentialKeywords.some(kw => textLower.includes(kw));
         if (!hasKeyword) {
-            return { success: false, message: "Rejeitado pelo filtro heurístico pré-LLM (palavras-chave ausentes)." };
+            return { success: false, message: "Rejeitado pelo filtro heurístico pré-LLM (palavras-chave ausentes no texto extraído)." };
         }
         const triageResult = await triageEditalWebpage({ text, searchQuery: options?.searchQuery });
         if (triageResult.isValidEdital) {
@@ -3581,7 +3610,9 @@ exports.rssWorker = (0, tasks_1.onTaskDispatched)({
     },
     rateLimits: {
         maxConcurrentDispatches: 1,
-    }
+    },
+    memory: '1GiB',
+    timeoutSeconds: 540
 }, async (request) => {
     const runId = request.data.runId;
     const db = (0, firestore_1.getFirestore)();
