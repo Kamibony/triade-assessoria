@@ -459,9 +459,45 @@ async function fetchAndExtractText(url) {
         const contentType = response.headers.get('content-type') || '';
         // Handle PDF responses directly
         if (contentType.toLowerCase().includes('application/pdf') || url.toLowerCase().endsWith('.pdf')) {
-            logger.info(`[fetchAndExtractText] Detected PDF at ${url}. Using pdf-parse.`);
-            const arrayBuffer = await response.arrayBuffer();
-            const uint8Array = new Uint8Array(Buffer.from(arrayBuffer));
+            logger.info(`[fetchAndExtractText] Detected PDF at ${url}. Inspecting memory limits.`);
+            const MAX_PDF_SIZE = 10 * 1024 * 1024; // 10MB
+            const contentLengthHeader = response.headers.get('content-length');
+            if (contentLengthHeader) {
+                const size = parseInt(contentLengthHeader, 10);
+                if (size > MAX_PDF_SIZE) {
+                    logger.warn(`[fetchAndExtractText] PDF at ${url} is too large (${size} bytes). Rejecting to prevent OOM.`);
+                    throw new Error(`PDF exceeds 10MB size limit (${size} bytes)`);
+                }
+            }
+            // Read stream in chunks as a fallback
+            const chunks = [];
+            let loadedBytes = 0;
+            const reader = response.body?.getReader();
+            if (reader) {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done)
+                        break;
+                    if (value) {
+                        chunks.push(value);
+                        loadedBytes += value.length;
+                        if (loadedBytes > MAX_PDF_SIZE) {
+                            logger.warn(`[fetchAndExtractText] PDF stream at ${url} exceeded 10MB. Aborting stream to prevent OOM.`);
+                            throw new Error(`PDF stream exceeds 10MB size limit`);
+                        }
+                    }
+                }
+            }
+            else {
+                // Node native fetch response body might not be a Web Stream in all CommonJS compat layers, fallback to arrayBuffer if no reader
+                const ab = await response.arrayBuffer();
+                if (ab.byteLength > MAX_PDF_SIZE) {
+                    logger.warn(`[fetchAndExtractText] PDF ArrayBuffer at ${url} exceeded 10MB. Rejecting to prevent OOM.`);
+                    throw new Error(`PDF ArrayBuffer exceeds 10MB size limit`);
+                }
+                chunks.push(new Uint8Array(Buffer.from(ab)));
+            }
+            const uint8Array = new Uint8Array(Buffer.concat(chunks.map(c => Buffer.from(c))));
             const parser = new PDFParse(uint8Array, { max: 10 });
             const pdfData = await parser.getText();
             return pdfData.text.replace(/\s+/g, ' ').trim();
@@ -1655,17 +1691,17 @@ async function routeEditalUrl(url, sourceContext, searchId, options, discoverySo
     if (url.toLowerCase().includes('prosas.com.br')) {
         logger.info(`[Smart Router] Routing Prosas link to authenticated worker: ${url}`);
         await (0, functions_1.getFunctions)().taskQueue('prosasAuthenticatedWorker').enqueue({ url, searchId: searchId || sourceContext });
-        return { success: true, message: "Edital encaminhado para o raspador autenticado (Prosas)." };
+        return { success: true, message: "Edital encaminhado para o raspador autenticado (Prosas).", outcome: 'PROSAS' };
     }
     try {
         const text = await fetchAndExtractText(url);
         if (!text) {
-            return { success: false, message: "Falha ao extrair texto (vazio ou erro de requisição/PDF inválido)." };
+            return { success: false, message: "Falha ao extrair texto (vazio ou erro de requisição/PDF inválido).", outcome: 'ERROR' };
         }
         if (text.length < 150) {
             const isSpaLikely = text.length < 150;
             const spaMsg = isSpaLikely ? " (Possível SPA renderizado via JS)" : "";
-            return { success: false, message: `Texto muito curto para análise (${text.length} caracteres)${spaMsg}.` };
+            return { success: false, message: `Texto muito curto para análise (${text.length} caracteres)${spaMsg}.`, outcome: 'HEURISTIC_REJECT' };
         }
         // Heuristic Pre-filter (Stricter AND gate)
         const textLower = text.toLowerCase();
@@ -1674,21 +1710,21 @@ async function routeEditalUrl(url, sourceContext, searchId, options, discoverySo
         const hasPrimary = primaryKeywords.some(kw => textLower.includes(kw));
         const hasSecondary = secondaryKeywords.some(kw => textLower.includes(kw));
         if (!(hasPrimary && hasSecondary)) {
-            return { success: false, message: "Rejeitado pelo filtro heurístico pré-LLM (ausência de combinação primária+secundária de palavras-chave)." };
+            return { success: false, message: "Rejeitado pelo filtro heurístico pré-LLM (ausência de combinação primária+secundária de palavras-chave).", outcome: 'HEURISTIC_REJECT' };
         }
         const triageResult = await triageEditalWebpage({ text, searchQuery: options?.searchQuery });
         if (triageResult.isValidEdital) {
             // Only fall back to sourceContext if searchId is strictly undefined
             await enqueueEditalExtraction(url, text, "Edital válido", searchId !== undefined ? searchId : sourceContext, discoverySource);
-            return { success: true, message: "Edital válido" };
+            return { success: true, message: "Edital válido", outcome: 'AI_APPROVE' };
         }
         else {
-            return { success: false, message: "Edital inválido" };
+            return { success: false, message: "Edital inválido", outcome: 'AI_REJECT' };
         }
     }
     catch (error) {
         logger.error(`[Smart Router] Error processing link ${url}:`, error);
-        return { success: false, message: error instanceof Error ? error.message : "Erro desconhecido" };
+        return { success: false, message: error instanceof Error ? error.message : "Erro desconhecido", outcome: 'ERROR' };
     }
 }
 async function enqueueEditalExtraction(link, text, reason, searchId, discoverySource) {
@@ -1797,6 +1833,13 @@ async function processPredefinedQueries(runId) {
     ];
     let processedCount = 0;
     let savedCount = 0;
+    // Telemetry Counters
+    let heuristicRejects = 0;
+    let aiRejects = 0;
+    let cacheHits = 0;
+    let aiApprovals = 0;
+    let prosasLinks = 0;
+    let errorCount = 0;
     let vertexProjectId = process.env.VERTEX_AI_SEARCH_PROJECT_ID;
     if (!vertexProjectId) {
         try {
@@ -1848,27 +1891,38 @@ async function processPredefinedQueries(runId) {
             let attempt = 0;
             const maxAttempts = 3;
             while (attempt < maxAttempts) {
-                vertexResponse = await fetch(vertexUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${accessToken.token}`,
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ query: query, pageSize: 10 })
-                });
-                if (vertexResponse.ok)
-                    break;
-                if (vertexResponse.status === 429 || vertexResponse.status >= 500) {
-                    attempt++;
-                    console.warn(`Vertex AI API failed with status ${vertexResponse.status}. Retrying ${attempt}/${maxAttempts}...`);
-                    await new Promise(res => setTimeout(res, 1000 * Math.pow(2, attempt)));
+                try {
+                    vertexResponse = await fetch(vertexUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${accessToken.token}`,
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ query: query, pageSize: 10 })
+                    });
+                    if (vertexResponse.ok)
+                        break;
+                    if (vertexResponse.status === 429 || vertexResponse.status >= 500) {
+                        attempt++;
+                        console.warn(`Vertex AI API failed with status ${vertexResponse.status}. Retrying ${attempt}/${maxAttempts}...`);
+                        await new Promise(res => setTimeout(res, 1000 * Math.pow(2, attempt)));
+                    }
+                    else {
+                        break;
+                    }
                 }
-                else {
-                    break;
+                catch (networkError) {
+                    attempt++;
+                    console.warn(`Vertex AI API network error: ${networkError.message}. Retrying ${attempt}/${maxAttempts}...`);
+                    if (attempt >= maxAttempts) {
+                        vertexResponse = undefined; // Force failure block below
+                        break;
+                    }
+                    await new Promise(res => setTimeout(res, 1000 * Math.pow(2, attempt)));
                 }
             }
             if (!vertexResponse || !vertexResponse.ok) {
-                const status = vertexResponse ? vertexResponse.status : 'unknown';
+                const status = vertexResponse ? vertexResponse.status : 'network_error_or_unknown';
                 console.error(`Vertex AI API failed permanently for query "${query}" with status: ${status}`);
                 if (runId) {
                     await db.collection('ingestion_runs').doc(runId).update({
@@ -1896,12 +1950,35 @@ async function processPredefinedQueries(runId) {
                 if (!existingQueue.empty)
                     continue;
                 const rejectionRef = await db.collection('scraping_cache').where('url', '==', link).limit(1).get();
-                if (!rejectionRef.empty)
+                if (!rejectionRef.empty) {
+                    cacheHits++;
                     continue;
+                }
                 processedCount++;
                 const routeResult = await routeEditalUrl(link, "VERTEX_SEARCH", undefined, { searchQuery: query }, "VERTEX_SEARCH");
+                if (routeResult.outcome === 'HEURISTIC_REJECT')
+                    heuristicRejects++;
+                else if (routeResult.outcome === 'AI_REJECT')
+                    aiRejects++;
+                else if (routeResult.outcome === 'AI_APPROVE')
+                    aiApprovals++;
+                else if (routeResult.outcome === 'PROSAS')
+                    prosasLinks++;
+                else if (routeResult.outcome === 'ERROR')
+                    errorCount++;
                 if (routeResult.success) {
                     savedCount++;
+                }
+                else {
+                    const safeReason = routeResult.message ? routeResult.message.substring(0, 200) : '';
+                    const expireAt = new Date();
+                    expireAt.setDate(expireAt.getDate() + 30);
+                    await db.collection('scraping_cache').add({
+                        url: link,
+                        reason: safeReason,
+                        createdAt: firestore_1.FieldValue.serverTimestamp(),
+                        expireAt: expireAt
+                    });
                 }
             }
         }
@@ -1914,7 +1991,18 @@ async function processPredefinedQueries(runId) {
             }
         }
     }
-    return { processedCount, savedCount };
+    return {
+        processedCount,
+        savedCount,
+        metrics: {
+            heuristicRejects,
+            aiRejects,
+            cacheHits,
+            aiApprovals,
+            prosasLinks,
+            errorCount
+        }
+    };
 }
 async function checkAndUpdateGlobalRunStatus(runId) {
     if (!runId)
@@ -1970,6 +2058,13 @@ async function processRssFeeds(runId) {
     const db = (0, firestore_1.getFirestore)();
     let processedCount = 0;
     let savedCount = 0;
+    // Telemetry Counters
+    let heuristicRejects = 0;
+    let aiRejects = 0;
+    let cacheHits = 0;
+    let aiApprovals = 0;
+    let prosasLinks = 0;
+    let errorCount = 0;
     for (const feedUrl of RSS_URLS) {
         try {
             console.log(`Fetching RSS feed: ${feedUrl}`);
@@ -1999,12 +2094,23 @@ async function processRssFeeds(runId) {
                 const rejectionRef = await db.collection('scraping_cache').where('url', '==', item.link).limit(1).get();
                 if (!rejectionRef.empty) {
                     console.log(`Skipping link in rejection cache: ${item.link}`);
+                    cacheHits++;
                     continue;
                 }
                 processedCount++;
                 console.log(`Processing link: ${item.link}`);
                 const routeResult = await routeEditalUrl(item.link, "RSS", undefined, undefined, "PROSAS_RSS");
                 console.log(`Router result for ${item.link}: success=${routeResult.success}, message=${routeResult.message}`);
+                if (routeResult.outcome === 'HEURISTIC_REJECT')
+                    heuristicRejects++;
+                else if (routeResult.outcome === 'AI_REJECT')
+                    aiRejects++;
+                else if (routeResult.outcome === 'AI_APPROVE')
+                    aiApprovals++;
+                else if (routeResult.outcome === 'PROSAS')
+                    prosasLinks++;
+                else if (routeResult.outcome === 'ERROR')
+                    errorCount++;
                 if (routeResult.success) {
                     savedCount++;
                 }
@@ -2031,7 +2137,18 @@ async function processRssFeeds(runId) {
         }
     }
     console.log(`Ingestion complete. Processed ${processedCount} items, saved ${savedCount} valid editais.`);
-    return { processedCount, savedCount };
+    return {
+        processedCount,
+        savedCount,
+        metrics: {
+            heuristicRejects,
+            aiRejects,
+            cacheHits,
+            aiApprovals,
+            prosasLinks,
+            errorCount
+        }
+    };
 }
 exports.ingestManualOscFunction = (0, https_1.onCall)({
     cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
@@ -2931,6 +3048,14 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
     const db = (0, firestore_1.getFirestore)();
     const searchRef = searchId && !['GLOBAL_RUN', 'BULK_DISCOVERY', 'MANUAL', 'RSS'].includes(searchId) ? db.collection('searches').doc(searchId) : null;
     logger.info(`[Scraper] Starting processing for target: ${target.name} | URL: ${target.url} | Page: ${page} | Strategy: ${target.strategy}`);
+    // Local Telemetry Counters
+    let heuristicRejects = 0;
+    let aiRejects = 0;
+    let aiApprovals = 0;
+    let cacheHits = 0;
+    let prosasLinks = 0;
+    let errorCount = 0;
+    let urlsDiscovered = 0;
     try {
         let totalProcessed = 0;
         let candidateLinks = linksQueue;
@@ -3190,27 +3315,29 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
             // Rejection Cache Deduplication
             const rejectionRef = await db.collection('scraping_cache').where('url', '==', link).limit(1).get();
             if (!rejectionRef.empty) {
+                cacheHits++;
                 totalProcessed++;
                 return;
             }
             try {
                 const routeResult = await routeEditalUrl(link, searchId, searchId, { searchQuery: query }, "VERTEX_SEARCH");
                 const safeReason = routeResult.message ? routeResult.message.substring(0, 200) : '';
+                urlsDiscovered++;
+                if (routeResult.outcome === 'HEURISTIC_REJECT')
+                    heuristicRejects++;
+                else if (routeResult.outcome === 'AI_REJECT')
+                    aiRejects++;
+                else if (routeResult.outcome === 'AI_APPROVE')
+                    aiApprovals++;
+                else if (routeResult.outcome === 'PROSAS')
+                    prosasLinks++;
+                else if (routeResult.outcome === 'ERROR')
+                    errorCount++;
                 if (routeResult.success) {
                     if (searchRef) {
                         await searchRef.update({
                             logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Em Processamento (Extração)', reason: safeReason })
                         });
-                    }
-                    if (runId) {
-                        try {
-                            await db.collection('ingestion_runs').doc(runId).update({
-                                'phases.internalFontes.newEditaisEnqueued': firestore_1.FieldValue.increment(1)
-                            });
-                        }
-                        catch (e) {
-                            logger.warn(`Failed to update telemetry (newEditaisEnqueued) for runId ${runId}: ${e.message}`);
-                        }
                     }
                 }
                 else {
@@ -3229,20 +3356,10 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                         expireAt: expireAt
                     });
                 }
-                if (runId) {
-                    try {
-                        await db.collection('ingestion_runs').doc(runId).update({
-                            'phases.internalFontes.urlsDiscovered': firestore_1.FieldValue.increment(1),
-                            'totalUrlsScanned': firestore_1.FieldValue.increment(1)
-                        });
-                    }
-                    catch (e) {
-                        logger.warn(`Failed to update telemetry (urlsDiscovered) for runId ${runId}: ${e.message}`);
-                    }
-                }
             }
             catch (error) {
                 console.error(`Error processing link ${link} from ${target.name}:`, error);
+                errorCount++;
                 const rawErrorMsg = error instanceof Error ? error.message : 'Erro desconhecido';
                 const safeErrorMsg = rawErrorMsg ? rawErrorMsg.substring(0, 200) : '';
                 if (searchRef) {
@@ -3254,6 +3371,25 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
             totalProcessed++;
         }));
         await Promise.all(processPromises);
+        if (runId) {
+            try {
+                const telemetryUpdate = {
+                    'phases.internalFontes.urlsDiscovered': firestore_1.FieldValue.increment(urlsDiscovered),
+                    'totalUrlsScanned': firestore_1.FieldValue.increment(urlsDiscovered),
+                    'phases.internalFontes.newEditaisEnqueued': firestore_1.FieldValue.increment(aiApprovals + prosasLinks),
+                    'phases.internalFontes.metrics.heuristicRejects': firestore_1.FieldValue.increment(heuristicRejects),
+                    'phases.internalFontes.metrics.aiRejects': firestore_1.FieldValue.increment(aiRejects),
+                    'phases.internalFontes.metrics.cacheHits': firestore_1.FieldValue.increment(cacheHits),
+                    'phases.internalFontes.metrics.aiApprovals': firestore_1.FieldValue.increment(aiApprovals),
+                    'phases.internalFontes.metrics.prosasLinks': firestore_1.FieldValue.increment(prosasLinks),
+                    'phases.internalFontes.metrics.errors': firestore_1.FieldValue.increment(errorCount)
+                };
+                await db.collection('ingestion_runs').doc(runId).update(telemetryUpdate);
+            }
+            catch (e) {
+                logger.warn(`Failed to update batched telemetry for runId ${runId}: ${e.message}`);
+            }
+        }
         const queue = (0, functions_1.getFunctions)().taskQueue('processScrapingTargetWorker');
         if (remainingLinks.length > 0) {
             // Still have links from the current page to process
@@ -3748,10 +3884,18 @@ exports.rssWorker = (0, tasks_1.onTaskDispatched)({
         if (runId) {
             const totalDiscovered = (rssResult?.processedCount || 0) + (queryResult?.processedCount || 0);
             const totalEnqueued = (rssResult?.savedCount || 0) + (queryResult?.savedCount || 0);
+            const rssMetrics = rssResult?.metrics || { heuristicRejects: 0, aiRejects: 0, cacheHits: 0, aiApprovals: 0, prosasLinks: 0, errorCount: 0 };
+            const queryMetrics = queryResult?.metrics || { heuristicRejects: 0, aiRejects: 0, cacheHits: 0, aiApprovals: 0, prosasLinks: 0, errorCount: 0 };
             await db.collection('ingestion_runs').doc(runId).update({
                 'phases.rssAndQueries.status': 'COMPLETED',
                 'phases.rssAndQueries.urlsDiscovered': firestore_1.FieldValue.increment(totalDiscovered),
                 'phases.rssAndQueries.newEditaisEnqueued': firestore_1.FieldValue.increment(totalEnqueued),
+                'phases.rssAndQueries.metrics.heuristicRejects': firestore_1.FieldValue.increment(rssMetrics.heuristicRejects + queryMetrics.heuristicRejects),
+                'phases.rssAndQueries.metrics.aiRejects': firestore_1.FieldValue.increment(rssMetrics.aiRejects + queryMetrics.aiRejects),
+                'phases.rssAndQueries.metrics.cacheHits': firestore_1.FieldValue.increment(rssMetrics.cacheHits + queryMetrics.cacheHits),
+                'phases.rssAndQueries.metrics.aiApprovals': firestore_1.FieldValue.increment(rssMetrics.aiApprovals + queryMetrics.aiApprovals),
+                'phases.rssAndQueries.metrics.prosasLinks': firestore_1.FieldValue.increment(rssMetrics.prosasLinks + queryMetrics.prosasLinks),
+                'phases.rssAndQueries.metrics.errors': firestore_1.FieldValue.increment(rssMetrics.errorCount + queryMetrics.errorCount),
                 'totalUrlsScanned': firestore_1.FieldValue.increment(totalDiscovered),
                 'totalValidEditaisFound': firestore_1.FieldValue.increment(totalEnqueued)
             });
