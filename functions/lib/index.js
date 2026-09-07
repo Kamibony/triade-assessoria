@@ -922,7 +922,7 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         maxConcurrentDispatches: 2,
     },
     timeoutSeconds: 1800,
-    memory: '4GiB'
+    memory: '1GiB'
 }, async (request) => {
     const { oscId, jobId } = request.data;
     if (!oscId) {
@@ -2547,6 +2547,7 @@ exports.triggerAgenticSearch = (0, https_1.onCall)({
     cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
     timeoutSeconds: 300,
     invoker: 'public',
+    memory: '1GiB',
 }, async (request) => {
     logger.info(`[Diagnostics] triggerAgenticSearch invoked.`);
     logger.info(`[Diagnostics] GCLOUD_PROJECT: ${process.env.GCLOUD_PROJECT || 'not set'}`);

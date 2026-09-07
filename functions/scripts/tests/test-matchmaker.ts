@@ -1,4 +1,4 @@
-import { scoreMatch } from '../../src/index.js';
+import { bureaucracyAgentFlow, thematicAgentFlow } from '../../src/index.js';
 
 async function runTest() {
     const mockOsc = {
@@ -25,15 +25,15 @@ async function runTest() {
     };
 
     const payload = {
-        osc: mockOsc,
-        edital: mockEdital,
+        osc: mockOsc as any,
+        edital: mockEdital as any,
         oscId: 'test_osc_123',
         editalId: 'test_edital_456'
     };
 
-    console.log("Invoking Genkit scoreMatch flow...");
+    console.log("Invoking Genkit bureaucracyAgentFlow...");
     try {
-        const result = await scoreMatch(payload);
+        const result = await bureaucracyAgentFlow(payload);
         console.log("Match evaluation successful!");
         console.log("Parsed JSON via Zod:");
         console.log(JSON.stringify(result, null, 2));
