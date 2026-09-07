@@ -11,7 +11,7 @@ const allFunctions = [
   'triggerAgenticSearch', 'autonomousSearchWorker', 'triggerScrapingWorker',
   'seedScrapingTargets', 'extractionWorker', 'processScrapingTargetWorker',
   'onSearchCreated', 'prosasAuthenticatedWorker', 'renewProsasSessionCron', 'prosasBulkDiscoveryWorker',
-  'triggerGlobalIngestion', 'scheduledGlobalIngestion'
+  'triggerGlobalIngestion', 'scheduledGlobalIngestion', 'runVectorMigration'
 ];
 
 try {

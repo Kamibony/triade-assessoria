@@ -400,6 +400,7 @@ export declare const extractEditalRulesFunction: import("firebase-functions/v2/h
     trackingId: string;
     status: string;
 }>, unknown>;
+export declare const runVectorMigration: import("firebase-functions/v2/https").HttpsFunction;
 export declare const agenticSearchWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
 export declare const matchEvaluatorWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
 export declare const processOscChunkWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;

@@ -610,6 +610,67 @@ export const extractEditalRulesFunction = onCall({
 
 
 import { onDocumentCreated, onDocumentUpdated, onDocumentWritten } from 'firebase-functions/v2/firestore';
+import { onRequest } from 'firebase-functions/v2/https';
+
+export const runVectorMigration = onRequest({
+    timeoutSeconds: 3600, // Long timeout for migration
+    memory: '1GiB'
+}, async (request, response) => {
+    try {
+        const db = getFirestore();
+        const collections = ['editais', 'oscs'];
+        const results: any = {};
+
+        for (const collectionName of collections) {
+            console.log(`Starting migration for ${collectionName}...`);
+            let count = 0;
+            let lastDoc = null;
+            let keepGoing = true;
+
+            while (keepGoing) {
+                let query = db.collection(collectionName).orderBy('__name__').limit(500);
+                if (lastDoc) {
+                    query = query.startAfter(lastDoc);
+                }
+
+                const snapshot = await query.get();
+                if (snapshot.empty) {
+                    keepGoing = false;
+                    break;
+                }
+
+                const batch = db.batch();
+                let batchCount = 0;
+
+                for (const doc of snapshot.docs) {
+                    const data = doc.data();
+
+                    if (data.embedding && Array.isArray(data.embedding) && data.embedding.length > 0) {
+                        batch.update(doc.ref, {
+                            embedding: FieldValue.vector(data.embedding)
+                        });
+                        batchCount++;
+                        count++;
+                    }
+                }
+
+                if (batchCount > 0) {
+                    await batch.commit();
+                    console.log(`Migrated ${batchCount} documents in ${collectionName}. Total: ${count}`);
+                }
+
+                lastDoc = snapshot.docs[snapshot.docs.length - 1];
+            }
+            results[collectionName] = count;
+            console.log(`Finished migrating ${collectionName}. Total updated: ${count}`);
+        }
+
+        response.status(200).json({ success: true, migrated: results });
+    } catch (error) {
+        console.error('Migration failed:', error);
+        response.status(500).json({ success: false, error: String(error) });
+    }
+});
 
 
 

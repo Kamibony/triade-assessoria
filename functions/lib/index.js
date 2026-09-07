@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scheduledIngestionTimeoutSweeper = exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
+exports.scheduledIngestionTimeoutSweeper = exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.runVectorMigration = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
 exports.formatGenkitError = formatGenkitError;
 exports.fetchAndExtractText = fetchAndExtractText;
 exports.enqueueEditalExtraction = enqueueEditalExtraction;
@@ -571,6 +571,58 @@ exports.extractEditalRulesFunction = (0, https_1.onCall)({
     return { trackingId: trackingRef.id, status: 'pending' };
 });
 const firestore_2 = require("firebase-functions/v2/firestore");
+const https_2 = require("firebase-functions/v2/https");
+exports.runVectorMigration = (0, https_2.onRequest)({
+    timeoutSeconds: 3600, // Long timeout for migration
+    memory: '1GiB'
+}, async (request, response) => {
+    try {
+        const db = (0, firestore_1.getFirestore)();
+        const collections = ['editais', 'oscs'];
+        const results = {};
+        for (const collectionName of collections) {
+            console.log(`Starting migration for ${collectionName}...`);
+            let count = 0;
+            let lastDoc = null;
+            let keepGoing = true;
+            while (keepGoing) {
+                let query = db.collection(collectionName).orderBy('__name__').limit(500);
+                if (lastDoc) {
+                    query = query.startAfter(lastDoc);
+                }
+                const snapshot = await query.get();
+                if (snapshot.empty) {
+                    keepGoing = false;
+                    break;
+                }
+                const batch = db.batch();
+                let batchCount = 0;
+                for (const doc of snapshot.docs) {
+                    const data = doc.data();
+                    if (data.embedding && Array.isArray(data.embedding) && data.embedding.length > 0) {
+                        batch.update(doc.ref, {
+                            embedding: firestore_1.FieldValue.vector(data.embedding)
+                        });
+                        batchCount++;
+                        count++;
+                    }
+                }
+                if (batchCount > 0) {
+                    await batch.commit();
+                    console.log(`Migrated ${batchCount} documents in ${collectionName}. Total: ${count}`);
+                }
+                lastDoc = snapshot.docs[snapshot.docs.length - 1];
+            }
+            results[collectionName] = count;
+            console.log(`Finished migrating ${collectionName}. Total updated: ${count}`);
+        }
+        response.status(200).json({ success: true, migrated: results });
+    }
+    catch (error) {
+        console.error('Migration failed:', error);
+        response.status(500).json({ success: false, error: String(error) });
+    }
+});
 const generateSearchQueries = ai.defineFlow({
     name: 'generateSearchQueries',
     inputSchema: zod_1.z.object({
