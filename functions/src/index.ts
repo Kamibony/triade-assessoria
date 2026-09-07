@@ -2074,9 +2074,9 @@ async function processPredefinedQueries(runId?: string) {
         return { processedCount: 0, savedCount: 0 };
     }
 
-    const auth = new GoogleAuth({ scopes: 'https://www.googleapis.com/auth/cloud-platform' });
-    let client, accessToken;
+    let auth, client, accessToken;
     try {
+        auth = new GoogleAuth({ scopes: 'https://www.googleapis.com/auth/cloud-platform' });
         client = await auth.getClient();
         accessToken = await client.getAccessToken();
     } catch(e: any) {

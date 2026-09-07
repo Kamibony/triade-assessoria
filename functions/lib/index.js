@@ -1868,9 +1868,9 @@ async function processPredefinedQueries(runId) {
         console.warn("Vertex AI Search config missing for processPredefinedQueries.");
         return { processedCount: 0, savedCount: 0 };
     }
-    const auth = new google_auth_library_1.GoogleAuth({ scopes: 'https://www.googleapis.com/auth/cloud-platform' });
-    let client, accessToken;
+    let auth, client, accessToken;
     try {
+        auth = new google_auth_library_1.GoogleAuth({ scopes: 'https://www.googleapis.com/auth/cloud-platform' });
         client = await auth.getClient();
         accessToken = await client.getAccessToken();
     }
