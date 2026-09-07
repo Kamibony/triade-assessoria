@@ -2707,7 +2707,7 @@ async function handleScraperSuccess(db, targetId) {
     await targetRef.update({ failureCount: 0 });
 }
 exports.prosasAuthenticatedWorker = (0, tasks_1.onTaskDispatched)({
-    retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
+    retryConfig: { maxAttempts: 1, minBackoffSeconds: 30 },
     rateLimits: { maxConcurrentDispatches: 2 },
     timeoutSeconds: 1800,
     memory: '4GiB'
@@ -2889,7 +2889,7 @@ exports.prosasAuthenticatedWorker = (0, tasks_1.onTaskDispatched)({
     }
 });
 exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
-    retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
+    retryConfig: { maxAttempts: 1, minBackoffSeconds: 30 },
     rateLimits: { maxConcurrentDispatches: 5 },
     timeoutSeconds: 540,
     memory: '2GiB'
@@ -2901,7 +2901,7 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
         return;
     }
     const db = (0, firestore_1.getFirestore)();
-    const searchRef = db.collection('searches').doc(searchId);
+    const searchRef = searchId && !['GLOBAL_RUN', 'BULK_DISCOVERY', 'MANUAL', 'RSS'].includes(searchId) ? db.collection('searches').doc(searchId) : null;
     logger.info(`[Scraper] Starting processing for target: ${target.name} | URL: ${target.url} | Page: ${page} | Strategy: ${target.strategy}`);
     try {
         let totalProcessed = 0;
@@ -3139,9 +3139,11 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                 const routeResult = await routeEditalUrl(link, searchId, searchId, { searchQuery: query }, "VERTEX_SEARCH");
                 const safeReason = routeResult.message ? routeResult.message.substring(0, 200) : '';
                 if (routeResult.success) {
-                    await searchRef.update({
-                        logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Em Processamento (Extração)', reason: safeReason })
-                    });
+                    if (searchRef) {
+                        await searchRef.update({
+                            logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Em Processamento (Extração)', reason: safeReason })
+                        });
+                    }
                     if (runId) {
                         try {
                             await db.collection('ingestion_runs').doc(runId).update({
@@ -3154,9 +3156,11 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                     }
                 }
                 else {
-                    await searchRef.update({
-                        logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Ignorado/Rejeitado', reason: safeReason })
-                    });
+                    if (searchRef) {
+                        await searchRef.update({
+                            logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Ignorado/Rejeitado', reason: safeReason })
+                        });
+                    }
                 }
                 if (runId) {
                     try {
@@ -3174,9 +3178,11 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                 console.error(`Error processing link ${link} from ${target.name}:`, error);
                 const rawErrorMsg = error instanceof Error ? error.message : 'Erro desconhecido';
                 const safeErrorMsg = rawErrorMsg ? rawErrorMsg.substring(0, 200) : '';
-                await searchRef.update({
-                    logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Erro', reason: safeErrorMsg })
-                });
+                if (searchRef) {
+                    await searchRef.update({
+                        logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Erro', reason: safeErrorMsg })
+                    });
+                }
             }
             totalProcessed++;
         }));
@@ -3206,9 +3212,11 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
         }
         else if (remainingLinks.length === 0) {
             // No more links to process, and no next page to fetch (either RSS, reached end, or max pages)
-            await searchRef.update({
-                completedTargets: firestore_1.FieldValue.increment(1)
-            });
+            if (searchRef) {
+                await searchRef.update({
+                    completedTargets: firestore_1.FieldValue.increment(1)
+                });
+            }
             if (runId) {
                 await db.collection('ingestion_runs').doc(runId).update({
                     'phases.internalFontes.targetsProcessed': firestore_1.FieldValue.increment(1)
@@ -3227,9 +3235,11 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
             }
         }
         if (totalProcessed > 0) {
-            await searchRef.update({
-                processedCount: firestore_1.FieldValue.increment(totalProcessed)
-            });
+            if (searchRef) {
+                await searchRef.update({
+                    processedCount: firestore_1.FieldValue.increment(totalProcessed)
+                });
+            }
         }
     }
     catch (error) {
@@ -3348,7 +3358,7 @@ exports.renewProsasSessionCron = (0, scheduler_1.onSchedule)({
     }
 });
 exports.prosasBulkDiscoveryWorker = (0, tasks_1.onTaskDispatched)({
-    retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
+    retryConfig: { maxAttempts: 1, minBackoffSeconds: 30 },
     rateLimits: { maxConcurrentDispatches: 1 },
     timeoutSeconds: 1800,
     memory: '2GiB'
@@ -3618,7 +3628,7 @@ exports.scheduledGlobalIngestion = (0, scheduler_1.onSchedule)('0 2 * * *', asyn
 });
 exports.rssWorker = (0, tasks_1.onTaskDispatched)({
     retryConfig: {
-        maxAttempts: 3,
+        maxAttempts: 1,
         minBackoffSeconds: 60,
     },
     rateLimits: {
