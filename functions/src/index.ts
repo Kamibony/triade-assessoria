@@ -628,7 +628,7 @@ export const runVectorMigration = onRequest({
             let keepGoing = true;
 
             while (keepGoing) {
-                let query = db.collection(collectionName).orderBy('__name__').limit(500);
+                let query = db.collection(collectionName).orderBy('__name__').limit(50);
                 if (lastDoc) {
                     query = query.startAfter(lastDoc);
                 }
