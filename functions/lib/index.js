@@ -2272,6 +2272,7 @@ exports.manualTriggerRssSyncFunction = (0, https_1.onCall)({
     cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
     invoker: 'public',
     timeoutSeconds: 540,
+    memory: '1GiB'
 }, async (request) => {
     if (!request.auth) {
         throw new https_1.HttpsError('unauthenticated', 'User must be authenticated.');
@@ -3590,6 +3591,7 @@ exports.triggerGlobalIngestion = (0, https_1.onCall)({
     cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
     invoker: 'public',
     timeoutSeconds: 540,
+    memory: '1GiB'
 }, async (request) => {
     if (!request.auth) {
         throw new https_1.HttpsError('unauthenticated', 'User must be authenticated.');
