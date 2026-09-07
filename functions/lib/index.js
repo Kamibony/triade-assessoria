@@ -48,6 +48,8 @@ const path = __importStar(require("path"));
 const playwright_extra_1 = require("playwright-extra");
 const chromium_1 = __importDefault(require("@sparticuz/chromium"));
 // @ts-ignore
+const pLimit = require('p-limit');
+// @ts-ignore
 const { PDFParse } = require('pdf-parse');
 const puppeteer_extra_plugin_stealth_1 = __importDefault(require("puppeteer-extra-plugin-stealth"));
 const firestore_1 = require("firebase-admin/firestore");
@@ -2890,7 +2892,7 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
     retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
     rateLimits: { maxConcurrentDispatches: 5 },
     timeoutSeconds: 540,
-    memory: '1GiB'
+    memory: '2GiB'
 }, async (request) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { searchId, target, query, page = 1, linksQueue = [], runId } = request.data;
@@ -3124,14 +3126,14 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
         const linksToProcess = candidateLinks.slice(0, 10);
         const remainingLinks = candidateLinks.slice(10);
         logger.info(`[Scraper] Processing batch of ${linksToProcess.length} links. Remaining in queue for this page: ${remainingLinks.length}`);
-        for (let i = 0; i < linksToProcess.length; i++) {
-            const link = linksToProcess[i];
+        const limit = pLimit(3);
+        const processPromises = linksToProcess.map((link) => limit(async () => {
             if (!link)
-                continue;
+                return;
             const existingRef = await db.collection('editais').where('sourceUrl', '==', link).limit(1).get();
             if (!existingRef.empty) {
                 totalProcessed++;
-                continue;
+                return;
             }
             try {
                 const routeResult = await routeEditalUrl(link, searchId, searchId, { searchQuery: query }, "VERTEX_SEARCH");
@@ -3141,9 +3143,14 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                         logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Em Processamento (Extração)', reason: safeReason })
                     });
                     if (runId) {
-                        await db.collection('ingestion_runs').doc(runId).update({
-                            'phases.internalFontes.newEditaisEnqueued': firestore_1.FieldValue.increment(1)
-                        });
+                        try {
+                            await db.collection('ingestion_runs').doc(runId).update({
+                                'phases.internalFontes.newEditaisEnqueued': firestore_1.FieldValue.increment(1)
+                            });
+                        }
+                        catch (e) {
+                            logger.warn(`Failed to update telemetry (newEditaisEnqueued) for runId ${runId}: ${e.message}`);
+                        }
                     }
                 }
                 else {
@@ -3152,10 +3159,15 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                     });
                 }
                 if (runId) {
-                    await db.collection('ingestion_runs').doc(runId).update({
-                        'phases.internalFontes.urlsDiscovered': firestore_1.FieldValue.increment(1),
-                        'totalUrlsScanned': firestore_1.FieldValue.increment(1)
-                    });
+                    try {
+                        await db.collection('ingestion_runs').doc(runId).update({
+                            'phases.internalFontes.urlsDiscovered': firestore_1.FieldValue.increment(1),
+                            'totalUrlsScanned': firestore_1.FieldValue.increment(1)
+                        });
+                    }
+                    catch (e) {
+                        logger.warn(`Failed to update telemetry (urlsDiscovered) for runId ${runId}: ${e.message}`);
+                    }
                 }
             }
             catch (error) {
@@ -3167,7 +3179,8 @@ exports.processScrapingTargetWorker = (0, tasks_1.onTaskDispatched)({
                 });
             }
             totalProcessed++;
-        }
+        }));
+        await Promise.all(processPromises);
         const queue = (0, functions_1.getFunctions)().taskQueue('processScrapingTargetWorker');
         if (remainingLinks.length > 0) {
             // Still have links from the current page to process
@@ -3611,7 +3624,7 @@ exports.rssWorker = (0, tasks_1.onTaskDispatched)({
     rateLimits: {
         maxConcurrentDispatches: 1,
     },
-    memory: '1GiB',
+    memory: '2GiB',
     timeoutSeconds: 540
 }, async (request) => {
     const runId = request.data.runId;
