@@ -486,8 +486,8 @@ export async function fetchAndExtractText(url: string): Promise<string> {
         if (contentType.toLowerCase().includes('application/pdf') || url.toLowerCase().endsWith('.pdf')) {
             logger.info(`[fetchAndExtractText] Detected PDF at ${url}. Using pdf-parse.`);
             const arrayBuffer = await response.arrayBuffer();
-            const uint8Array = new Uint8Array(arrayBuffer);
-            const parser = new PDFParse(uint8Array, { max: 10 });
+            const uint8Array = new Uint8Array(Buffer.from(arrayBuffer));
+            const parser = new (PDFParse as any)(uint8Array, { max: 10 });
             const pdfData = await parser.getText();
             return pdfData.text.replace(/\s+/g, ' ').trim();
         }
@@ -1361,7 +1361,7 @@ export const agenticSearchWorker = onTaskDispatched({
                 // Step C: Fetch Full HTML and Re-apply Heuristic (Medium Cost)
                 try {
                     const fetchedText = await fetchAndExtractText(link);
-                    if (fetchedText && fetchedText.length >= 500) {
+                    if (fetchedText && fetchedText.length >= 150) {
                         const fetchedTextLower = fetchedText.toLowerCase();
                         const hasKeywordInFullText = essentialKeywords.some(kw => fetchedTextLower.includes(kw));
 
@@ -1847,7 +1847,7 @@ async function routeEditalUrl(url: string, sourceContext: string, searchId?: str
             return { success: false, message: "Falha ao extrair texto (vazio ou erro de requisição/PDF inválido)." };
         }
 
-        if (text.length < 500) {
+        if (text.length < 150) {
             const isSpaLikely = text.length < 150;
             const spaMsg = isSpaLikely ? " (Possível SPA renderizado via JS)" : "";
             return { success: false, message: `Texto muito curto para análise (${text.length} caracteres)${spaMsg}.` };
