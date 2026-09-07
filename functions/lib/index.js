@@ -2547,6 +2547,7 @@ exports.triggerAgenticSearch = (0, https_1.onCall)({
     cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
     timeoutSeconds: 300,
     invoker: 'public',
+    memory: '1GiB',
 }, async (request) => {
     logger.info(`[Diagnostics] triggerAgenticSearch invoked.`);
     logger.info(`[Diagnostics] GCLOUD_PROJECT: ${process.env.GCLOUD_PROJECT || 'not set'}`);
