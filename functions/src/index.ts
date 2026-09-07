@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { chromium } from 'playwright-extra';
 import chromiumSparticuz from '@sparticuz/chromium';
+// @ts-ignore
 const { PDFParse } = require('pdf-parse');
 import stealth from 'puppeteer-extra-plugin-stealth';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
@@ -126,8 +127,8 @@ CRÍTICO: Do NOT invent or generate example data. Se o texto fornecido for insuf
 
                 const [buffer] = await file.download();
                 const uint8Array = new Uint8Array(buffer);
-                const parser = new PDFParse(uint8Array, { max: 10 });
-                const pdfData = await parser.getText();
+                const parser = new (PDFParse as any)(uint8Array, { max: 10 });
+            const pdfData = await parser.getText();
 
                 const extractedText = pdfData.text.substring(0, 15000);
                 totalExtractedLength += extractedText.length;
@@ -387,7 +388,7 @@ Sempre retorne os dados no formato estruturado solicitado em português do Brasi
             try {
                 const pdfBuffer = Buffer.from(input.pdfBase64, 'base64');
                 const uint8Array = new Uint8Array(pdfBuffer);
-                const parser = new PDFParse(uint8Array, { max: 10 });
+                const parser = new (PDFParse as any)(uint8Array, { max: 10 });
                 const pdfData = await parser.getText();
                 const extractedText = pdfData.text.substring(0, 15000);
                 content.push({ text: `Texto extraído do PDF:\n\n${extractedText}` });
@@ -461,21 +462,51 @@ Provide NO reasoning, NO explanations, and NO thinking steps. Output ONLY the ra
 
 export async function fetchAndExtractText(url: string): Promise<string> {
     try {
-        const response = await fetch(url);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+        const response = await fetch(url, {
+            signal: controller.signal,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf,*/*;q=0.8',
+            }
+        });
+        clearTimeout(timeoutId);
+
         if (!response.ok) {
              throw new Error(`Failed to fetch ${url}: ${response.status}`);
         }
+
+        const contentType = response.headers.get('content-type') || '';
+
+        // Handle PDF responses directly
+        if (contentType.toLowerCase().includes('application/pdf') || url.toLowerCase().endsWith('.pdf')) {
+            logger.info(`[fetchAndExtractText] Detected PDF at ${url}. Using pdf-parse.`);
+            const arrayBuffer = await response.arrayBuffer();
+            const uint8Array = new Uint8Array(arrayBuffer);
+            const parser = new PDFParse(uint8Array, { max: 10 });
+            const pdfData = await parser.getText();
+            return pdfData.text.replace(/\s+/g, ' ').trim();
+        }
+
         const html = await response.text();
         const $ = cheerio.load(html);
 
         // Remove script, style, nav, footer, etc to get main content
-        $('script, style, nav, footer, header, aside, noscript, iframe').remove();
+        $('script, style, nav, footer, header, aside, noscript, iframe, svg').remove();
 
         const text = $('body').text();
         // Clean up whitespace
-        return text.replace(/\s+/g, ' ').trim();
-    } catch (e) {
-        console.error("Error fetching text from URL", url, e);
+        const cleanText = text.replace(/\s+/g, ' ').trim();
+
+        if (cleanText.length < 150) {
+            logger.warn(`[fetchAndExtractText] Suspiciously short text extracted from HTML (len: ${cleanText.length}). Possible SPA/JS-rendered page: ${url}`);
+        }
+
+        return cleanText;
+    } catch (e: any) {
+        logger.error(`Error fetching text from URL ${url}: ${e.message}`);
         return "";
     }
 }
@@ -1809,8 +1840,15 @@ async function routeEditalUrl(url: string, sourceContext: string, searchId?: str
 
     try {
         const text = await fetchAndExtractText(url);
-        if (!text || text.length < 500) {
-            return { success: false, message: "Texto ausente ou muito curto." };
+
+        if (!text) {
+            return { success: false, message: "Falha ao extrair texto (vazio ou erro de requisição/PDF inválido)." };
+        }
+
+        if (text.length < 500) {
+            const isSpaLikely = text.length < 150;
+            const spaMsg = isSpaLikely ? " (Possível SPA renderizado via JS)" : "";
+            return { success: false, message: `Texto muito curto para análise (${text.length} caracteres)${spaMsg}.` };
         }
 
         // Heuristic Pre-filter
@@ -1819,7 +1857,7 @@ async function routeEditalUrl(url: string, sourceContext: string, searchId?: str
         const hasKeyword = essentialKeywords.some(kw => textLower.includes(kw));
 
         if (!hasKeyword) {
-             return { success: false, message: "Rejeitado pelo filtro heurístico pré-LLM (palavras-chave ausentes)." };
+             return { success: false, message: "Rejeitado pelo filtro heurístico pré-LLM (palavras-chave ausentes no texto extraído)." };
         }
 
         const triageResult = await triageEditalWebpage({ text, searchQuery: options?.searchQuery });
@@ -3133,7 +3171,7 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                         let parsedText = '';
                         try {
                             const uint8Array = new Uint8Array(buffer);
-                            const parser = new PDFParse(uint8Array, { max: 5 });
+                            const parser = new (PDFParse as any)(uint8Array, { max: 5 });
                             const pdfData = await parser.getText();
                             parsedText = pdfData.text;
                         } catch (parseErr) {
@@ -3996,7 +4034,9 @@ export const rssWorker = onTaskDispatched({
     },
     rateLimits: {
         maxConcurrentDispatches: 1,
-    }
+    },
+    memory: '1GiB',
+    timeoutSeconds: 540
 }, async (request) => {
     const runId = request.data.runId;
     const db = getFirestore();
