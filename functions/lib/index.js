@@ -1008,11 +1008,20 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         console.log('Top internal vector matches (raw):', internalEditaisSnapshot.docs.map((m) => ({ id: m.id, distance: m.get('vectorDistance') ?? m.data()?.vectorDistance })));
         const validInternalMatches = internalEditaisSnapshot.docs
             .map((editalDoc) => {
-            const vectorDistance = (editalDoc.get('vectorDistance') ?? editalDoc.data()?.vectorDistance);
+            let vectorDistance = (editalDoc.get('vectorDistance') ?? editalDoc.data()?.vectorDistance);
+            let similarity;
+            if (vectorDistance === undefined || vectorDistance === null) {
+                const editalEmbedding = editalDoc.data()?.embedding;
+                similarity = cosineSimilarity(oscEmbedding, editalEmbedding);
+                vectorDistance = 1 - similarity;
+            }
+            else {
+                similarity = 1 - vectorDistance;
+            }
             return {
                 doc: editalDoc,
-                distance: vectorDistance !== undefined ? vectorDistance : 1,
-                similarity: vectorDistance !== undefined ? 1 - vectorDistance : 0
+                distance: vectorDistance,
+                similarity: similarity
             };
         })
             .filter((m) => m.similarity >= 0.25)
