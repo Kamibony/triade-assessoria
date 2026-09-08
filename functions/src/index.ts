@@ -739,16 +739,19 @@ Retorne apenas as queries geradas no array.`;
 );
 
 
-function cosineSimilarity(vecA: number[], vecB: number[]): number {
-    if (!vecA || !vecB || vecA.length !== vecB.length) {
-        console.warn(`cosineSimilarity returning 0 due to missing vectors or dimension mismatch. vecA.length: ${vecA?.length}, vecB.length: ${vecB?.length}`);
+function cosineSimilarity(vecA: any, vecB: any): number {
+    const a = vecA?.toArray ? vecA.toArray() : vecA;
+    const b = vecB?.toArray ? vecB.toArray() : vecB;
+
+    if (!a || !b || a.length !== b.length) {
+        console.warn(`cosineSimilarity returning 0 due to missing vectors or dimension mismatch. vecA.length: ${a?.length}, vecB.length: ${b?.length}`);
         return 0;
     }
     let dotProduct = 0; let normA = 0; let normB = 0;
-    for (let i = 0; i < vecA.length; i++) {
-        dotProduct += (vecA[i] || 0) * (vecB[i] || 0);
-        normA += (vecA[i] || 0) * (vecA[i] || 0);
-        normB += (vecB[i] || 0) * (vecB[i] || 0);
+    for (let i = 0; i < a.length; i++) {
+        dotProduct += (a[i] || 0) * (b[i] || 0);
+        normA += (a[i] || 0) * (a[i] || 0);
+        normB += (b[i] || 0) * (b[i] || 0);
     }
     if (normA === 0 || normB === 0) {
         console.warn(`cosineSimilarity returning 0 due to zero norm. normA: ${normA}, normB: ${normB}`);
@@ -1093,10 +1096,10 @@ export const agenticSearchWorker = onTaskDispatched({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const internalEditaisSnapshot = await (db.collection('editais') as any).findNearest('embedding', vectorQuery, { limit: 30, distanceMeasure: 'COSINE', distanceResultField: 'vectorDistance' }).get();
 
-        console.log('Top internal vector matches:', internalEditaisSnapshot.docs.map((m: any) => ({ id: m.id, distance: m.data().vectorDistance })));
+        console.log('Top internal vector matches:', internalEditaisSnapshot.docs.map((m: any) => ({ id: m.id, distance: m.get('vectorDistance') })));
 
         for (const editalDoc of internalEditaisSnapshot.docs) {
-            const vectorDistance = editalDoc.data().vectorDistance;
+            const vectorDistance = editalDoc.get('vectorDistance');
             if (vectorDistance !== undefined) {
                 await matchEvaluatorQueue.enqueue({
                     oscId: oscId,
