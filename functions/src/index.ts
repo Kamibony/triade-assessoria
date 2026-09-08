@@ -1025,10 +1025,41 @@ export const agenticSearchWorker = onTaskDispatched({
             return;
         }
 
-        const rawOscData = oscDoc.data();
-        const parseResult = ngoProfileSchema.safeParse(rawOscData);
+        const rawOscData = oscDoc.data() || {};
+
+        const hasDescriptiveText = Boolean(
+            rawOscData.mission ||
+            rawOscData.description ||
+            rawOscData.about ||
+            rawOscData.focus ||
+            (Array.isArray(rawOscData.coreActivities) && rawOscData.coreActivities.length > 0)
+        );
+
+        if (!hasDescriptiveText) {
+            console.warn(`Invalid OSC data for ${oscId}: No descriptive text or activities found.`);
+            if (jobRef) await jobRef.update({ status: 'failed', error: 'Dados da OSC inválidos.', updatedAt: FieldValue.serverTimestamp() });
+            return;
+        }
+
+        const validDocumentationStatuses = ['Em dia', 'Pendente', 'Irregular'];
+        const docStatus = validDocumentationStatuses.includes(rawOscData.documentationStatus)
+            ? rawOscData.documentationStatus
+            : 'Pendente';
+
+        const enrichedOscData = {
+            ...rawOscData,
+            name: typeof rawOscData.name === 'string' ? rawOscData.name : 'ONG Desconhecida',
+            foundationDate: typeof rawOscData.foundationDate === 'string' ? rawOscData.foundationDate : 'Data Desconhecida',
+            location: typeof rawOscData.location === 'string' ? rawOscData.location : 'Localização Desconhecida',
+            documentationStatus: docStatus,
+            previousProjectsApproved: typeof rawOscData.previousProjectsApproved === 'boolean' ? rawOscData.previousProjectsApproved : false,
+            coreActivities: Array.isArray(rawOscData.coreActivities) ? rawOscData.coreActivities : [],
+            mission: rawOscData.mission || [rawOscData.description, rawOscData.about, rawOscData.focus].filter(Boolean).join(' ') || undefined
+        };
+
+        const parseResult = ngoProfileSchema.safeParse(enrichedOscData);
         if (!parseResult.success) {
-            console.warn(`Invalid OSC data for ${oscId}`);
+            console.warn(`Invalid OSC data for ${oscId} after enrichment`, parseResult.error);
             if (jobRef) await jobRef.update({ status: 'failed', error: 'Dados da OSC inválidos.', updatedAt: FieldValue.serverTimestamp() });
             return;
         }
@@ -1036,7 +1067,11 @@ export const agenticSearchWorker = onTaskDispatched({
         const oscData = parseResult.data;
         let oscEmbedding = rawOscData?.embedding || null;
         if (!oscEmbedding) {
-            const oscText = `Missão: ${oscData.mission || ''}. Foco: ${(oscData.coreActivities || []).join(', ')}. Nome: ${oscData.name || ''}`;
+            const alternativeDesc = [rawOscData.description, rawOscData.about, rawOscData.focus].filter(Boolean).join(' ');
+            const missionText = oscData.mission || alternativeDesc || 'Não especificada';
+            const activitiesText = oscData.coreActivities.length > 0 ? oscData.coreActivities.join(', ') : 'Não especificadas';
+
+            const oscText = `Missão/Descrição: ${missionText}. Foco: ${activitiesText}. Nome: ${oscData.name || ''}`;
             oscEmbedding = await generateTextEmbedding(oscText);
             await db.collection('oscs').doc(oscId).update({ embedding: FieldValue.vector(oscEmbedding) });
         }
