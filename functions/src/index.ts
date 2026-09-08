@@ -1100,11 +1100,21 @@ export const agenticSearchWorker = onTaskDispatched({
 
         const validInternalMatches = internalEditaisSnapshot.docs
             .map((editalDoc: any) => {
-                const vectorDistance = (editalDoc.get('vectorDistance') ?? editalDoc.data()?.vectorDistance) as number;
+                let vectorDistance = (editalDoc.get('vectorDistance') ?? editalDoc.data()?.vectorDistance) as number | undefined;
+                let similarity: number;
+
+                if (vectorDistance === undefined || vectorDistance === null) {
+                    const editalEmbedding = editalDoc.data()?.embedding;
+                    similarity = cosineSimilarity(oscEmbedding, editalEmbedding);
+                    vectorDistance = 1 - similarity;
+                } else {
+                    similarity = 1 - vectorDistance;
+                }
+
                 return {
                     doc: editalDoc,
-                    distance: vectorDistance !== undefined ? vectorDistance : 1,
-                    similarity: vectorDistance !== undefined ? 1 - vectorDistance : 0
+                    distance: vectorDistance,
+                    similarity: similarity
                 };
             })
             .filter((m: any) => m.similarity >= 0.25)
