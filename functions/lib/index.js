@@ -1015,10 +1015,10 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                 similarity: vectorDistance !== undefined ? 1 - vectorDistance : 0
             };
         })
-            .filter((m) => m.similarity >= 0.50)
+            .filter((m) => m.similarity >= 0.25)
             .sort((a, b) => a.distance - b.distance)
             .slice(0, 15);
-        console.log('Filtered internal vector matches (threshold 0.5, max 15):', validInternalMatches.map((m) => ({ id: m.doc.id, distance: m.distance, similarity: m.similarity })));
+        console.log('Filtered internal vector matches (threshold 0.25, max 15):', validInternalMatches.map((m) => ({ id: m.doc.id, distance: m.distance, similarity: m.similarity })));
         for (const match of validInternalMatches) {
             await matchEvaluatorQueue.enqueue({
                 oscId: oscId,
@@ -1382,8 +1382,8 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                 fullTextToAnalyze = fullTextToAnalyze.substring(0, 3000); // Truncate to reduce token cost
                 const triageResult = await triageEditalWebpage({ text: fullTextToAnalyze, searchQuery: r.query });
                 if (triageResult.isValidEdital) {
-                    await enqueueEditalExtraction(link, fullTextToAnalyze, "Edital válido", jobId || `AGENTIC_${oscId}`, "VERTEX_SEARCH");
-                    console.log(`Successfully enqueued agentic extraction for ${link}`);
+                    await enqueueEditalExtraction(link, fullTextToAnalyze, "Edital válido", `AGENTIC_${oscId}`, "VERTEX_SEARCH");
+                    console.info(`[Handoff Trace] Successfully enqueued agentic extraction for ${link} (OSC: ${oscId})`);
                     totalValidEditaisEnqueued++;
                     methodBreakdown.web++;
                     if (r.query) {
@@ -2821,6 +2821,7 @@ exports.extractionWorker = (0, tasks_1.onTaskDispatched)({
         }
         const editalResult = await (0, exports.extractEditalRules)({ text });
         const parseResult = schemas_js_1.editalSchema.safeParse(editalResult);
+        let docRef = null;
         if (parseResult.success) {
             let embedding = [];
             try {
@@ -2839,7 +2840,7 @@ exports.extractionWorker = (0, tasks_1.onTaskDispatched)({
                 discoverySource: discoverySource || contentDoc.data()?.discoverySource || null,
                 createdAt: firestore_1.FieldValue.serverTimestamp(),
             };
-            const docRef = await db.collection('editais').add(editalDocData);
+            docRef = await db.collection('editais').add(editalDocData);
             if (searchRef) {
                 const safeReason = reason ? reason.substring(0, 200) : '';
                 await searchRef.set({
@@ -2847,27 +2848,64 @@ exports.extractionWorker = (0, tasks_1.onTaskDispatched)({
                     savedCount: firestore_1.FieldValue.increment(1)
                 }, { merge: true });
             }
-            // Handoff: Trigger Match Evaluator for agentic search if searchId contains an oscId pattern
-            // Note: In agentic search, we passed oscId in place of searchId in enqueueEditalExtraction
-            if (searchId && searchId !== "MANUAL" && searchId !== "RSS" && searchId.length > 15) {
-                try {
-                    const matchQueue = (0, functions_1.getFunctions)().taskQueue('matchEvaluatorWorker');
-                    await matchQueue.enqueue({
-                        oscId: searchId,
-                        editalId: docRef.id
-                    });
-                    console.log(`Enqueued match evaluation for new edital ${docRef.id} and OSC ${searchId}`);
-                }
-                catch (matchErr) {
-                    console.error("Failed to enqueue match evaluator:", matchErr);
-                }
-            }
         }
         else {
+            console.warn(`[Extraction Trace] Validation failed for ${link}. Saving fallback document.`, parseResult.error);
+            const fallbackDocData = {
+                title: "Edital Parcial/Mapeamento Incompleto",
+                issuer: "Desconhecido",
+                publicationDate: new Date().toISOString().split('T')[0],
+                deadline: "2099-12-31", // Distant future to avoid immediate expiration
+                totalBudget: 0,
+                eligibilityCriteria: {
+                    minYearsActive: 0,
+                    requiredLocations: [],
+                    requiredDocumentation: [],
+                    allowedActivities: []
+                },
+                rawText: text.substring(0, 5000),
+                sourceUrl: link,
+                discoverySource: discoverySource || contentDoc.data()?.discoverySource || null,
+                createdAt: firestore_1.FieldValue.serverTimestamp(),
+                parseError: true,
+                originalExtractionData: editalResult // Save the raw object to trace what LLM gave us
+            };
+            docRef = await db.collection('editais').add(fallbackDocData);
             if (searchRef) {
                 await searchRef.set({
-                    logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Erro', reason: 'Falha na validação do schema do edital.' })
+                    logs: firestore_1.FieldValue.arrayUnion({ link, status: 'Aviso', reason: 'Salvo com erro de validação (Fallback).' }),
+                    savedCount: firestore_1.FieldValue.increment(1)
                 }, { merge: true });
+            }
+        }
+        // Handoff: Trigger Match Evaluator for agentic search if searchId contains an oscId pattern
+        // Note: In agentic search, we passed oscId in place of searchId in enqueueEditalExtraction
+        if (docRef && searchId && searchId.startsWith("AGENTIC_")) {
+            const realOscId = searchId.replace("AGENTIC_", "");
+            try {
+                const matchQueue = (0, functions_1.getFunctions)().taskQueue('matchEvaluatorWorker');
+                await matchQueue.enqueue({
+                    oscId: realOscId,
+                    editalId: docRef.id
+                });
+                console.info(`[Handoff Trace] Successfully enqueued match evaluation for new edital ${docRef.id} and OSC ${realOscId}`);
+            }
+            catch (matchErr) {
+                console.error(`[Handoff Trace] Failed to enqueue match evaluator for edital ${docRef.id}:`, matchErr);
+            }
+        }
+        else if (docRef && searchId && searchId !== "MANUAL" && searchId !== "RSS" && searchId.length > 15 && !searchId.startsWith("GLOBAL_") && !searchId.startsWith("BULK_")) {
+            // Fallback for any legacy enqueue that directly passed the oscId
+            try {
+                const matchQueue = (0, functions_1.getFunctions)().taskQueue('matchEvaluatorWorker');
+                await matchQueue.enqueue({
+                    oscId: searchId,
+                    editalId: docRef.id
+                });
+                console.info(`[Handoff Trace] Successfully enqueued match evaluation (legacy) for new edital ${docRef.id} and OSC ${searchId}`);
+            }
+            catch (matchErr) {
+                console.error(`[Handoff Trace] Failed to enqueue match evaluator for edital ${docRef.id} (legacy):`, matchErr);
             }
         }
         // Cleanup the temporary content document only on success (to allow retries on error)
