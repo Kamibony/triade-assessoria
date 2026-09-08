@@ -10,7 +10,7 @@ export const ngoProfileSchema = z.object({
     documentationStatus: z.enum(['Em dia', 'Pendente', 'Irregular']).describe("Status das certidões negativas e documentação básica"),
     previousProjectsApproved: z.boolean().describe("Se a ONG já teve projetos culturais aprovados anteriormente"),
     coreActivities: z.array(z.string()).describe("Lista de atividades principais da ONG"),
-    embedding: z.array(z.number()).optional().describe("Vetor de embedding para busca semântica")
+    embedding: z.any().optional().describe("Vetor de embedding para busca semântica")
 });
 
 export const editalSchema = z.object({
@@ -25,7 +25,7 @@ export const editalSchema = z.object({
         requiredDocumentation: z.array(z.string()).describe("Lista de documentações exigidas"),
         allowedActivities: z.array(z.string()).describe("Lista de atividades permitidas ou focos de atuação"),
     }).describe("Critérios de elegibilidade do edital"),
-    embedding: z.array(z.number()).optional().describe("Vetor de embedding para busca semântica")
+    embedding: z.any().optional().describe("Vetor de embedding para busca semântica")
 });
 
 export const bureaucracySchema = z.object({
