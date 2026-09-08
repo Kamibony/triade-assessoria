@@ -1096,17 +1096,29 @@ export const agenticSearchWorker = onTaskDispatched({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const internalEditaisSnapshot = await (db.collection('editais') as any).findNearest('embedding', vectorQuery, { limit: 30, distanceMeasure: 'COSINE', distanceResultField: 'vectorDistance' }).get();
 
-        console.log('Top internal vector matches:', internalEditaisSnapshot.docs.map((m: any) => ({ id: m.id, distance: m.get('vectorDistance') })));
+        console.log('Top internal vector matches (raw):', internalEditaisSnapshot.docs.map((m: any) => ({ id: m.id, distance: m.get('vectorDistance') })));
 
-        for (const editalDoc of internalEditaisSnapshot.docs) {
-            const vectorDistance = editalDoc.get('vectorDistance');
-            if (vectorDistance !== undefined) {
-                await matchEvaluatorQueue.enqueue({
-                    oscId: oscId,
-                    editalId: editalDoc.id
-                });
-                instantMatches++;
-            }
+        const validInternalMatches = internalEditaisSnapshot.docs
+            .map((editalDoc: any) => {
+                const vectorDistance = editalDoc.get('vectorDistance') as number;
+                return {
+                    doc: editalDoc,
+                    distance: vectorDistance !== undefined ? vectorDistance : 1,
+                    similarity: vectorDistance !== undefined ? 1 - vectorDistance : 0
+                };
+            })
+            .filter((m: any) => m.similarity >= 0.50)
+            .sort((a: any, b: any) => a.distance - b.distance)
+            .slice(0, 15);
+
+        console.log('Filtered internal vector matches (threshold 0.5, max 15):', validInternalMatches.map((m: any) => ({ id: m.doc.id, distance: m.distance, similarity: m.similarity })));
+
+        for (const match of validInternalMatches) {
+            await matchEvaluatorQueue.enqueue({
+                oscId: oscId,
+                editalId: match.doc.id
+            });
+            instantMatches++;
         }
 
         console.log(`Found ${instantMatches} instant internal matches for OSC ${oscId}.`);

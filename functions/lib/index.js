@@ -1005,16 +1005,26 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         const vectorQuery = Array.isArray(oscEmbedding) ? firestore_1.FieldValue.vector(oscEmbedding) : oscEmbedding;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const internalEditaisSnapshot = await db.collection('editais').findNearest('embedding', vectorQuery, { limit: 30, distanceMeasure: 'COSINE', distanceResultField: 'vectorDistance' }).get();
-        console.log('Top internal vector matches:', internalEditaisSnapshot.docs.map((m) => ({ id: m.id, distance: m.get('vectorDistance') })));
-        for (const editalDoc of internalEditaisSnapshot.docs) {
+        console.log('Top internal vector matches (raw):', internalEditaisSnapshot.docs.map((m) => ({ id: m.id, distance: m.get('vectorDistance') })));
+        const validInternalMatches = internalEditaisSnapshot.docs
+            .map((editalDoc) => {
             const vectorDistance = editalDoc.get('vectorDistance');
-            if (vectorDistance !== undefined) {
-                await matchEvaluatorQueue.enqueue({
-                    oscId: oscId,
-                    editalId: editalDoc.id
-                });
-                instantMatches++;
-            }
+            return {
+                doc: editalDoc,
+                distance: vectorDistance !== undefined ? vectorDistance : 1,
+                similarity: vectorDistance !== undefined ? 1 - vectorDistance : 0
+            };
+        })
+            .filter((m) => m.similarity >= 0.50)
+            .sort((a, b) => a.distance - b.distance)
+            .slice(0, 15);
+        console.log('Filtered internal vector matches (threshold 0.5, max 15):', validInternalMatches.map((m) => ({ id: m.doc.id, distance: m.distance, similarity: m.similarity })));
+        for (const match of validInternalMatches) {
+            await matchEvaluatorQueue.enqueue({
+                oscId: oscId,
+                editalId: match.doc.id
+            });
+            instantMatches++;
         }
         console.log(`Found ${instantMatches} instant internal matches for OSC ${oscId}.`);
         if (jobRef) {
