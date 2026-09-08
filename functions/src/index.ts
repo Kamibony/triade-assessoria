@@ -1096,11 +1096,11 @@ export const agenticSearchWorker = onTaskDispatched({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const internalEditaisSnapshot = await (db.collection('editais') as any).findNearest('embedding', vectorQuery, { limit: 30, distanceMeasure: 'COSINE', distanceResultField: 'vectorDistance' }).get();
 
-        console.log('Top internal vector matches (raw):', internalEditaisSnapshot.docs.map((m: any) => ({ id: m.id, distance: m.get('vectorDistance') })));
+        console.log('Top internal vector matches (raw):', internalEditaisSnapshot.docs.map((m: any) => ({ id: m.id, distance: m.get('vectorDistance') ?? m.data()?.vectorDistance })));
 
         const validInternalMatches = internalEditaisSnapshot.docs
             .map((editalDoc: any) => {
-                const vectorDistance = editalDoc.get('vectorDistance') as number;
+                const vectorDistance = (editalDoc.get('vectorDistance') ?? editalDoc.data()?.vectorDistance) as number;
                 return {
                     doc: editalDoc,
                     distance: vectorDistance !== undefined ? vectorDistance : 1,

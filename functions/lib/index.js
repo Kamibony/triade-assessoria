@@ -1005,10 +1005,10 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         const vectorQuery = Array.isArray(oscEmbedding) ? firestore_1.FieldValue.vector(oscEmbedding) : oscEmbedding;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const internalEditaisSnapshot = await db.collection('editais').findNearest('embedding', vectorQuery, { limit: 30, distanceMeasure: 'COSINE', distanceResultField: 'vectorDistance' }).get();
-        console.log('Top internal vector matches (raw):', internalEditaisSnapshot.docs.map((m) => ({ id: m.id, distance: m.get('vectorDistance') })));
+        console.log('Top internal vector matches (raw):', internalEditaisSnapshot.docs.map((m) => ({ id: m.id, distance: m.get('vectorDistance') ?? m.data()?.vectorDistance })));
         const validInternalMatches = internalEditaisSnapshot.docs
             .map((editalDoc) => {
-            const vectorDistance = editalDoc.get('vectorDistance');
+            const vectorDistance = (editalDoc.get('vectorDistance') ?? editalDoc.data()?.vectorDistance);
             return {
                 doc: editalDoc,
                 distance: vectorDistance !== undefined ? vectorDistance : 1,
