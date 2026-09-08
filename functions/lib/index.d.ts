@@ -13,7 +13,7 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
         documentationStatus: z.ZodEnum<["Em dia", "Pendente", "Irregular"]>;
         previousProjectsApproved: z.ZodBoolean;
         coreActivities: z.ZodArray<z.ZodString, "many">;
-        embedding: z.ZodOptional<z.ZodArray<z.ZodNumber, "many">>;
+        embedding: z.ZodOptional<z.ZodAny>;
     }, "strip", z.ZodTypeAny, {
         name: string;
         cnpj?: string | undefined;
@@ -24,7 +24,7 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
         documentationStatus: "Em dia" | "Irregular" | "Pendente";
         previousProjectsApproved: boolean;
         coreActivities: string[];
-        embedding?: number[] | undefined;
+        embedding?: any;
     }, {
         name: string;
         cnpj?: string | undefined;
@@ -35,7 +35,7 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
         documentationStatus: "Em dia" | "Irregular" | "Pendente";
         previousProjectsApproved: boolean;
         coreActivities: string[];
-        embedding?: number[] | undefined;
+        embedding?: any;
     }>;
     edital: z.ZodObject<{
         title: z.ZodString;
@@ -59,7 +59,7 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
             requiredDocumentation: string[];
             allowedActivities: string[];
         }>;
-        embedding: z.ZodOptional<z.ZodArray<z.ZodNumber, "many">>;
+        embedding: z.ZodOptional<z.ZodAny>;
     }, "strip", z.ZodTypeAny, {
         title: string;
         issuer: string;
@@ -72,7 +72,7 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
             requiredDocumentation: string[];
             allowedActivities: string[];
         };
-        embedding?: number[] | undefined;
+        embedding?: any;
     }, {
         title: string;
         issuer: string;
@@ -85,7 +85,7 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
             requiredDocumentation: string[];
             allowedActivities: string[];
         };
-        embedding?: number[] | undefined;
+        embedding?: any;
     }>;
 }, "strip", z.ZodTypeAny, {
     osc: {
@@ -98,7 +98,7 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
         documentationStatus: "Em dia" | "Irregular" | "Pendente";
         previousProjectsApproved: boolean;
         coreActivities: string[];
-        embedding?: number[] | undefined;
+        embedding?: any;
     };
     edital: {
         title: string;
@@ -112,7 +112,7 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
             requiredDocumentation: string[];
             allowedActivities: string[];
         };
-        embedding?: number[] | undefined;
+        embedding?: any;
     };
 }, {
     osc: {
@@ -125,7 +125,7 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
         documentationStatus: "Em dia" | "Irregular" | "Pendente";
         previousProjectsApproved: boolean;
         coreActivities: string[];
-        embedding?: number[] | undefined;
+        embedding?: any;
     };
     edital: {
         title: string;
@@ -139,7 +139,7 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
             requiredDocumentation: string[];
             allowedActivities: string[];
         };
-        embedding?: number[] | undefined;
+        embedding?: any;
     };
 }>, z.ZodObject<{
     passesBureaucracy: z.ZodBoolean;
@@ -162,7 +162,7 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
         documentationStatus: z.ZodEnum<["Em dia", "Pendente", "Irregular"]>;
         previousProjectsApproved: z.ZodBoolean;
         coreActivities: z.ZodArray<z.ZodString, "many">;
-        embedding: z.ZodOptional<z.ZodArray<z.ZodNumber, "many">>;
+        embedding: z.ZodOptional<z.ZodAny>;
     }, "strip", z.ZodTypeAny, {
         name: string;
         cnpj?: string | undefined;
@@ -173,7 +173,7 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
         documentationStatus: "Em dia" | "Irregular" | "Pendente";
         previousProjectsApproved: boolean;
         coreActivities: string[];
-        embedding?: number[] | undefined;
+        embedding?: any;
     }, {
         name: string;
         cnpj?: string | undefined;
@@ -184,7 +184,7 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
         documentationStatus: "Em dia" | "Irregular" | "Pendente";
         previousProjectsApproved: boolean;
         coreActivities: string[];
-        embedding?: number[] | undefined;
+        embedding?: any;
     }>;
     edital: z.ZodObject<{
         title: z.ZodString;
@@ -208,7 +208,7 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
             requiredDocumentation: string[];
             allowedActivities: string[];
         }>;
-        embedding: z.ZodOptional<z.ZodArray<z.ZodNumber, "many">>;
+        embedding: z.ZodOptional<z.ZodAny>;
     }, "strip", z.ZodTypeAny, {
         title: string;
         issuer: string;
@@ -221,7 +221,7 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
             requiredDocumentation: string[];
             allowedActivities: string[];
         };
-        embedding?: number[] | undefined;
+        embedding?: any;
     }, {
         title: string;
         issuer: string;
@@ -234,7 +234,7 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
             requiredDocumentation: string[];
             allowedActivities: string[];
         };
-        embedding?: number[] | undefined;
+        embedding?: any;
     }>;
     oscId: z.ZodString;
     editalId: z.ZodString;
@@ -249,7 +249,7 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
         documentationStatus: "Em dia" | "Irregular" | "Pendente";
         previousProjectsApproved: boolean;
         coreActivities: string[];
-        embedding?: number[] | undefined;
+        embedding?: any;
     };
     edital: {
         title: string;
@@ -263,7 +263,7 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
             requiredDocumentation: string[];
             allowedActivities: string[];
         };
-        embedding?: number[] | undefined;
+        embedding?: any;
     };
     oscId: string;
     editalId: string;
@@ -278,7 +278,7 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
         documentationStatus: "Em dia" | "Irregular" | "Pendente";
         previousProjectsApproved: boolean;
         coreActivities: string[];
-        embedding?: number[] | undefined;
+        embedding?: any;
     };
     edital: {
         title: string;
@@ -292,7 +292,7 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
             requiredDocumentation: string[];
             allowedActivities: string[];
         };
-        embedding?: number[] | undefined;
+        embedding?: any;
     };
     oscId: string;
     editalId: string;
@@ -366,7 +366,7 @@ export declare const extractEditalRules: import("genkit").Action<z.ZodObject<{
         requiredDocumentation: string[];
         allowedActivities: string[];
     }>;
-    embedding: z.ZodOptional<z.ZodArray<z.ZodNumber, "many">>;
+    embedding: z.ZodOptional<z.ZodAny>;
 }, "strip", z.ZodTypeAny, {
     title: string;
     issuer: string;
@@ -379,7 +379,7 @@ export declare const extractEditalRules: import("genkit").Action<z.ZodObject<{
         requiredDocumentation: string[];
         allowedActivities: string[];
     };
-    embedding?: number[] | undefined;
+    embedding?: any;
 }, {
     title: string;
     issuer: string;
@@ -392,7 +392,7 @@ export declare const extractEditalRules: import("genkit").Action<z.ZodObject<{
         requiredDocumentation: string[];
         allowedActivities: string[];
     };
-    embedding?: number[] | undefined;
+    embedding?: any;
 }>, z.ZodTypeAny, any, z.ZodTypeAny>;
 export declare function fetchAndExtractText(url: string): Promise<string>;
 export declare const extractEditalRulesWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
@@ -467,7 +467,7 @@ export declare const ingestManualOscFunction: import("firebase-functions/v2/http
         documentationStatus: "Em dia" | "Irregular" | "Pendente";
         previousProjectsApproved: boolean;
         coreActivities: string[];
-        embedding?: number[] | undefined;
+        embedding?: any;
         id: string;
     };
 }>, unknown>;

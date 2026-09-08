@@ -862,7 +862,7 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
         matchResult = {
             matchScore: 0,
             eligibility: false,
-            status: 'Inelegível',
+            status: 'Fora do Escopo',
             badges: ['Baixa Relevância (Filtro)'],
             aiSummary: 'A avaliação foi interrompida devido à baixa similaridade semântica entre a ONG e o Edital.',
             reasoning: null
@@ -1003,9 +1003,10 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         const vectorQuery = Array.isArray(oscEmbedding) ? firestore_1.FieldValue.vector(oscEmbedding) : oscEmbedding;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const internalEditaisSnapshot = await db.collection('editais').findNearest('embedding', vectorQuery, { limit: 30, distanceMeasure: 'COSINE', distanceResultField: 'vectorDistance' }).get();
+        console.log('Top internal vector matches:', internalEditaisSnapshot.docs.map((m) => ({ id: m.id, distance: m.data().vectorDistance })));
         for (const editalDoc of internalEditaisSnapshot.docs) {
             const vectorDistance = editalDoc.data().vectorDistance;
-            if (vectorDistance !== undefined && vectorDistance <= 0.30) {
+            if (vectorDistance !== undefined) {
                 await matchEvaluatorQueue.enqueue({
                     oscId: oscId,
                     editalId: editalDoc.id
