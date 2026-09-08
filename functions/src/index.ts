@@ -190,14 +190,14 @@ export const bureaucracyAgentFlow = ai.defineFlow(
         outputSchema: bureaucracySchema,
     },
     async (input) => {
-        const currentDate = new Date().toISOString();
+        const currentDate = new Date().toISOString().split('T')[0];
         const prompt = `Você é um Agente de Burocracia estrito avaliando a elegibilidade de uma ONG para um Edital.
 Seu trabalho é APENAS olhar para restrições e regras rígidas. Você não avalia alinhamento de projeto, missão ou tema.
 
 Data atual do sistema: ${currentDate}.
 
 Regras de Ouro:
-1. Prazos: Se a data limite do edital (${input.edital.deadline}) for anterior à data atual, a ONG é INELEGÍVEL.
+1. Prazos: Se a data limite do edital (${input.edital.deadline}) for anterior à data atual, a ONG é INELEGÍVEL. Lembre-se que o ano atual é 2026. Rejeite qualquer edital com prazo no passado.
 2. Localização: Se o edital exige localizações específicas (${input.edital.eligibilityCriteria.requiredLocations.join(', ')}) e a ONG (${input.osc.location}) não está nelas (ou se a abrangência não for nacional/ampla o suficiente para incluí-la), a ONG é INELEGÍVEL.
 3. Idade da ONG: Calcule os anos desde a data de fundação (${input.osc.foundationDate}) até hoje. Se for menor que o mínimo exigido pelo edital (${input.edital.eligibilityCriteria.minYearsActive}), a ONG é INELEGÍVEL.
 
@@ -3168,7 +3168,7 @@ export const extractionWorker = onTaskDispatched({
     }
 
     const db = getFirestore();
-    const searchRef = searchId && searchId !== "MANUAL" && searchId !== "RSS" ? db.collection('searches').doc(searchId) : null;
+    const searchRef = searchId && !['GLOBAL_RUN', 'BULK_DISCOVERY', 'MANUAL', 'RSS'].includes(searchId) && !searchId.startsWith('AGENTIC_') ? db.collection('searches').doc(searchId) : null;
     const contentRef = db.collection('scraping_contents').doc(contentId);
 
     try {
@@ -3221,7 +3221,7 @@ export const extractionWorker = onTaskDispatched({
                 title: "Edital Parcial/Mapeamento Incompleto",
                 issuer: "Desconhecido",
                 publicationDate: new Date().toISOString().split('T')[0],
-                deadline: "2099-12-31", // Distant future to avoid immediate expiration
+                deadline: "1970-01-01", // Distant past to force immediate expiration
                 totalBudget: 0,
                 eligibilityCriteria: {
                     minYearsActive: 0,

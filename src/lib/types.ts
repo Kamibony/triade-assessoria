@@ -7,5 +7,6 @@ export type Edital = z.infer<typeof editalSchema> & { id: string };
 
 export type MatchResult = z.infer<typeof matchSchema> & {
     id?: string;
+    sourceUrl?: string;
     createdAt?: { toMillis?: () => number; seconds?: number; nanoseconds?: number; };
 };
