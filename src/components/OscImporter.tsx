@@ -18,6 +18,7 @@ interface SystemJob {
   createdAt?: any;
 }
 
+import { BulkMatchRadar } from './BulkMatchRadar';
 export function OscImporter() {
   const { t } = useTranslation();
   const [uf, setUf] = useState('');
@@ -335,8 +336,34 @@ export function OscImporter() {
                 </div>
               </div>
             </div>
+            {activeJob.status === 'completed' && (
+              <div className="mt-6">
+                <Button
+                  onClick={async () => {
+                    const loadingToast = toast.loading('Acionando match interno...');
+                    try {
+                        const triggerBulkMatch = httpsCallable(functions, 'triggerBulkInternalMatch');
+                        await triggerBulkMatch({
+                          cidade: municipio || uf || "Geral",
+                          limit: activeJob.validOscsSaved
+                        });
+                        toast.success('Processo de match iniciado.', { id: loadingToast });
+                    } catch(error) {
+                        toast.error('Erro ao acionar match.', { id: loadingToast });
+                    }
+                  }}
+                  className="w-full bg-amber-600 hover:bg-amber-700 text-white"
+                >
+                  <Activity className="w-4 h-4 mr-2" />
+                  Executar Match Interno para estas OSCs
+                </Button>
+              </div>
+            )}
           </div>
         )}
+
+        <BulkMatchRadar />
+
 
         {importResult && !activeJob && (
           <div className={`mt-6 p-4 rounded-md border flex items-start ${

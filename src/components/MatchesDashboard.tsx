@@ -20,6 +20,7 @@ export function MatchesDashboard() {
   const [searchTerm, setSearchTerm] = useState('');
   const [groupBy, setGroupBy] = useState<'none' | 'edital' | 'osc'>('none');
   const [statusFilter, setStatusFilter] = useState('hide-rejected');
+  const [cityFilter, setCityFilter] = useState('');
 
   useEffect(() => {
     const db = getFirestore();
@@ -122,13 +123,23 @@ export function MatchesDashboard() {
 
       const matchesOscFilter = filterOscId ? match.oscId === filterOscId : true;
 
+      let matchesCityFilter = true;
+      if (cityFilter.trim() !== '') {
+          const osc = oscs[match.oscId];
+          if (osc && typeof osc.location === 'string') {
+              matchesCityFilter = osc.location.toLowerCase().includes(cityFilter.trim().toLowerCase());
+          } else {
+              matchesCityFilter = false;
+          }
+      }
+
       const matchesStatus = statusFilter === 'all'
           ? true
           : statusFilter === 'hide-rejected'
               ? match.actionState !== 'Rejeitado' && match.eligibility !== false
               : (match.actionState || 'Pendente') === statusFilter;
 
-      return matchesSearch && matchesOscFilter && matchesStatus;
+      return matchesSearch && matchesOscFilter && matchesCityFilter && matchesStatus;
   });
 
   const groupedMatches: Record<string, MatchResult[]> = {};
@@ -182,6 +193,8 @@ export function MatchesDashboard() {
            setGroupBy={setGroupBy}
            statusFilter={statusFilter}
            setStatusFilter={setStatusFilter}
+           cityFilter={cityFilter}
+           setCityFilter={setCityFilter}
        />
 
        <MatchesTable
