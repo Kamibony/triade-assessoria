@@ -944,34 +944,51 @@ async function processMatchEvaluation(oscId: string, editalId: string, forceReca
             reasoning: null
         };
     } else {
-        // Multi-Agent Pipeline
-        console.log(`Similarity passed (${similarityScore}). Invoking Bureaucracy Agent...`);
-        const bureaucracyResult = await bureaucracyAgentFlow({
-            osc: oscData,
-            edital: editalData
-        });
+        // Deterministic Date Guardrail
+        const currentDate = new Date().toISOString().split('T')[0]!;
+        const isExpired = editalData.deadline < currentDate || editalData.deadline === '1970-01-01';
 
-        if (!bureaucracyResult.passesBureaucracy) {
-            console.log(`Bureaucracy Agent rejected match: ${bureaucracyResult.rejectionReason}`);
+        if (isExpired) {
+            console.log(`Silently rejecting match for OSC ${oscId} and Edital ${editalId} due to expired deadline (${editalData.deadline})`);
             matchResult = {
                 matchScore: 0,
                 eligibility: false,
                 status: 'Inelegível',
                 badges: ['Restrição Burocrática'],
                 aiSummary: 'A ONG não atende aos requisitos burocráticos do edital (prazos, localização ou idade).',
-                reasoning: bureaucracyResult.rejectionReason,
+                reasoning: 'Edital expirado. O prazo já foi encerrado.',
                 actionPlan: null
             };
         } else {
-            console.log(`Bureaucracy Agent passed. Invoking Thematic Agent...`);
-            matchResult = await thematicAgentFlow({
+            // Multi-Agent Pipeline
+            console.log(`Similarity passed (${similarityScore}). Invoking Bureaucracy Agent...`);
+            const bureaucracyResult = await bureaucracyAgentFlow({
                 osc: oscData,
-                edital: editalData,
-                oscId: oscId,
-                editalId: editalId
+                edital: editalData
             });
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (matchResult as any).status = 'Elegível';
+
+            if (!bureaucracyResult.passesBureaucracy) {
+                console.log(`Bureaucracy Agent rejected match: ${bureaucracyResult.rejectionReason}`);
+                matchResult = {
+                    matchScore: 0,
+                    eligibility: false,
+                    status: 'Inelegível',
+                    badges: ['Restrição Burocrática'],
+                    aiSummary: 'A ONG não atende aos requisitos burocráticos do edital (prazos, localização ou idade).',
+                    reasoning: bureaucracyResult.rejectionReason,
+                    actionPlan: null
+                };
+            } else {
+                console.log(`Bureaucracy Agent passed. Invoking Thematic Agent...`);
+                matchResult = await thematicAgentFlow({
+                    osc: oscData,
+                    edital: editalData,
+                    oscId: oscId,
+                    editalId: editalId
+                });
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (matchResult as any).status = 'Elegível';
+            }
         }
     }
 

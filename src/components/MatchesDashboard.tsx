@@ -158,7 +158,7 @@ export function MatchesDashboard() {
            <div className="bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center">
                <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Pendentes</p>
                <p className="text-3xl font-bold mt-1 text-amber-500">
-                   {matches.filter(m => !m.actionState || m.actionState === 'Pendente').length}
+                   {matches.filter(m => (!m.actionState && m.eligibility !== false) || m.actionState === 'Pendente').length}
                </p>
            </div>
            <div className="bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center">
@@ -170,7 +170,7 @@ export function MatchesDashboard() {
            <div className="bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center">
                <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Reprovados</p>
                <p className="text-3xl font-bold mt-1 text-red-500">
-                   {matches.filter(m => m.actionState === 'Rejeitado' || m.eligibility === false).length}
+                   {matches.filter(m => m.actionState === 'Rejeitado' || (!m.actionState && m.eligibility === false)).length}
                </p>
            </div>
        </div>
