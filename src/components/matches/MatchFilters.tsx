@@ -8,9 +8,11 @@ interface MatchFiltersProps {
     setGroupBy: (group: 'none' | 'edital' | 'osc') => void;
     statusFilter: string;
     setStatusFilter: (status: string) => void;
+    cityFilter: string;
+    setCityFilter: (city: string) => void;
 }
 
-export function MatchFilters({ searchTerm, setSearchTerm, groupBy, setGroupBy, statusFilter, setStatusFilter }: MatchFiltersProps) {
+export function MatchFilters({ searchTerm, setSearchTerm, groupBy, setGroupBy, statusFilter, setStatusFilter, cityFilter, setCityFilter }: MatchFiltersProps) {
     return (
         <div className="bg-card border rounded-lg p-4 mb-6 shadow-sm flex flex-col sm:flex-row gap-4 items-center justify-between">
             <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">
@@ -47,7 +49,21 @@ export function MatchFilters({ searchTerm, setSearchTerm, groupBy, setGroupBy, s
 
             <div className="h-6 w-px bg-border hidden sm:block"></div>
 
-            <div className="relative w-full sm:w-64">
+
+            <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto mt-4 sm:mt-0">
+                 <div className="flex items-center gap-2">
+                    <label htmlFor="cityFilter" className="text-sm font-medium whitespace-nowrap">Cidade/Lote:</label>
+                    <input
+                        id="cityFilter"
+                        type="text"
+                        className="w-full sm:w-48 rounded-md border border-input bg-background py-1.5 px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        placeholder="Filtrar por cidade..."
+                        value={cityFilter}
+                        onChange={(e) => setCityFilter(e.target.value)}
+                    />
+                </div>
+            </div>
+            <div className="relative w-full sm:w-64 mt-4 sm:mt-0">
                 <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
                     <Search className="w-4 h-4 text-muted-foreground" />
                 </div>

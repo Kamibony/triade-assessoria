@@ -1866,13 +1866,26 @@ exports.triggerBulkInternalMatch = (0, https_1.onCall)({
     if (!cidade) {
         throw new https_1.HttpsError('invalid-argument', 'O parâmetro cidade é obrigatório.');
     }
+    const jobRef = db.collection('system_jobs').doc();
+    const jobId = jobRef.id;
     try {
         const oscsSnapshot = await db.collection('oscs').get();
         let oscs = oscsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         const lowerCidade = cidade.toLowerCase();
         oscs = oscs.filter(osc => typeof osc.location === 'string' && osc.location.toLowerCase().includes(lowerCidade));
         oscs = oscs.slice(0, limit);
+        await jobRef.set({
+            type: 'bulk_match',
+            status: 'running',
+            cidade: cidade,
+            totalOscs: oscs.length,
+            oscsProcessed: 0,
+            matchesTriggered: 0,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+            updatedAt: firestore_1.FieldValue.serverTimestamp(),
+        });
         let matchesTriggered = 0;
+        let oscsProcessed = 0;
         const matchEvaluatorQueue = (0, functions_1.getFunctions)().taskQueue('matchEvaluatorWorker');
         for (const osc of oscs) {
             let oscEmbedding = osc.embedding;
@@ -1917,11 +1930,30 @@ exports.triggerBulkInternalMatch = (0, https_1.onCall)({
                 });
                 matchesTriggered++;
             }
+            oscsProcessed++;
+            if (oscsProcessed % 5 === 0 || oscsProcessed === oscs.length) {
+                await jobRef.update({
+                    oscsProcessed: oscsProcessed,
+                    matchesTriggered: matchesTriggered,
+                    updatedAt: firestore_1.FieldValue.serverTimestamp()
+                });
+            }
         }
+        await jobRef.update({
+            status: 'completed',
+            oscsProcessed: oscsProcessed,
+            matchesTriggered: matchesTriggered,
+            updatedAt: firestore_1.FieldValue.serverTimestamp()
+        });
         return { success: true, message: `Disparados ${matchesTriggered} matches internos para a cidade ${cidade}.` };
     }
     catch (error) {
         console.error('Error in triggerBulkInternalMatch:', error);
+        await jobRef.update({
+            status: 'error',
+            error: error instanceof Error ? error.message : String(error),
+            updatedAt: firestore_1.FieldValue.serverTimestamp()
+        }).catch(e => console.error('Failed to update job status on error:', e));
         throw new https_1.HttpsError('internal', 'Erro interno ao processar matches em massa.');
     }
 });
