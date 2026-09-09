@@ -1641,6 +1641,7 @@ exports.processOscChunkWorker = (0, tasks_1.onTaskDispatched)({
                 cnpj: cleanCnpj,
                 embedding: embedding ? firestore_1.FieldValue.vector(embedding) : null,
                 updatedAt: now,
+                ...(jobId ? { importBatchId: jobId } : {})
             };
             if (!oscDoc.exists) {
                 Object.assign(upsertData, { createdAt: now });
@@ -1862,22 +1863,20 @@ exports.triggerBulkInternalMatch = (0, https_1.onCall)({
     if (userDoc.data()?.role !== 'admin') {
         throw new https_1.HttpsError('permission-denied', 'User must be an admin.');
     }
-    const { cidade, limit = 100 } = request.data;
-    if (!cidade) {
-        throw new https_1.HttpsError('invalid-argument', 'O parâmetro cidade é obrigatório.');
+    const { importBatchId, limit = 100 } = request.data;
+    if (!importBatchId) {
+        throw new https_1.HttpsError('invalid-argument', 'O parâmetro importBatchId é obrigatório.');
     }
     const jobRef = db.collection('system_jobs').doc();
     const jobId = jobRef.id;
     try {
-        const oscsSnapshot = await db.collection('oscs').get();
+        const oscsSnapshot = await db.collection('oscs').where('importBatchId', '==', importBatchId).get();
         let oscs = oscsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        const lowerCidade = cidade.toLowerCase();
-        oscs = oscs.filter(osc => typeof osc.location === 'string' && osc.location.toLowerCase().includes(lowerCidade));
         oscs = oscs.slice(0, limit);
         await jobRef.set({
             type: 'bulk_match',
             status: 'running',
-            cidade: cidade,
+            importBatchId: importBatchId,
             totalOscs: oscs.length,
             oscsProcessed: 0,
             matchesTriggered: 0,
@@ -1945,7 +1944,7 @@ exports.triggerBulkInternalMatch = (0, https_1.onCall)({
             matchesTriggered: matchesTriggered,
             updatedAt: firestore_1.FieldValue.serverTimestamp()
         });
-        return { success: true, message: `Disparados ${matchesTriggered} matches internos para a cidade ${cidade}.` };
+        return { success: true, message: `Disparados ${matchesTriggered} matches internos para o lote ${importBatchId}.` };
     }
     catch (error) {
         console.error('Error in triggerBulkInternalMatch:', error);

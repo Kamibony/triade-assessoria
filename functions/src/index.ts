@@ -1806,6 +1806,7 @@ export const processOscChunkWorker = onTaskDispatched({
                 cnpj: cleanCnpj,
                 embedding: embedding ? FieldValue.vector(embedding) : null,
                 updatedAt: now,
+                ...(jobId ? { importBatchId: jobId } : {})
             };
 
             if (!oscDoc.exists) {
@@ -2076,26 +2077,24 @@ export const triggerBulkInternalMatch = onCall({
         throw new HttpsError('permission-denied', 'User must be an admin.');
     }
 
-    const { cidade, limit = 100 } = request.data as { cidade: string, limit?: number };
-    if (!cidade) {
-        throw new HttpsError('invalid-argument', 'O parâmetro cidade é obrigatório.');
+    const { importBatchId, limit = 100 } = request.data as { importBatchId: string, limit?: number };
+    if (!importBatchId) {
+        throw new HttpsError('invalid-argument', 'O parâmetro importBatchId é obrigatório.');
     }
 
     const jobRef = db.collection('system_jobs').doc();
     const jobId = jobRef.id;
 
     try {
-        const oscsSnapshot = await db.collection('oscs').get();
+        const oscsSnapshot = await db.collection('oscs').where('importBatchId', '==', importBatchId).get();
         let oscs = oscsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
 
-        const lowerCidade = cidade.toLowerCase();
-        oscs = oscs.filter(osc => typeof osc.location === 'string' && osc.location.toLowerCase().includes(lowerCidade));
         oscs = oscs.slice(0, limit);
 
         await jobRef.set({
             type: 'bulk_match',
             status: 'running',
-            cidade: cidade,
+            importBatchId: importBatchId,
             totalOscs: oscs.length,
             oscsProcessed: 0,
             matchesTriggered: 0,
@@ -2176,7 +2175,7 @@ export const triggerBulkInternalMatch = onCall({
             updatedAt: FieldValue.serverTimestamp()
         });
 
-        return { success: true, message: `Disparados ${matchesTriggered} matches internos para a cidade ${cidade}.` };
+        return { success: true, message: `Disparados ${matchesTriggered} matches internos para o lote ${importBatchId}.` };
     } catch (error: unknown) {
         console.error('Error in triggerBulkInternalMatch:', error);
         await jobRef.update({
