@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scheduledIngestionTimeoutSweeper = exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.runVectorMigration = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
+exports.scheduledIngestionTimeoutSweeper = exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.triggerBulkInternalMatch = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.runVectorMigration = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
 exports.formatGenkitError = formatGenkitError;
 exports.fetchAndExtractText = fetchAndExtractText;
 exports.enqueueEditalExtraction = enqueueEditalExtraction;
@@ -374,6 +374,7 @@ Sua tarefa é ler atentamente o texto ou o documento PDF do edital fornecido e e
 Preste MUITA ATENÇÃO à "Abrangência" (Geographic Reach) do edital. Se um edital tiver abrangência Nacional ou cobrir a região Nordeste, você DEVE sinalizá-lo como válido para OSCs locais (ex: incluindo 'PB', 'Nordeste' ou 'Nacional' em requiredLocations), IGNORANDO COMPLETAMENTE o endereço físico ou sede da instituição financiadora. O que importa é onde o projeto pode ser executado.
 
 Se alguma informação não estiver explícita, você deve tentar deduzir com base no contexto geral ou, se impossível, preencher de forma condizente. Não invente informações.
+The deadline MUST BE the final date for submitting proposals/applications (Envio de propostas/Inscrições), NOT the date for results, homologation, or appeals.
 Sempre retorne os dados no formato estruturado solicitado em português do Brasil (pt-BR).`;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const content = [{ text: prompt }];
@@ -858,7 +859,7 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
     let matchResult;
     // Dynamically adjust pre-filter threshold based on profile density to avoid false negatives for sparse data
     const isSparseProfile = (!oscData.mission || oscData.mission.length < 20) && (oscData.coreActivities.length <= 2);
-    const dynamicThreshold = isSparseProfile ? 0.50 : 0.70;
+    const dynamicThreshold = isSparseProfile ? 0.25 : 0.25;
     if (similarityScore < dynamicThreshold) {
         console.log(`Silently rejecting match for OSC ${oscId} and Edital ${editalId} due to low similarity score (${similarityScore} < ${dynamicThreshold})`);
         matchResult = {
@@ -1847,6 +1848,83 @@ async function enqueueEditalExtraction(link, text, reason, searchId, discoverySo
     });
     return tempContentRef.id;
 }
+exports.triggerBulkInternalMatch = (0, https_1.onCall)({
+    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    invoker: 'public',
+}, async (request) => {
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'User must be authenticated.');
+    }
+    const db = (0, firestore_1.getFirestore)();
+    const userDoc = await db.collection('users').doc(request.auth.uid).get();
+    if (userDoc.data()?.role !== 'admin') {
+        throw new https_1.HttpsError('permission-denied', 'User must be an admin.');
+    }
+    const { cidade, limit = 100 } = request.data;
+    if (!cidade) {
+        throw new https_1.HttpsError('invalid-argument', 'O parâmetro cidade é obrigatório.');
+    }
+    try {
+        const oscsSnapshot = await db.collection('oscs').get();
+        let oscs = oscsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const lowerCidade = cidade.toLowerCase();
+        oscs = oscs.filter(osc => typeof osc.location === 'string' && osc.location.toLowerCase().includes(lowerCidade));
+        oscs = oscs.slice(0, limit);
+        let matchesTriggered = 0;
+        const matchEvaluatorQueue = (0, functions_1.getFunctions)().taskQueue('matchEvaluatorWorker');
+        for (const osc of oscs) {
+            let oscEmbedding = osc.embedding;
+            if (!oscEmbedding) {
+                const parseResult = schemas_js_1.ngoProfileSchema.safeParse(osc);
+                const mission = parseResult.success ? parseResult.data.mission : osc.mission;
+                const activities = parseResult.success ? parseResult.data.coreActivities : osc.coreActivities;
+                const name = parseResult.success ? parseResult.data.name : osc.name;
+                const missionText = mission || 'Não especificada';
+                const activitiesText = (Array.isArray(activities) && activities.length > 0) ? activities.join(', ') : 'Não especificadas';
+                const oscText = `Missão/Descrição: ${missionText}. Foco: ${activitiesText}. Nome: ${name || ''}`;
+                const embedding = await generateTextEmbedding(oscText);
+                oscEmbedding = firestore_1.FieldValue.vector(embedding);
+                await db.collection('oscs').doc(osc.id).update({ embedding: oscEmbedding });
+            }
+            const vectorQuery = Array.isArray(oscEmbedding) ? firestore_1.FieldValue.vector(oscEmbedding) : oscEmbedding;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const internalEditaisSnapshot = await db.collection('editais').findNearest('embedding', vectorQuery, { limit: 100, distanceMeasure: 'COSINE', distanceResultField: 'vectorDistance' }).get();
+            const validInternalMatches = internalEditaisSnapshot.docs
+                .map((editalDoc) => {
+                let vectorDistance = (editalDoc.get('vectorDistance') ?? editalDoc.data()?.vectorDistance);
+                let similarity;
+                if (vectorDistance === undefined || vectorDistance === null) {
+                    const editalEmbedding = editalDoc.data()?.embedding;
+                    similarity = cosineSimilarity(oscEmbedding, editalEmbedding);
+                    vectorDistance = 1 - similarity;
+                }
+                else {
+                    similarity = 1 - vectorDistance;
+                }
+                return {
+                    id: editalDoc.id,
+                    distance: vectorDistance,
+                    similarity: similarity
+                };
+            })
+                .filter((m) => m.similarity >= 0.25);
+            for (const match of validInternalMatches) {
+                await matchEvaluatorQueue.enqueue({
+                    oscId: osc.id,
+                    editalId: match.id
+                });
+                matchesTriggered++;
+            }
+        }
+        return { success: true, message: `Disparados ${matchesTriggered} matches internos para a cidade ${cidade}.` };
+    }
+    catch (error) {
+        console.error('Error in triggerBulkInternalMatch:', error);
+        throw new https_1.HttpsError('internal', 'Erro interno ao processar matches em massa.');
+    }
+});
 exports.triggerMatchOrchestrator = (0, https_1.onCall)({
     cors: true
 }, async (request) => {
