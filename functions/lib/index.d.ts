@@ -416,6 +416,10 @@ export declare const ingestOscDataFunction: import("firebase-functions/v2/https"
     enqueuedTasks: number;
 }>, unknown>;
 export declare function enqueueEditalExtraction(link: string, text: string, reason: string, searchId?: string, discoverySource?: string): Promise<string>;
+export declare const triggerBulkInternalMatch: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+    message: string;
+}>, unknown>;
 export declare const triggerMatchOrchestrator: import("firebase-functions/v2/https").CallableFunction<any, Promise<Record<string, unknown> | {
     id: string;
     oscId: string;
