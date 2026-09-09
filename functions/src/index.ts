@@ -2062,7 +2062,7 @@ export async function enqueueEditalExtraction(link: string, text: string, reason
 }
 
 export const triggerBulkInternalMatch = onCall({
-    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost/, /127\.0\.0\.1/],
+    cors: true,
     timeoutSeconds: 540,
     memory: '1GiB',
     invoker: 'public',

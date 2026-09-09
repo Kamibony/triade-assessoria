@@ -1849,7 +1849,7 @@ async function enqueueEditalExtraction(link, text, reason, searchId, discoverySo
     return tempContentRef.id;
 }
 exports.triggerBulkInternalMatch = (0, https_1.onCall)({
-    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost/, /127\.0\.0\.1/],
+    cors: true,
     timeoutSeconds: 540,
     memory: '1GiB',
     invoker: 'public',
