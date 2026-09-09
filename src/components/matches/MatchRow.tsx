@@ -44,6 +44,17 @@ export function MatchRow({ match, edital, osc, isExpanded, onToggleExpand, onFee
                 <td className="px-6 py-4 font-medium" title={match.oscId}>{osc?.name || match.oscName || match.oscId}</td>
                 <td className="px-6 py-4">
                     <div className="font-medium line-clamp-1" title={edital?.title}>{edital?.title || match.editalId}</div>
+                    {(match.sourceUrl || (edital as any)?.sourceUrl) && (
+                        <div className="text-xs text-muted-foreground line-clamp-1 mt-1">
+                            {(() => {
+                                try {
+                                    return new URL(match.sourceUrl || (edital as any)?.sourceUrl).hostname;
+                                } catch {
+                                    return match.sourceUrl || (edital as any)?.sourceUrl;
+                                }
+                            })()}
+                        </div>
+                    )}
                 </td>
                 <td className="px-6 py-4 text-center">
                     <div className={`inline-flex items-center gap-1.5 font-medium px-2.5 py-1 rounded-full text-xs cursor-help ${gate1Class}`} title={!gate1Passed && match.reasoning ? match.reasoning : "Gate 1: Restrições burocráticas avaliadas."}>
