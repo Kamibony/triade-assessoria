@@ -7,7 +7,7 @@ interface BulkMatchJob {
   id: string;
   type: string;
   status: 'running' | 'completed' | 'error' | 'dismissed';
-  cidade: string;
+  importBatchId: string;
   totalOscs: number;
   oscsProcessed: number;
   matchesTriggered: number;
@@ -105,8 +105,8 @@ export function BulkMatchRadar() {
 
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div className="bg-muted p-3 rounded-md">
-            <p className="text-muted-foreground mb-1">Cidade Alvo</p>
-            <p className="text-xl font-bold">{activeJob.cidade}</p>
+            <p className="text-muted-foreground mb-1">Lote de Importação</p>
+            <p className="text-xl font-bold text-xs truncate" title={activeJob.importBatchId}>{activeJob.importBatchId}</p>
           </div>
           <div className="bg-muted p-3 rounded-md">
             <p className="text-muted-foreground mb-1">OSCs a Processar</p>
