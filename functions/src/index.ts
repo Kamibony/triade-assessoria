@@ -2202,7 +2202,7 @@ async function processPredefinedQueries(runId?: string) {
                             'Authorization': `Bearer ${accessToken.token}`,
                             'Content-Type': 'application/json',
                         },
-                        body: JSON.stringify({ query: query, pageSize: 10 })
+                        body: JSON.stringify({ query: query, pageSize: 40 })
                     });
 
                     if (vertexResponse.ok) break;
@@ -2396,8 +2396,8 @@ async function processRssFeeds(runId?: string) {
                 });
             }
 
-            // Limit to top 5 items per feed to prevent token leaks
-            const topItems = feed.items.slice(0, 5);
+            // Limit to top 40 items per feed to prevent token leaks
+            const topItems = feed.items.slice(0, 40);
 
             for (const item of topItems) {
                 if (!item.link) continue;
@@ -3906,7 +3906,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
                 linksQueue: remainingLinks,
                 runId
             });
-        } else if (target.strategy !== 'RSS' && page < 5) {
+        } else if (target.strategy !== 'RSS' && page <= 20) {
             let nextConsecutiveZeroNewCount = consecutiveZeroNewCount;
             // If we processed links but none were successful, increment. Otherwise, reset if we had successes.
             // But wait, candidateLinks might be empty, which means no new links found on the page.
@@ -4306,7 +4306,7 @@ export const triggerGlobalIngestion = onCall({
     // Phase 1: Prosas Bulk Discovery
     try {
         const discoveryQueue = getFunctions().taskQueue('prosasBulkDiscoveryWorker');
-        await discoveryQueue.enqueue({ page: 1, consecutiveZeroNewCount: 0, runId, maxPages: 5 });
+        await discoveryQueue.enqueue({ page: 1, consecutiveZeroNewCount: 0, runId, maxPages: 50 });
     } catch (e: any) {
         await db.collection('ingestion_runs').doc(runId).update({
             'phases.prosas.status': 'FAILED',
@@ -4375,7 +4375,7 @@ export const scheduledGlobalIngestion = onSchedule('0 2 * * *', async () => {
 
      try {
          const discoveryQueue = getFunctions().taskQueue('prosasBulkDiscoveryWorker');
-         await discoveryQueue.enqueue({ page: 1, consecutiveZeroNewCount: 0, runId, maxPages: 5 });
+         await discoveryQueue.enqueue({ page: 1, consecutiveZeroNewCount: 0, runId, maxPages: 50 });
      } catch (e: any) {
          await db.collection('ingestion_runs').doc(runId).update({
              'phases.prosas.status': 'FAILED',
