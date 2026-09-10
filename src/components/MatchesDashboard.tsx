@@ -137,12 +137,13 @@ export function MatchesDashboard() {
                       if (match.id) {
                           const matchRef = doc(db, 'matches', match.id);
                           batch.update(matchRef, { actionState: 'Rejeitado' });
-                          // Optimistic local update
-                          setMatches(prev => prev.map(m => m.id === match.id ? { ...m, actionState: 'Rejeitado' } : m));
                       }
                   });
                   await batch.commit();
               }
+
+              // Optimistic local update after all chunks complete
+              setMatches(prev => prev.map(m => m.editalId === editalId ? { ...m, actionState: 'Rejeitado' } : m));
 
               toast.success("Edital invalidado globalmente com sucesso.");
           } catch (error) {
@@ -226,6 +227,10 @@ export function MatchesDashboard() {
   }
 
   const filteredMatches = matches.filter(match => {
+      // Exclude globally inactive editais
+      const isEditalActive = (editais[match.editalId] as any)?.ativo !== false;
+      if (!isEditalActive) return false;
+
       const matchesSearch =
           match.oscName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
           match.oscId.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -384,6 +389,7 @@ export function MatchesDashboard() {
                oscs={oscs}
                editais={editais}
                handleFeedback={handleFeedback}
+               handleGlobalInvalidate={handleGlobalInvalidate}
            />
        )}
     </div>
