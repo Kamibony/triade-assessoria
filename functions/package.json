@@ -42,7 +42,7 @@
   "devDependencies": {
     "@types/cheerio": "^0.22.35",
     "@types/handlebars": "^4.0.40",
-    "@types/node": "^26.4.1",
+    "@types/node": "^26.5.1",
     "@types/pdf-parse": "^1.1.5",
     "ts-node": "^10.9.2",
     "tsx": "^4.23.13",
