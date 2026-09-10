@@ -11,8 +11,15 @@ interface RadarOportunidadesProps {
 }
 
 export function RadarOportunidades({ matches, oscs, editais, onDrillDown }: RadarOportunidadesProps) {
+  // Filter out globally rejected matches and matches from inactive editais
+  const radarMatches = matches.filter(m => {
+      const edital = editais[m.editalId] as any;
+      const isEditalActive = edital?.ativo !== false;
+      return m.actionState !== 'Rejeitado' && isEditalActive;
+  });
+
   // 1. Ranking de OSCs (Hot Leads) - matches > 80 score
-  const validOscMatches = matches.filter(m => m.matchScore >= 80 && m.eligibility !== false);
+  const validOscMatches = radarMatches.filter(m => m.matchScore >= 80 && m.eligibility !== false);
   const oscCountMap: Record<string, number> = {};
   validOscMatches.forEach(m => {
     oscCountMap[m.oscId] = (oscCountMap[m.oscId] || 0) + 1;
@@ -22,12 +29,12 @@ export function RadarOportunidades({ matches, oscs, editais, onDrillDown }: Rada
     .slice(0, 10)
     .map(([oscId, count]) => ({
       oscId,
-      name: oscs[oscId]?.name || matches.find(m => m.oscId === oscId)?.oscName || oscId,
+      name: oscs[oscId]?.name || radarMatches.find(m => m.oscId === oscId)?.oscName || oscId,
       count
     }));
 
   // 2. Ranking de Editais (Top Grants)
-  const validEditalMatches = matches.filter(m => m.eligibility !== false);
+  const validEditalMatches = radarMatches.filter(m => m.eligibility !== false);
   const editalCountMap: Record<string, number> = {};
   validEditalMatches.forEach(m => {
     editalCountMap[m.editalId] = (editalCountMap[m.editalId] || 0) + 1;
@@ -51,13 +58,13 @@ export function RadarOportunidades({ matches, oscs, editais, onDrillDown }: Rada
       return () => clearTimeout(timer);
   }, [matches, oscs, editais]);
 
-  const totalMatches = matches.length;
-  const aiApproved = matches.filter(m => m.eligibility === true).length;
-  const manuallyApproved = matches.filter(m => m.actionState === 'Aprovado').length;
+  const totalMatches = radarMatches.length;
+  const aiApproved = radarMatches.filter(m => m.eligibility === true).length;
+  const manuallyApproved = radarMatches.filter(m => m.actionState === 'Aprovado').length;
 
   // 4. Nuvem de Insights (Tags)
   const tagCountMap: Record<string, number> = {};
-  matches.filter(m => m.eligibility === true).forEach(m => {
+  radarMatches.filter(m => m.eligibility === true).forEach(m => {
     if (m.badges && Array.isArray(m.badges)) {
       m.badges.forEach(badge => {
         tagCountMap[badge] = (tagCountMap[badge] || 0) + 1;

@@ -11,9 +11,10 @@ interface DrillDownPanelProps {
   oscs: Record<string, NgoProfile>;
   editais: Record<string, Edital>;
   handleFeedback: (matchId: string, action: 'Aprovado' | 'Rejeitado' | 'Revisao') => void;
+  handleGlobalInvalidate?: (editalId: string) => void;
 }
 
-export function DrillDownPanel({ type, id, onClose, matches, oscs, editais, handleFeedback }: DrillDownPanelProps) {
+export function DrillDownPanel({ type, id, onClose, matches, oscs, editais, handleFeedback, handleGlobalInvalidate }: DrillDownPanelProps) {
   const [expandedMatch, setExpandedMatch] = React.useState<string | null>(null);
 
   const relatedMatches = matches.filter(m => type === 'osc' ? m.oscId === id : m.editalId === id);
@@ -23,39 +24,11 @@ export function DrillDownPanel({ type, id, onClose, matches, oscs, editais, hand
 
   const validMatchesCount = relatedMatches.filter(m => m.eligibility !== false).length;
 
-  const handleGlobalInvalidate = async () => {
-    if (window.confirm(`ATENÇÃO: Você está prestes a rejeitar GLOBALMENTE todos os ${relatedMatches.length} matches associados a este Edital. Esta ação atualizará o status de todos eles para "Rejeitado". Deseja continuar?`)) {
-      try {
-        const { getFirestore, writeBatch, doc } = await import('firebase/firestore');
-        const db = getFirestore();
-
-        // Max batch size is 500 in Firestore
-        // We do this purely client-side for now, to ensure all related docs are hit based on the array
-        const chunks = [];
-        for (let i = 0; i < relatedMatches.length; i += 500) {
-            chunks.push(relatedMatches.slice(i, i + 500));
-        }
-
-        for (const chunk of chunks) {
-            const batch = writeBatch(db);
-            chunk.forEach(match => {
-                if (match.id) {
-                    const matchRef = doc(db, 'matches', match.id);
-                    batch.update(matchRef, { actionState: 'Rejeitado' });
-                    // Also fire optimistic UI update
-                    handleFeedback(match.id, 'Rejeitado');
-                }
-            });
-            await batch.commit();
-        }
-
-        alert("Edital invalidado globalmente com sucesso. Todos os matches foram rejeitados.");
-        onClose(); // Optionally close the panel
-      } catch (error) {
-        console.error("Error invalidating edital globally:", error);
-        alert("Ocorreu um erro ao invalidar o edital. Verifique o console.");
+  const onGlobalInvalidateClick = () => {
+      if (handleGlobalInvalidate) {
+          handleGlobalInvalidate(id);
+          onClose();
       }
-    }
   };
 
   return (
@@ -87,7 +60,7 @@ export function DrillDownPanel({ type, id, onClose, matches, oscs, editais, hand
                         </p>
                     </div>
                     <button
-                        onClick={handleGlobalInvalidate}
+                        onClick={onGlobalInvalidateClick}
                         className="whitespace-nowrap bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-md text-sm font-medium transition-colors"
                     >
                         Invalidar Edital Globalmente
