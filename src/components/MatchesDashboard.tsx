@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { collection, query, onSnapshot, getDocs, getFirestore, updateDoc, doc, where } from 'firebase/firestore';
-import { Loader2, Activity, CheckCircle2 } from 'lucide-react';
+import { Activity, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { MatchResult, Edital, NgoProfile } from '../lib/types';
 import { useSearchParams } from 'react-router-dom';
@@ -8,6 +8,7 @@ import { MatchFilters } from './matches/MatchFilters';
 import { MatchesTable } from './matches/MatchesTable';
 import { RadarOportunidades } from './RadarOportunidades';
 import { DrillDownPanel } from './matches/DrillDownPanel';
+import { Skeleton } from './ui/Skeleton';
 
 export function MatchesDashboard() {
   const [searchParams] = useSearchParams();
@@ -120,7 +121,30 @@ export function MatchesDashboard() {
 
   const handleFeedback = async (matchId: string, action: 'Aprovado' | 'Rejeitado' | 'Revisao') => {
       // Optimistic Update
+      const previousMatches = [...matches];
+      const matchToUpdate = matches.find(m => m.id === matchId);
+      const previousState = matchToUpdate?.actionState;
+
       setMatches(prev => prev.map(m => m.id === matchId ? { ...m, actionState: action } : m));
+
+      // Show Undo Toast
+      toast((t) => (
+        <div className="flex items-center gap-4">
+          <span>Match marcado como <b>{action}</b></span>
+          <button
+            onClick={() => {
+              toast.dismiss(t.id);
+              // Revert optimistic update
+              setMatches(previousMatches);
+              // Revert in Firestore
+              updateDoc(doc(getFirestore(), 'matches', matchId), { actionState: previousState || null });
+            }}
+            className="px-3 py-1 bg-secondary text-secondary-foreground rounded-md text-sm font-medium hover:bg-secondary/80"
+          >
+            Desfazer
+          </button>
+        </div>
+      ), { duration: 4000 });
 
       // Update Firestore
       const db = getFirestore();
@@ -130,17 +154,39 @@ export function MatchesDashboard() {
           });
       } catch (error) {
           console.error("Failed to update feedback state:", error);
-          // Revert on failure (simplified for this demo, requires full state restoration in real app)
-          alert("Erro ao salvar o feedback. Tente novamente.");
+          // Revert on failure
+          setMatches(previousMatches);
+          toast.error("Erro ao salvar o feedback. Tente novamente.");
       }
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-[50vh]">
-        <div className="flex flex-col items-center gap-4 text-muted-foreground">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
-          <p>Carregando avaliações do Agente...</p>
+      <div className="space-y-6">
+        <div>
+          <div className="flex items-center gap-4">
+            <h2 className="text-2xl font-bold tracking-tight">Dashboard de Matches (V2)</h2>
+          </div>
+          <Skeleton className="h-4 w-1/3 mt-2" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <Skeleton className="h-28 w-full" />
+          <Skeleton className="h-28 w-full" />
+          <Skeleton className="h-28 w-full" />
+          <Skeleton className="h-28 w-full" />
+        </div>
+        <div className="space-y-4">
+          <div className="flex gap-4">
+             <Skeleton className="h-10 w-1/4" />
+             <Skeleton className="h-10 w-1/4" />
+          </div>
+          <div className="bg-card border rounded-lg shadow-sm p-4">
+            <Skeleton className="h-8 w-full mb-4" />
+            <Skeleton className="h-12 w-full mb-2" />
+            <Skeleton className="h-12 w-full mb-2" />
+            <Skeleton className="h-12 w-full mb-2" />
+            <Skeleton className="h-12 w-full" />
+          </div>
         </div>
       </div>
     );
