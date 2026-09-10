@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { collection, query, onSnapshot, getDocs, getFirestore, updateDoc, doc } from 'firebase/firestore';
-import { Loader2 } from 'lucide-react';
+import { collection, query, onSnapshot, getDocs, getFirestore, updateDoc, doc, where } from 'firebase/firestore';
+import { Loader2, Activity, CheckCircle2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import type { MatchResult, Edital, NgoProfile } from '../lib/types';
 import { useSearchParams } from 'react-router-dom';
 import { MatchFilters } from './matches/MatchFilters';
 import { MatchesTable } from './matches/MatchesTable';
+import { RadarOportunidades } from './RadarOportunidades';
 
 export function MatchesDashboard() {
   const [searchParams] = useSearchParams();
@@ -16,11 +18,38 @@ export function MatchesDashboard() {
   const [loading, setLoading] = useState(true);
 
   // UI State
+  const [viewMode, setViewMode] = useState<'table' | 'radar'>('table');
   const [expandedMatch, setExpandedMatch] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [groupBy, setGroupBy] = useState<'none' | 'edital' | 'osc'>('none');
   const [statusFilter, setStatusFilter] = useState('hide-rejected');
   const [cityFilter, setCityFilter] = useState('');
+
+  const [activeJob, setActiveJob] = useState<any>(null);
+
+  useEffect(() => {
+    const db = getFirestore();
+    const jobQuery = query(
+      collection(db, 'system_jobs'),
+      where('type', '==', 'bulk_match'),
+      where('status', 'in', ['running', 'completed'])
+    );
+
+    const unsubscribeJob = onSnapshot(jobQuery, (snapshot) => {
+      const jobs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      jobs.sort((a: any, b: any) => b.createdAt?.toMillis() - a.createdAt?.toMillis());
+      const currentActive = jobs[0];
+
+      setActiveJob((prev: any) => {
+        if (prev && !prev.evaluationsCompleted && (currentActive as any)?.evaluationsCompleted) {
+          toast.success('Avaliação concluída com sucesso');
+        }
+        return currentActive || null;
+      });
+    });
+
+    return () => unsubscribeJob();
+  }, []);
 
   useEffect(() => {
     const db = getFirestore();
@@ -155,7 +184,24 @@ export function MatchesDashboard() {
   return (
     <div className="space-y-6">
        <div>
-         <h2 className="text-2xl font-bold tracking-tight">Dashboard de Matches (V2)</h2>
+         <div className="flex items-center gap-4">
+           <h2 className="text-2xl font-bold tracking-tight">Dashboard de Matches (V2)</h2>
+           {activeJob && (
+             <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${activeJob.evaluationsCompleted ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
+               {activeJob.evaluationsCompleted ? (
+                 <>
+                   <CheckCircle2 className="w-4 h-4 mr-1.5" />
+                   Avaliações Concluídas
+                 </>
+               ) : (
+                 <>
+                   <Activity className="w-4 h-4 mr-1.5 animate-pulse" />
+                   Processando Avaliações...
+                 </>
+               )}
+             </span>
+           )}
+         </div>
          <p className="text-muted-foreground mt-2">
             Resultados da avaliação multi-agente. Valide os matches gerados pela IA para refinar os futuros resultados.
          </p>
@@ -186,27 +232,50 @@ export function MatchesDashboard() {
            </div>
        </div>
 
-       <MatchFilters
-           searchTerm={searchTerm}
-           setSearchTerm={setSearchTerm}
-           groupBy={groupBy}
-           setGroupBy={setGroupBy}
-           statusFilter={statusFilter}
-           setStatusFilter={setStatusFilter}
-           cityFilter={cityFilter}
-           setCityFilter={setCityFilter}
-       />
+       <div className="flex justify-center mb-6">
+           <div className="inline-flex bg-muted p-1 rounded-lg">
+               <button
+                   onClick={() => setViewMode('table')}
+                   className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'table' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+               >
+                   Tabela de Matches
+               </button>
+               <button
+                   onClick={() => setViewMode('radar')}
+                   className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'radar' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+               >
+                   Radar de Oportunidades
+               </button>
+           </div>
+       </div>
 
-       <MatchesTable
-           matches={filteredMatches}
-           editais={editais}
-           oscs={oscs}
-           groupBy={groupBy}
-           groupedMatches={groupedMatches}
-           expandedMatch={expandedMatch}
-           setExpandedMatch={setExpandedMatch}
-           handleFeedback={handleFeedback}
-       />
+       {viewMode === 'table' ? (
+           <>
+               <MatchFilters
+                   searchTerm={searchTerm}
+                   setSearchTerm={setSearchTerm}
+                   groupBy={groupBy}
+                   setGroupBy={setGroupBy}
+                   statusFilter={statusFilter}
+                   setStatusFilter={setStatusFilter}
+                   cityFilter={cityFilter}
+                   setCityFilter={setCityFilter}
+               />
+
+               <MatchesTable
+                   matches={filteredMatches}
+                   editais={editais}
+                   oscs={oscs}
+                   groupBy={groupBy}
+                   groupedMatches={groupedMatches}
+                   expandedMatch={expandedMatch}
+                   setExpandedMatch={setExpandedMatch}
+                   handleFeedback={handleFeedback}
+               />
+           </>
+       ) : (
+           <RadarOportunidades matches={filteredMatches} oscs={oscs} editais={editais} />
+       )}
     </div>
   );
 }
