@@ -215,14 +215,14 @@ export function MatchesDashboard() {
 
        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
            <div
-             className="bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center cursor-pointer hover:bg-muted/50 transition-colors"
+             className={`bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center cursor-pointer transition-colors ${statusFilter === 'all' ? 'ring-2 ring-primary bg-primary/5' : 'hover:bg-muted/50'}`}
              onClick={() => { setViewMode('table'); setStatusFilter('all'); }}
            >
                <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Total Matches</p>
                <p className="text-3xl font-bold mt-1">{matches.length}</p>
            </div>
            <div
-             className="bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center cursor-pointer hover:bg-muted/50 transition-colors"
+             className={`bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center cursor-pointer transition-colors ${statusFilter === 'Pendente' ? 'ring-2 ring-amber-500 bg-amber-500/5' : 'hover:bg-muted/50'}`}
              onClick={() => { setViewMode('table'); setStatusFilter('Pendente'); }}
            >
                <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Pendentes</p>
@@ -231,7 +231,7 @@ export function MatchesDashboard() {
                </p>
            </div>
            <div
-             className="bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center cursor-pointer hover:bg-muted/50 transition-colors"
+             className={`bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center cursor-pointer transition-colors ${statusFilter === 'Aprovado' ? 'ring-2 ring-emerald-500 bg-emerald-500/5' : 'hover:bg-muted/50'}`}
              onClick={() => { setViewMode('table'); setStatusFilter('Aprovado'); }}
            >
                <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Aprovados</p>
@@ -240,7 +240,7 @@ export function MatchesDashboard() {
                </p>
            </div>
            <div
-             className="bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center cursor-pointer hover:bg-muted/50 transition-colors"
+             className={`bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center cursor-pointer transition-colors ${statusFilter === 'Rejeitado' ? 'ring-2 ring-red-500 bg-red-500/5' : 'hover:bg-muted/50'}`}
              onClick={() => { setViewMode('table'); setStatusFilter('Rejeitado'); }}
            >
                <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Reprovados</p>

@@ -22,7 +22,7 @@ function runTest() {
     // Generate ~5MB string
     const chunk = '<header>Ignore this</header><div><p>Valid text.</p><script>alert("evil")</script></div><footer>Footer text</footer>';
     const repeatCount = Math.ceil((5 * 1024 * 1024) / chunk.length);
-    let largeHtml = chunk.repeat(repeatCount);
+    const largeHtml = chunk.repeat(repeatCount);
 
     console.log(`Payload length: ${largeHtml.length} bytes`);
 

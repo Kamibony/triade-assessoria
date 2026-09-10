@@ -1180,7 +1180,7 @@ export const agenticSearchWorker = onTaskDispatched({
         const topDomains: Record<string, number> = {};
         const rejections: { [key: string]: number; expired: number; out_of_scope: number; fetch_error: number; snippet_rejected: number; } = { expired: 0, out_of_scope: 0, fetch_error: 0, snippet_rejected: 0 };
 
-        let allSearchResults: { link: string, title: string, snippet: string, query: string }[] = [];
+        const allSearchResults: { link: string, title: string, snippet: string, query: string }[] = [];
 
         const QUERY_CHUNK_SIZE = 3;
         for (let q = 0; q < queries.length; q += QUERY_CHUNK_SIZE) {

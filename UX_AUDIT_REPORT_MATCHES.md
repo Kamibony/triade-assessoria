@@ -54,3 +54,25 @@ This audit evaluates the frontend components responsible for the matches triage 
 *   **Slide-out Drawer Flow:** Standardize deep dives using a Slide-out Drawer (Side Panel) component instead of full-page navigation or simple modals. This allows users to view detailed information about an OSC or Edital while maintaining the context of the underlying table or radar view.
 *   **Contextual Preservation:** Ensure that applying filters, sorting, or pagination state is preserved when opening and closing the Slide-out Drawer or expanding/collapsing table rows. Users should not be forced to reload the page or reset their state after a deep dive.
 *   **Actionable Context:** Within the Slide-out Drawer (e.g., viewing an Edital), allow users to perform actions related to that entity (like the proposed bulk invalidation) directly from the drawer, seamlessly updating the underlying dashboard state.
+
+## Deployment Plan
+
+To ensure a smooth transition and immediate delivery of high-value UX improvements, the refactoring recommendations are broken down into three logical deployment phases based on technical dependencies and impact.
+
+### Phase 1: High-Priority Interactions & States
+*Focus: Resolving immediate pain points related to click-efficiency and basic visual feedback.*
+*   **Active KPI States:** Implement clear active visual styling on the KPI cards in `MatchesDashboard` to indicate when they are acting as filters.
+*   **Inline Table Actions:** Add 1-click "Approve" and "Reject" buttons directly into the `MatchRow` component to streamline individual match triage without requiring row expansion.
+*   **Bulk Invalidation:** Introduce a "Reject All Pendentes" action within the group headers of `MatchesTable` (when grouping by Edital or OSC) to allow for rapid global invalidation.
+*   **Enhanced Empty States:** Update `MatchesTable` to display contextual empty state messages when no matches align with the selected filters.
+
+### Phase 2: Enhanced Feedback & Cognitive Load Reduction
+*Focus: Improving the readability of AI outputs and providing robust action feedback.*
+*   **Markdown Parsing:** Integrate `react-markdown` in `MatchDetailPanel` to render the AI's `reasoning` and `actionPlan` with proper formatting (bolding, lists).
+*   **Highlight Tags:** Implement visual tags/badges for critical eligibility factors directly within the reasoning context.
+*   **Undo Toast Notifications:** Replace standard toasts with actionable notifications that allow users to immediately revert an accidental Approve/Reject action.
+
+### Phase 3: Information Architecture & Perceived Performance
+*Focus: Deep architectural improvements for contextual consistency and loading experiences.*
+*   **Slide-out Drawer Integration:** Replace the current `DrillDownPanel` and potentially the `MatchDetailPanel` expansion with a unified Slide-out Drawer component for deep dives, preserving the background table/radar context.
+*   **Skeleton Loaders:** Swap the generic `Loader2` spinners in `MatchesDashboard` and `RadarOportunidades` with tailored Skeleton components to reduce layout shift and improve perceived loading speed.
