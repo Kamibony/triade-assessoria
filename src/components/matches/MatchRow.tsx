@@ -42,7 +42,7 @@ export function MatchRow({ match, edital, osc, isExpanded, onToggleExpand, onFee
 
     return (
         <React.Fragment>
-            <tr className="hover:bg-muted/50 transition-colors group">
+            <tr className="hover:bg-muted/50 transition-colors group cursor-pointer" onClick={onToggleExpand}>
                 {hideColumn !== 'osc' && (
                     <td className="px-6 py-4 font-medium" title={match.oscId}>{osc?.name || match.oscName || match.oscId}</td>
                 )}
@@ -103,11 +103,11 @@ export function MatchRow({ match, edital, osc, isExpanded, onToggleExpand, onFee
                              <span className={`w-2 h-2 rounded-full ${match.actionState === 'Aprovado' ? 'bg-emerald-500' : match.actionState === 'Rejeitado' ? 'bg-red-500' : 'bg-amber-500'}`} title={`Feedback: ${match.actionState}`}></span>
                          )}
                          <button
-                            onClick={onToggleExpand}
-                            className="text-primary hover:text-primary/80 font-medium text-sm flex items-center gap-1"
+                            onClick={(e) => { e.stopPropagation(); onToggleExpand(); }}
+                            className="bg-primary hover:bg-primary/90 text-primary-foreground px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1 shadow-sm transition-colors"
                         >
                             {isExpanded ? 'Fechar' : 'Detalhes'}
-                            {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                            {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                         </button>
                     </div>
                 </td>
