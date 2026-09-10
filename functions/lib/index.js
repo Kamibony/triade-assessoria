@@ -1463,7 +1463,7 @@ exports.matchEvaluatorWorker = (0, tasks_1.onTaskDispatched)({
     timeoutSeconds: 540, // Allow enough time for Genkit execution
     memory: '1GiB'
 }, async (request) => {
-    const { oscId, editalId } = request.data;
+    const { oscId, editalId, jobId } = request.data;
     if (!oscId || !editalId) {
         console.error("Invalid task payload: missing oscId or editalId.");
         return;
@@ -1475,6 +1475,23 @@ exports.matchEvaluatorWorker = (0, tasks_1.onTaskDispatched)({
         }
         else {
             console.log(`Successfully processed task for OSC ${oscId} and Edital ${editalId}`);
+        }
+        if (jobId) {
+            const db = (0, firestore_1.getFirestore)();
+            const jobRef = db.collection('system_jobs').doc(jobId);
+            await jobRef.update({
+                matchesEvaluated: firestore_1.FieldValue.increment(1),
+                updatedAt: firestore_1.FieldValue.serverTimestamp()
+            });
+            const jobDoc = await jobRef.get();
+            const data = jobDoc.data();
+            // Check if status is completed (meaning dispatching is fully done) before marking evaluations complete
+            if (data && data.status === 'completed' && data.matchesEvaluated >= data.matchesTriggered) {
+                await jobRef.update({
+                    evaluationsCompleted: true,
+                    updatedAt: firestore_1.FieldValue.serverTimestamp()
+                });
+            }
         }
     }
     catch (error) {
@@ -1880,6 +1897,8 @@ exports.triggerBulkInternalMatch = (0, https_1.onCall)({
             totalOscs: oscs.length,
             oscsProcessed: 0,
             matchesTriggered: 0,
+            matchesEvaluated: 0,
+            evaluationsCompleted: false,
             createdAt: firestore_1.FieldValue.serverTimestamp(),
             updatedAt: firestore_1.FieldValue.serverTimestamp(),
         });
@@ -1925,7 +1944,8 @@ exports.triggerBulkInternalMatch = (0, https_1.onCall)({
             for (const match of validInternalMatches) {
                 await matchEvaluatorQueue.enqueue({
                     oscId: osc.id,
-                    editalId: match.id
+                    editalId: match.id,
+                    jobId: jobId
                 });
                 matchesTriggered++;
             }
