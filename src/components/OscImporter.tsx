@@ -344,11 +344,12 @@ export function OscImporter() {
                     try {
                         const triggerBulkMatch = httpsCallable(functions, 'triggerBulkInternalMatch');
                         await triggerBulkMatch({
-                          cidade: municipio || uf || "Geral",
+                          importBatchId: activeJob.id,
                           limit: activeJob.validOscsSaved
                         });
                         toast.success('Processo de match iniciado.', { id: loadingToast });
                     } catch(error) {
+                        console.error('Erro ao acionar match', error);
                         toast.error('Erro ao acionar match.', { id: loadingToast });
                     }
                   }}
