@@ -7,6 +7,7 @@ import { useSearchParams } from 'react-router-dom';
 import { MatchFilters } from './matches/MatchFilters';
 import { MatchesTable } from './matches/MatchesTable';
 import { RadarOportunidades } from './RadarOportunidades';
+import { DrillDownPanel } from './matches/DrillDownPanel';
 
 export function MatchesDashboard() {
   const [searchParams] = useSearchParams();
@@ -24,6 +25,7 @@ export function MatchesDashboard() {
   const [groupBy, setGroupBy] = useState<'none' | 'edital' | 'osc'>('none');
   const [statusFilter, setStatusFilter] = useState('hide-rejected');
   const [cityFilter, setCityFilter] = useState('');
+  const [selectedDrillDown, setSelectedDrillDown] = useState<{ type: 'osc' | 'edital', id: string } | null>(null);
 
   const [activeJob, setActiveJob] = useState<any>(null);
 
@@ -72,7 +74,7 @@ export function MatchesDashboard() {
           try {
               let hasNewEditais = false;
               const editaisMap: Record<string, Edital> = { ...editais };
-              const chunkSize = 10;
+              const chunkSize = 30;
               for (let i = 0; i < editalIds.length; i += chunkSize) {
                   const chunk = editalIds.slice(i, i + chunkSize);
                   const validChunk = chunk.filter(id => !!id && !editaisMap[id]);
@@ -94,7 +96,7 @@ export function MatchesDashboard() {
           try {
               let hasNewOscs = false;
               const oscsMap: Record<string, NgoProfile> = { ...oscs };
-              const chunkSize = 10;
+              const chunkSize = 30;
               for (let i = 0; i < oscIds.length; i += chunkSize) {
                   const chunk = oscIds.slice(i, i + chunkSize);
                   const validChunk = chunk.filter(id => !!id && !oscsMap[id]);
@@ -171,6 +173,10 @@ export function MatchesDashboard() {
       return matchesSearch && matchesOscFilter && matchesCityFilter && matchesStatus;
   });
 
+  const handleDrillDown = (type: 'osc' | 'edital', id: string) => {
+      setSelectedDrillDown({ type, id });
+  };
+
   const groupedMatches: Record<string, MatchResult[]> = {};
   filteredMatches.forEach(match => {
       let key = 'all';
@@ -208,23 +214,35 @@ export function MatchesDashboard() {
        </div>
 
        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-           <div className="bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center">
+           <div
+             className="bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center cursor-pointer hover:bg-muted/50 transition-colors"
+             onClick={() => { setViewMode('table'); setStatusFilter('all'); }}
+           >
                <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Total Matches</p>
                <p className="text-3xl font-bold mt-1">{matches.length}</p>
            </div>
-           <div className="bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center">
+           <div
+             className="bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center cursor-pointer hover:bg-muted/50 transition-colors"
+             onClick={() => { setViewMode('table'); setStatusFilter('Pendente'); }}
+           >
                <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Pendentes</p>
                <p className="text-3xl font-bold mt-1 text-amber-500">
                    {matches.filter(m => (!m.actionState && m.eligibility !== false) || m.actionState === 'Pendente').length}
                </p>
            </div>
-           <div className="bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center">
+           <div
+             className="bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center cursor-pointer hover:bg-muted/50 transition-colors"
+             onClick={() => { setViewMode('table'); setStatusFilter('Aprovado'); }}
+           >
                <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Aprovados</p>
                <p className="text-3xl font-bold mt-1 text-emerald-500">
                    {matches.filter(m => m.actionState === 'Aprovado').length}
                </p>
            </div>
-           <div className="bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center">
+           <div
+             className="bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center cursor-pointer hover:bg-muted/50 transition-colors"
+             onClick={() => { setViewMode('table'); setStatusFilter('Rejeitado'); }}
+           >
                <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Reprovados</p>
                <p className="text-3xl font-bold mt-1 text-red-500">
                    {matches.filter(m => m.actionState === 'Rejeitado' || (!m.actionState && m.eligibility === false)).length}
@@ -274,7 +292,19 @@ export function MatchesDashboard() {
                />
            </>
        ) : (
-           <RadarOportunidades matches={filteredMatches} oscs={oscs} editais={editais} />
+           <RadarOportunidades matches={filteredMatches} oscs={oscs} editais={editais} onDrillDown={handleDrillDown} />
+       )}
+
+       {selectedDrillDown && (
+           <DrillDownPanel
+               type={selectedDrillDown.type}
+               id={selectedDrillDown.id}
+               onClose={() => setSelectedDrillDown(null)}
+               matches={matches}
+               oscs={oscs}
+               editais={editais}
+               handleFeedback={handleFeedback}
+           />
        )}
     </div>
   );
