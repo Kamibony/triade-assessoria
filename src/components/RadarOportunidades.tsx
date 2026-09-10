@@ -5,9 +5,10 @@ interface RadarOportunidadesProps {
   matches: MatchResult[];
   oscs: Record<string, NgoProfile>;
   editais: Record<string, Edital>;
+  onDrillDown: (type: 'osc' | 'edital', id: string) => void;
 }
 
-export function RadarOportunidades({ matches, oscs, editais }: RadarOportunidadesProps) {
+export function RadarOportunidades({ matches, oscs, editais, onDrillDown }: RadarOportunidadesProps) {
   // 1. Ranking de OSCs (Hot Leads) - matches > 80 score
   const validOscMatches = matches.filter(m => m.matchScore >= 80 && m.eligibility !== false);
   const oscCountMap: Record<string, number> = {};
@@ -70,7 +71,11 @@ export function RadarOportunidades({ matches, oscs, editais }: RadarOportunidade
             <p className="text-sm text-muted-foreground mb-4">OSCs com mais matches de alto potencial (Score &ge; 80).</p>
             <div className="space-y-3">
               {hotLeads.length > 0 ? hotLeads.map((lead, idx) => (
-                <div key={lead.oscId} className="flex items-center justify-between p-3 rounded-md bg-muted/10 border border-muted/50">
+                <div
+                  key={lead.oscId}
+                  className="flex items-center justify-between p-3 rounded-md bg-muted/10 border border-muted/50 cursor-pointer hover:bg-muted/30 transition-colors"
+                  onClick={() => onDrillDown('osc', lead.oscId)}
+                >
                   <div className="flex items-center gap-3">
                     <span className="text-lg font-bold text-muted-foreground w-6 text-center">{idx + 1}</span>
                     <span className="font-medium line-clamp-1">{lead.name}</span>
@@ -96,7 +101,11 @@ export function RadarOportunidades({ matches, oscs, editais }: RadarOportunidade
             <p className="text-sm text-muted-foreground mb-4">Editais com o maior número de OSCs elegíveis pareadas.</p>
             <div className="space-y-3">
               {topGrants.length > 0 ? topGrants.map((grant, idx) => (
-                <div key={grant.editalId} className="flex items-center justify-between p-3 rounded-md bg-muted/10 border border-muted/50">
+                <div
+                  key={grant.editalId}
+                  className="flex items-center justify-between p-3 rounded-md bg-muted/10 border border-muted/50 cursor-pointer hover:bg-muted/30 transition-colors"
+                  onClick={() => onDrillDown('edital', grant.editalId)}
+                >
                   <div className="flex items-center gap-3">
                     <span className="text-lg font-bold text-muted-foreground w-6 text-center">{idx + 1}</span>
                     <span className="font-medium line-clamp-1">{grant.title}</span>

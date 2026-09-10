@@ -10,9 +10,10 @@ interface MatchRowProps {
     isExpanded: boolean;
     onToggleExpand: () => void;
     onFeedback: (matchId: string, action: 'Aprovado' | 'Rejeitado' | 'Revisao') => void;
+    hideColumn?: 'osc' | 'edital';
 }
 
-export function MatchRow({ match, edital, osc, isExpanded, onToggleExpand, onFeedback }: MatchRowProps) {
+export function MatchRow({ match, edital, osc, isExpanded, onToggleExpand, onFeedback, hideColumn }: MatchRowProps) {
     // Gate 1 (Bureaucracy) Status
     const gate1Passed = match.eligibility;
     const isMissingData = !gate1Passed && match.matchScore === 0 && match.reasoning?.includes('Falta de informações'); // Heuristic based on memory/requirements
@@ -41,21 +42,25 @@ export function MatchRow({ match, edital, osc, isExpanded, onToggleExpand, onFee
     return (
         <React.Fragment>
             <tr className="hover:bg-muted/50 transition-colors">
-                <td className="px-6 py-4 font-medium" title={match.oscId}>{osc?.name || match.oscName || match.oscId}</td>
-                <td className="px-6 py-4">
-                    <div className="font-medium line-clamp-1" title={edital?.title}>{edital?.title || match.editalId}</div>
-                    {(match.sourceUrl || (edital as any)?.sourceUrl) && (
-                        <div className="text-xs text-muted-foreground line-clamp-1 mt-1">
-                            {(() => {
-                                try {
-                                    return new URL(match.sourceUrl || (edital as any)?.sourceUrl).hostname;
-                                } catch {
-                                    return match.sourceUrl || (edital as any)?.sourceUrl;
-                                }
-                            })()}
-                        </div>
-                    )}
-                </td>
+                {hideColumn !== 'osc' && (
+                    <td className="px-6 py-4 font-medium" title={match.oscId}>{osc?.name || match.oscName || match.oscId}</td>
+                )}
+                {hideColumn !== 'edital' && (
+                    <td className="px-6 py-4">
+                        <div className="font-medium line-clamp-1" title={edital?.title}>{edital?.title || match.editalId}</div>
+                        {(match.sourceUrl || (edital as any)?.sourceUrl) && (
+                            <div className="text-xs text-muted-foreground line-clamp-1 mt-1">
+                                {(() => {
+                                    try {
+                                        return new URL(match.sourceUrl || (edital as any)?.sourceUrl).hostname;
+                                    } catch {
+                                        return match.sourceUrl || (edital as any)?.sourceUrl;
+                                    }
+                                })()}
+                            </div>
+                        )}
+                    </td>
+                )}
                 <td className="px-6 py-4 text-center">
                     <div className={`inline-flex items-center gap-1.5 font-medium px-2.5 py-1 rounded-full text-xs cursor-help ${gate1Class}`} title={!gate1Passed && match.reasoning ? match.reasoning : "Gate 1: Restrições burocráticas avaliadas."}>
                         {gate1Icon}
@@ -91,7 +96,7 @@ export function MatchRow({ match, edital, osc, isExpanded, onToggleExpand, onFee
             </tr>
             {isExpanded && (
                 <tr className="bg-muted/20">
-                    <td colSpan={5} className="px-6 py-6 border-t-0">
+                    <td colSpan={hideColumn ? 4 : 5} className="px-6 py-6 border-t-0">
                         <MatchDetailPanel match={match} edital={edital} osc={osc} onFeedback={onFeedback} />
                     </td>
                 </tr>
