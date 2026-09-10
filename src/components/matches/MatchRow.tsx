@@ -10,10 +10,11 @@ interface MatchRowProps {
     isExpanded: boolean;
     onToggleExpand: () => void;
     onFeedback: (matchId: string, action: 'Aprovado' | 'Rejeitado' | 'Revisao') => void;
+    handleGlobalInvalidate?: (editalId: string) => void;
     hideColumn?: 'osc' | 'edital';
 }
 
-export function MatchRow({ match, edital, osc, isExpanded, onToggleExpand, onFeedback, hideColumn }: MatchRowProps) {
+export function MatchRow({ match, edital, osc, isExpanded, onToggleExpand, onFeedback, handleGlobalInvalidate, hideColumn }: MatchRowProps) {
     // Gate 1 (Bureaucracy) Status
     const gate1Passed = match.eligibility;
     const isMissingData = !gate1Passed && match.matchScore === 0 && match.reasoning?.includes('Falta de informações'); // Heuristic based on memory/requirements
@@ -41,7 +42,7 @@ export function MatchRow({ match, edital, osc, isExpanded, onToggleExpand, onFee
 
     return (
         <React.Fragment>
-            <tr className="hover:bg-muted/50 transition-colors">
+            <tr className="hover:bg-muted/50 transition-colors group">
                 {hideColumn !== 'osc' && (
                     <td className="px-6 py-4 font-medium" title={match.oscId}>{osc?.name || match.oscName || match.oscId}</td>
                 )}
@@ -80,7 +81,24 @@ export function MatchRow({ match, edital, osc, isExpanded, onToggleExpand, onFee
                 </td>
                 <td className="px-6 py-4 text-center">
                     <div className="flex items-center justify-end gap-3">
-                         {/* Optional tiny indicator of feedback state */}
+                         {match.id && (!match.actionState || match.actionState === 'Pendente') && (
+                             <div className="flex items-center gap-1 mr-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                 <button
+                                     onClick={(e) => { e.stopPropagation(); onFeedback(match.id!, 'Aprovado'); }}
+                                     className="p-1 text-emerald-600 hover:bg-emerald-50 rounded"
+                                     title="Aprovar"
+                                 >
+                                     <CheckCircle className="w-4 h-4" />
+                                 </button>
+                                 <button
+                                     onClick={(e) => { e.stopPropagation(); onFeedback(match.id!, 'Rejeitado'); }}
+                                     className="p-1 text-red-600 hover:bg-red-50 rounded"
+                                     title="Rejeitar"
+                                 >
+                                     <XCircle className="w-4 h-4" />
+                                 </button>
+                             </div>
+                         )}
                          {match.actionState && match.actionState !== 'Pendente' && (
                              <span className={`w-2 h-2 rounded-full ${match.actionState === 'Aprovado' ? 'bg-emerald-500' : match.actionState === 'Rejeitado' ? 'bg-red-500' : 'bg-amber-500'}`} title={`Feedback: ${match.actionState}`}></span>
                          )}
@@ -97,7 +115,13 @@ export function MatchRow({ match, edital, osc, isExpanded, onToggleExpand, onFee
             {isExpanded && (
                 <tr className="bg-muted/20">
                     <td colSpan={hideColumn ? 4 : 5} className="px-6 py-6 border-t-0">
-                        <MatchDetailPanel match={match} edital={edital} osc={osc} onFeedback={onFeedback} />
+                        <MatchDetailPanel
+                            match={match}
+                            edital={edital}
+                            osc={osc}
+                            onFeedback={onFeedback}
+                            handleGlobalInvalidate={handleGlobalInvalidate}
+                        />
                     </td>
                 </tr>
             )}

@@ -12,9 +12,10 @@ interface MatchesTableProps {
     expandedMatch: string | null;
     setExpandedMatch: (id: string | null) => void;
     handleFeedback: (matchId: string, action: 'Aprovado' | 'Rejeitado' | 'Revisao') => void;
+    handleGlobalInvalidate: (editalId: string) => void;
 }
 
-export function MatchesTable({ matches, editais, oscs, groupBy, groupedMatches, expandedMatch, setExpandedMatch, handleFeedback }: MatchesTableProps) {
+export function MatchesTable({ matches, editais, oscs, groupBy, groupedMatches, expandedMatch, setExpandedMatch, handleFeedback, handleGlobalInvalidate }: MatchesTableProps) {
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 50;
 
@@ -22,14 +23,6 @@ export function MatchesTable({ matches, editais, oscs, groupBy, groupedMatches, 
     React.useEffect(() => {
         setCurrentPage(1);
     }, [matches, groupBy]);
-
-    if (matches.length === 0) {
-        return (
-            <div className="bg-muted p-6 rounded-lg text-center text-muted-foreground">
-                Nenhum match encontrado.
-            </div>
-        );
-    }
 
     const groupKeys = Object.keys(groupedMatches);
     const totalItems = groupBy === 'none' ? matches.length : groupKeys.length;
@@ -40,6 +33,32 @@ export function MatchesTable({ matches, editais, oscs, groupBy, groupedMatches, 
 
     const currentMatches = groupBy === 'none' ? matches.slice(startIndex, endIndex) : [];
     const currentGroupKeys = groupBy !== 'none' ? groupKeys.slice(startIndex, endIndex) : [];
+
+    const handleBulkReject = (groupMatches: MatchResult[]) => {
+        if (window.confirm('Tem certeza que deseja rejeitar todos os matches pendentes deste grupo?')) {
+            groupMatches.forEach(match => {
+                if (!match.actionState || match.actionState === 'Pendente') {
+                    handleFeedback(match.id!, 'Rejeitado');
+                }
+            });
+        }
+    };
+
+    if (matches.length === 0) {
+        return (
+            <div className="bg-muted p-8 rounded-lg text-center border shadow-sm">
+                <div className="mx-auto w-12 h-12 rounded-full bg-background flex items-center justify-center mb-4">
+                    <svg className="w-6 h-6 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                </div>
+                <h3 className="text-lg font-medium">Nenhum match encontrado</h3>
+                <p className="text-sm text-muted-foreground mt-2">
+                    Tente ajustar seus filtros ou remover os termos de busca.
+                </p>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-4">
@@ -66,19 +85,33 @@ export function MatchesTable({ matches, editais, oscs, groupBy, groupedMatches, 
                                     isExpanded={expandedMatch === match.id}
                                     onToggleExpand={() => setExpandedMatch(expandedMatch === match.id ? null : (match.id || null))}
                                     onFeedback={handleFeedback}
+                                    handleGlobalInvalidate={handleGlobalInvalidate}
                                 />
                             ))
                         ) : (
                             currentGroupKeys.map(groupKey => {
                                 const groupMatches = groupedMatches[groupKey];
+                                const hasPendings = groupMatches.some(m => !m.actionState || m.actionState === 'Pendente');
                                 return (
                                     <React.Fragment key={groupKey}>
                                         <tr className="bg-muted/30">
                                             <td colSpan={5} className="px-6 py-3 font-semibold text-sm">
-                                                {groupBy === 'edital'
-                                                    ? `Edital: ${editais[groupKey]?.title || groupKey}`
-                                                    : `OSC: ${oscs[groupKey]?.name || groupMatches[0]?.oscName || groupKey}`}
-                                                <span className="ml-2 text-xs font-normal text-muted-foreground">({groupMatches.length} matches)</span>
+                                                <div className="flex items-center justify-between">
+                                                    <div>
+                                                        {groupBy === 'edital'
+                                                            ? `Edital: ${editais[groupKey]?.title || groupKey}`
+                                                            : `OSC: ${oscs[groupKey]?.name || groupMatches[0]?.oscName || groupKey}`}
+                                                        <span className="ml-2 text-xs font-normal text-muted-foreground">({groupMatches.length} matches)</span>
+                                                    </div>
+                                                    {hasPendings && (
+                                                        <button
+                                                            onClick={() => handleBulkReject(groupMatches)}
+                                                            className="text-xs font-medium text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-3 py-1 rounded-md transition-colors"
+                                                        >
+                                                            Rejeitar Pendentes
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </td>
                                         </tr>
                                         {groupMatches.map(match => (
@@ -90,6 +123,7 @@ export function MatchesTable({ matches, editais, oscs, groupBy, groupedMatches, 
                                                 isExpanded={expandedMatch === match.id}
                                                 onToggleExpand={() => setExpandedMatch(expandedMatch === match.id ? null : (match.id || null))}
                                                 onFeedback={handleFeedback}
+                                                handleGlobalInvalidate={handleGlobalInvalidate}
                                             />
                                         ))}
                                     </React.Fragment>

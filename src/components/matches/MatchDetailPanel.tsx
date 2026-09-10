@@ -1,5 +1,7 @@
 
 import { FileText, ExternalLink } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { MatchResult, Edital, NgoProfile } from '../../lib/types';
 import { FeedbackActionBar } from './FeedbackActionBar';
 
@@ -8,9 +10,10 @@ interface MatchDetailPanelProps {
     edital?: Edital;
     osc?: NgoProfile;
     onFeedback: (matchId: string, action: 'Aprovado' | 'Rejeitado' | 'Revisao') => void;
+    handleGlobalInvalidate?: (editalId: string) => void;
 }
 
-export function MatchDetailPanel({ match, edital, onFeedback }: MatchDetailPanelProps) {
+export function MatchDetailPanel({ match, edital, onFeedback, handleGlobalInvalidate }: MatchDetailPanelProps) {
     return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
@@ -19,9 +22,15 @@ export function MatchDetailPanel({ match, edital, onFeedback }: MatchDetailPanel
                         <FileText className="w-4 h-4" />
                         Justificativa da IA (Explainability)
                     </h4>
-                    <p className="text-sm text-foreground/80 leading-relaxed bg-background p-4 rounded-lg border whitespace-pre-wrap">
-                        {match.reasoning || "Nenhuma justificativa fornecida (geralmente ocorre quando falha no Gate 1)."}
-                    </p>
+                    <div className="text-sm text-foreground/80 leading-relaxed bg-background p-4 rounded-lg border prose prose-sm dark:prose-invert max-w-none">
+                        {match.reasoning ? (
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {match.reasoning}
+                            </ReactMarkdown>
+                        ) : (
+                            <p>Nenhuma justificativa fornecida (geralmente ocorre quando falha no Gate 1).</p>
+                        )}
+                    </div>
 
                     {/* Simulated Vector Context / Key Terms (Placeholder for future actual XAI data) */}
                      {match.eligibility && (
@@ -76,6 +85,8 @@ export function MatchDetailPanel({ match, edital, onFeedback }: MatchDetailPanel
                              matchId={match.id}
                              currentState={match.actionState || 'Pendente'}
                              onFeedback={onFeedback}
+                             editalId={match.editalId}
+                             handleGlobalInvalidate={handleGlobalInvalidate}
                          />
                      )}
                 </div>
