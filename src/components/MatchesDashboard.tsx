@@ -119,6 +119,39 @@ export function MatchesDashboard() {
     return () => unsubscribe();
   }, []);
 
+  const handleGlobalInvalidate = async (editalId: string) => {
+      const relatedMatches = matches.filter(m => m.editalId === editalId);
+      if (window.confirm(`ATENÇÃO: Você está prestes a rejeitar GLOBALMENTE todos os ${relatedMatches.length} matches associados a este Edital. Esta ação atualizará o status de todos eles para "Rejeitado". Deseja continuar?`)) {
+          try {
+              const { writeBatch } = await import('firebase/firestore');
+              const db = getFirestore();
+
+              const chunks = [];
+              for (let i = 0; i < relatedMatches.length; i += 500) {
+                  chunks.push(relatedMatches.slice(i, i + 500));
+              }
+
+              for (const chunk of chunks) {
+                  const batch = writeBatch(db);
+                  chunk.forEach(match => {
+                      if (match.id) {
+                          const matchRef = doc(db, 'matches', match.id);
+                          batch.update(matchRef, { actionState: 'Rejeitado' });
+                          // Optimistic local update
+                          setMatches(prev => prev.map(m => m.id === match.id ? { ...m, actionState: 'Rejeitado' } : m));
+                      }
+                  });
+                  await batch.commit();
+              }
+
+              toast.success("Edital invalidado globalmente com sucesso.");
+          } catch (error) {
+              console.error("Error invalidating edital globally:", error);
+              toast.error("Ocorreu um erro ao invalidar o edital. Verifique o console.");
+          }
+      }
+  };
+
   const handleFeedback = async (matchId: string, action: 'Aprovado' | 'Rejeitado' | 'Revisao') => {
       // Optimistic Update
       const previousMatches = [...matches];
@@ -335,6 +368,7 @@ export function MatchesDashboard() {
                    expandedMatch={expandedMatch}
                    setExpandedMatch={setExpandedMatch}
                    handleFeedback={handleFeedback}
+                   handleGlobalInvalidate={handleGlobalInvalidate}
                />
            </>
        ) : (

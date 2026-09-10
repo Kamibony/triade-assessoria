@@ -12,9 +12,10 @@ interface MatchesTableProps {
     expandedMatch: string | null;
     setExpandedMatch: (id: string | null) => void;
     handleFeedback: (matchId: string, action: 'Aprovado' | 'Rejeitado' | 'Revisao') => void;
+    handleGlobalInvalidate: (editalId: string) => void;
 }
 
-export function MatchesTable({ matches, editais, oscs, groupBy, groupedMatches, expandedMatch, setExpandedMatch, handleFeedback }: MatchesTableProps) {
+export function MatchesTable({ matches, editais, oscs, groupBy, groupedMatches, expandedMatch, setExpandedMatch, handleFeedback, handleGlobalInvalidate }: MatchesTableProps) {
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 50;
 
@@ -84,6 +85,7 @@ export function MatchesTable({ matches, editais, oscs, groupBy, groupedMatches, 
                                     isExpanded={expandedMatch === match.id}
                                     onToggleExpand={() => setExpandedMatch(expandedMatch === match.id ? null : (match.id || null))}
                                     onFeedback={handleFeedback}
+                                    handleGlobalInvalidate={handleGlobalInvalidate}
                                 />
                             ))
                         ) : (
@@ -121,6 +123,7 @@ export function MatchesTable({ matches, editais, oscs, groupBy, groupedMatches, 
                                                 isExpanded={expandedMatch === match.id}
                                                 onToggleExpand={() => setExpandedMatch(expandedMatch === match.id ? null : (match.id || null))}
                                                 onFeedback={handleFeedback}
+                                                handleGlobalInvalidate={handleGlobalInvalidate}
                                             />
                                         ))}
                                     </React.Fragment>

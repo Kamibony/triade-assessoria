@@ -10,9 +10,10 @@ interface MatchDetailPanelProps {
     edital?: Edital;
     osc?: NgoProfile;
     onFeedback: (matchId: string, action: 'Aprovado' | 'Rejeitado' | 'Revisao') => void;
+    handleGlobalInvalidate?: (editalId: string) => void;
 }
 
-export function MatchDetailPanel({ match, edital, onFeedback }: MatchDetailPanelProps) {
+export function MatchDetailPanel({ match, edital, onFeedback, handleGlobalInvalidate }: MatchDetailPanelProps) {
     return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
@@ -84,6 +85,8 @@ export function MatchDetailPanel({ match, edital, onFeedback }: MatchDetailPanel
                              matchId={match.id}
                              currentState={match.actionState || 'Pendente'}
                              onFeedback={onFeedback}
+                             editalId={match.editalId}
+                             handleGlobalInvalidate={handleGlobalInvalidate}
                          />
                      )}
                 </div>

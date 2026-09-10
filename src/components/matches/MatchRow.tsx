@@ -10,10 +10,11 @@ interface MatchRowProps {
     isExpanded: boolean;
     onToggleExpand: () => void;
     onFeedback: (matchId: string, action: 'Aprovado' | 'Rejeitado' | 'Revisao') => void;
+    handleGlobalInvalidate?: (editalId: string) => void;
     hideColumn?: 'osc' | 'edital';
 }
 
-export function MatchRow({ match, edital, osc, isExpanded, onToggleExpand, onFeedback, hideColumn }: MatchRowProps) {
+export function MatchRow({ match, edital, osc, isExpanded, onToggleExpand, onFeedback, handleGlobalInvalidate, hideColumn }: MatchRowProps) {
     // Gate 1 (Bureaucracy) Status
     const gate1Passed = match.eligibility;
     const isMissingData = !gate1Passed && match.matchScore === 0 && match.reasoning?.includes('Falta de informações'); // Heuristic based on memory/requirements
@@ -114,7 +115,13 @@ export function MatchRow({ match, edital, osc, isExpanded, onToggleExpand, onFee
             {isExpanded && (
                 <tr className="bg-muted/20">
                     <td colSpan={hideColumn ? 4 : 5} className="px-6 py-6 border-t-0">
-                        <MatchDetailPanel match={match} edital={edital} osc={osc} onFeedback={onFeedback} />
+                        <MatchDetailPanel
+                            match={match}
+                            edital={edital}
+                            osc={osc}
+                            onFeedback={onFeedback}
+                            handleGlobalInvalidate={handleGlobalInvalidate}
+                        />
                     </td>
                 </tr>
             )}
