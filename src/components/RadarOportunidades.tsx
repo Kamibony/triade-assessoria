@@ -1,5 +1,7 @@
 import type { MatchResult, Edital, NgoProfile } from '../lib/types';
+import React from 'react';
 import { Target, Users, Filter, Hash } from 'lucide-react';
+import { Skeleton } from './ui/Skeleton';
 
 interface RadarOportunidadesProps {
   matches: MatchResult[];
@@ -40,6 +42,15 @@ export function RadarOportunidades({ matches, oscs, editais, onDrillDown }: Rada
     }));
 
   // 3. Funil de Conversão
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+      // Simulate loading for the radar dashboard to demonstrate the skeleton
+      // In a real scenario, this would be tied to actual data fetching states
+      const timer = setTimeout(() => setLoading(false), 500);
+      return () => clearTimeout(timer);
+  }, [matches, oscs, editais]);
+
   const totalMatches = matches.length;
   const aiApproved = matches.filter(m => m.eligibility === true).length;
   const manuallyApproved = matches.filter(m => m.actionState === 'Aprovado').length;
@@ -56,6 +67,55 @@ export function RadarOportunidades({ matches, oscs, editais, onDrillDown }: Rada
   const topTags = Object.entries(tagCountMap)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 15);
+
+  if (loading) {
+      return (
+        <div className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-card border rounded-lg shadow-sm p-6">
+                     <Skeleton className="h-6 w-1/2 mb-6" />
+                     <div className="space-y-3">
+                         <Skeleton className="h-12 w-full" />
+                         <Skeleton className="h-12 w-full" />
+                         <Skeleton className="h-12 w-full" />
+                         <Skeleton className="h-12 w-full" />
+                         <Skeleton className="h-12 w-full" />
+                     </div>
+                </div>
+                <div className="bg-card border rounded-lg shadow-sm p-6">
+                     <Skeleton className="h-6 w-1/2 mb-6" />
+                     <div className="space-y-3">
+                         <Skeleton className="h-12 w-full" />
+                         <Skeleton className="h-12 w-full" />
+                         <Skeleton className="h-12 w-full" />
+                         <Skeleton className="h-12 w-full" />
+                         <Skeleton className="h-12 w-full" />
+                     </div>
+                </div>
+            </div>
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-card border rounded-lg shadow-sm p-6">
+                     <Skeleton className="h-6 w-1/2 mb-6" />
+                     <div className="space-y-4">
+                         <Skeleton className="h-16 w-full" />
+                         <Skeleton className="h-16 w-full" />
+                         <Skeleton className="h-16 w-full" />
+                     </div>
+                </div>
+                <div className="bg-card border rounded-lg shadow-sm p-6">
+                     <Skeleton className="h-6 w-1/2 mb-6" />
+                     <div className="flex flex-wrap gap-2">
+                         <Skeleton className="h-8 w-24 rounded-full" />
+                         <Skeleton className="h-8 w-32 rounded-full" />
+                         <Skeleton className="h-8 w-20 rounded-full" />
+                         <Skeleton className="h-8 w-28 rounded-full" />
+                         <Skeleton className="h-8 w-16 rounded-full" />
+                     </div>
+                </div>
+             </div>
+        </div>
+      );
+  }
 
   return (
     <div className="space-y-6">

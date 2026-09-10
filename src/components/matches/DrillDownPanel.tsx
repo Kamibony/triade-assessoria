@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, ExternalLink, Target, Users } from 'lucide-react';
+import { X, ExternalLink, Target, Users, Lock } from 'lucide-react';
 import type { MatchResult, Edital, NgoProfile } from '../../lib/types';
 import { MatchRow } from './MatchRow';
 
@@ -23,6 +23,41 @@ export function DrillDownPanel({ type, id, onClose, matches, oscs, editais, hand
 
   const validMatchesCount = relatedMatches.filter(m => m.eligibility !== false).length;
 
+  const handleGlobalInvalidate = async () => {
+    if (window.confirm(`ATENÇÃO: Você está prestes a rejeitar GLOBALMENTE todos os ${relatedMatches.length} matches associados a este Edital. Esta ação atualizará o status de todos eles para "Rejeitado". Deseja continuar?`)) {
+      try {
+        const { getFirestore, writeBatch, doc } = await import('firebase/firestore');
+        const db = getFirestore();
+
+        // Max batch size is 500 in Firestore
+        // We do this purely client-side for now, to ensure all related docs are hit based on the array
+        const chunks = [];
+        for (let i = 0; i < relatedMatches.length; i += 500) {
+            chunks.push(relatedMatches.slice(i, i + 500));
+        }
+
+        for (const chunk of chunks) {
+            const batch = writeBatch(db);
+            chunk.forEach(match => {
+                if (match.id) {
+                    const matchRef = doc(db, 'matches', match.id);
+                    batch.update(matchRef, { actionState: 'Rejeitado' });
+                    // Also fire optimistic UI update
+                    handleFeedback(match.id, 'Rejeitado');
+                }
+            });
+            await batch.commit();
+        }
+
+        alert("Edital invalidado globalmente com sucesso. Todos os matches foram rejeitados.");
+        onClose(); // Optionally close the panel
+      } catch (error) {
+        console.error("Error invalidating edital globally:", error);
+        alert("Ocorreu um erro ao invalidar o edital. Verifique o console.");
+      }
+    }
+  };
+
   return (
     <>
       <div
@@ -41,6 +76,25 @@ export function DrillDownPanel({ type, id, onClose, matches, oscs, editais, hand
         </div>
 
         <div className="p-6 flex-1 space-y-6">
+            {type === 'edital' && (
+                <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+                    <div>
+                        <h4 className="font-bold text-destructive text-sm flex items-center gap-1">
+                            <Lock className="w-4 h-4" /> Ação Global
+                        </h4>
+                        <p className="text-xs text-destructive/80 mt-1">
+                            Rejeitar todos os {relatedMatches.length} matches deste edital de uma só vez.
+                        </p>
+                    </div>
+                    <button
+                        onClick={handleGlobalInvalidate}
+                        className="whitespace-nowrap bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                    >
+                        Invalidar Edital Globalmente
+                    </button>
+                </div>
+            )}
+
             <div className="bg-card border rounded-lg p-4 shadow-sm">
                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Resumo</h3>
                  {type === 'osc' && oscs[id] && (
