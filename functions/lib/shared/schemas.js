@@ -18,7 +18,9 @@ exports.editalSchema = zod_1.z.object({
     title: zod_1.z.string().describe("Título do edital"),
     issuer: zod_1.z.string().describe("Órgão emissor ou financiador do edital"),
     publicationDate: zod_1.z.string().describe("Data de publicação do edital (YYYY-MM-DD)"),
-    deadline: zod_1.z.string().describe("Data limite para inscrições ou submissões (YYYY-MM-DD)"),
+    deadline: zod_1.z.string().nullable().optional().describe("Data limite para inscrições ou submissões (YYYY-MM-DD). Use null se for fluxo contínuo ou sem prazo."),
+    isContinuous: zod_1.z.boolean().default(false).describe("Se o edital é de fluxo contínuo (inscrições abertas permanentemente)"),
+    ativo: zod_1.z.boolean().optional().default(true).describe("Se o edital está ativo no momento"),
     totalBudget: zod_1.z.number().describe("Orçamento total previsto no edital"),
     eligibilityCriteria: zod_1.z.object({
         minYearsActive: zod_1.z.number().describe("Mínimo de anos de atividade exigido da ONG"),

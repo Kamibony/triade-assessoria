@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scheduledIngestionTimeoutSweeper = exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.triggerBulkInternalMatch = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.runVectorMigration = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
+exports.cronDeactivateExpiredEditais = exports.scheduledIngestionTimeoutSweeper = exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.triggerBulkInternalMatch = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.runVectorMigration = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
 exports.formatGenkitError = formatGenkitError;
 exports.fetchAndExtractText = fetchAndExtractText;
 exports.enqueueEditalExtraction = enqueueEditalExtraction;
@@ -874,7 +874,19 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
     else {
         // Deterministic Date Guardrail
         const currentDate = new Date().toISOString().split('T')[0];
-        const isExpired = editalData.deadline < currentDate || editalData.deadline === '1970-01-01';
+        let isExpired = false;
+        if (!editalData.isContinuous) {
+            if (editalData.deadline) {
+                isExpired = editalData.deadline < currentDate || editalData.deadline === '1970-01-01';
+            }
+            else {
+                // If there's no deadline and it's not continuous, we might treat it as expired or skip this check.
+                // It's safer to not forcefully expire it here without a date, but let the LLM evaluate if needed.
+                // However, matching the previous logic: if deadline is null/undefined and not continuous, it could fail.
+                // Since the previous schema enforced a string, it was never null before our change.
+                isExpired = false;
+            }
+        }
         if (isExpired) {
             console.log(`Silently rejecting match for OSC ${oscId} and Edital ${editalId} due to expired deadline (${editalData.deadline})`);
             matchResult = {
@@ -1022,7 +1034,10 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         // Check if oscEmbedding is already a VectorValue (from db) or an array (just generated)
         const vectorQuery = Array.isArray(oscEmbedding) ? firestore_1.FieldValue.vector(oscEmbedding) : oscEmbedding;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const internalEditaisSnapshot = await db.collection('editais').findNearest('embedding', vectorQuery, { limit: 30, distanceMeasure: 'COSINE', distanceResultField: 'vectorDistance' }).get();
+        const internalEditaisSnapshot = await db.collection('editais')
+            .where('ativo', '==', true)
+            .findNearest('embedding', vectorQuery, { limit: 30, distanceMeasure: 'COSINE', distanceResultField: 'vectorDistance' })
+            .get();
         console.log('Top internal vector matches (raw):', internalEditaisSnapshot.docs.map((m) => ({ id: m.id, distance: m.get('vectorDistance') ?? m.data()?.vectorDistance })));
         const validInternalMatches = internalEditaisSnapshot.docs
             .map((editalDoc) => {
@@ -1078,7 +1093,7 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
         const queryPerformance = {};
         const topDomains = {};
         const rejections = { expired: 0, out_of_scope: 0, fetch_error: 0, snippet_rejected: 0 };
-        let allSearchResults = [];
+        const allSearchResults = [];
         const QUERY_CHUNK_SIZE = 3;
         for (let q = 0; q < queries.length; q += QUERY_CHUNK_SIZE) {
             const queryChunk = queries.slice(q, q + QUERY_CHUNK_SIZE);
@@ -1921,7 +1936,10 @@ exports.triggerBulkInternalMatch = (0, https_1.onCall)({
             }
             const vectorQuery = Array.isArray(oscEmbedding) ? firestore_1.FieldValue.vector(oscEmbedding) : oscEmbedding;
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const internalEditaisSnapshot = await db.collection('editais').findNearest('embedding', vectorQuery, { limit: 100, distanceMeasure: 'COSINE', distanceResultField: 'vectorDistance' }).get();
+            const internalEditaisSnapshot = await db.collection('editais')
+                .where('ativo', '==', true)
+                .findNearest('embedding', vectorQuery, { limit: 100, distanceMeasure: 'COSINE', distanceResultField: 'vectorDistance' })
+                .get();
             const validInternalMatches = internalEditaisSnapshot.docs
                 .map((editalDoc) => {
                 let vectorDistance = (editalDoc.get('vectorDistance') ?? editalDoc.data()?.vectorDistance);
@@ -4202,6 +4220,48 @@ exports.scheduledIngestionTimeoutSweeper = (0, scheduler_1.onSchedule)('*/30 * *
             }
             await doc.ref.update(updates);
         }
+    }
+});
+exports.cronDeactivateExpiredEditais = (0, scheduler_1.onSchedule)({
+    schedule: 'every day 00:00',
+    timeZone: 'America/Sao_Paulo',
+    retryCount: 3,
+}, async (event) => {
+    const db = (0, firestore_1.getFirestore)();
+    const currentDate = new Date().toISOString().split('T')[0];
+    console.log(`[cronDeactivateExpiredEditais] Running grim reaper job for date: ${currentDate}`);
+    try {
+        const expiredEditaisSnapshot = await db.collection('editais')
+            .where('ativo', '==', true)
+            .where('deadline', '<', currentDate)
+            .get();
+        if (expiredEditaisSnapshot.empty) {
+            console.log(`[cronDeactivateExpiredEditais] No expired editais found.`);
+            return;
+        }
+        console.log(`[cronDeactivateExpiredEditais] Found ${expiredEditaisSnapshot.docs.length} expired editais. Deactivating...`);
+        let batch = db.batch();
+        let operationsCount = 0;
+        for (const doc of expiredEditaisSnapshot.docs) {
+            batch.update(doc.ref, {
+                ativo: false,
+                updatedAt: firestore_1.FieldValue.serverTimestamp()
+            });
+            operationsCount++;
+            // Firestore batch limit is 500
+            if (operationsCount === 500) {
+                await batch.commit();
+                batch = db.batch();
+                operationsCount = 0;
+            }
+        }
+        if (operationsCount > 0) {
+            await batch.commit();
+        }
+        console.log(`[cronDeactivateExpiredEditais] Successfully deactivated all expired editais.`);
+    }
+    catch (error) {
+        console.error(`[cronDeactivateExpiredEditais] Error during execution:`, error);
     }
 });
 //# sourceMappingURL=index.js.map

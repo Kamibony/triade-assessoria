@@ -17,7 +17,9 @@ export const editalSchema = z.object({
     title: z.string().describe("Título do edital"),
     issuer: z.string().describe("Órgão emissor ou financiador do edital"),
     publicationDate: z.string().describe("Data de publicação do edital (YYYY-MM-DD)"),
-    deadline: z.string().describe("Data limite para inscrições ou submissões (YYYY-MM-DD)"),
+    deadline: z.string().nullable().optional().describe("Data limite para inscrições ou submissões (YYYY-MM-DD). Use null se for fluxo contínuo ou sem prazo."),
+    isContinuous: z.boolean().default(false).describe("Se o edital é de fluxo contínuo (inscrições abertas permanentemente)"),
+    ativo: z.boolean().optional().default(true).describe("Se o edital está ativo no momento"),
     totalBudget: z.number().describe("Orçamento total previsto no edital"),
     eligibilityCriteria: z.object({
         minYearsActive: z.number().describe("Mínimo de anos de atividade exigido da ONG"),

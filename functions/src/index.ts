@@ -947,7 +947,19 @@ async function processMatchEvaluation(oscId: string, editalId: string, forceReca
     } else {
         // Deterministic Date Guardrail
         const currentDate = new Date().toISOString().split('T')[0]!;
-        const isExpired = editalData.deadline < currentDate || editalData.deadline === '1970-01-01';
+
+        let isExpired = false;
+        if (!editalData.isContinuous) {
+            if (editalData.deadline) {
+                isExpired = editalData.deadline < currentDate || editalData.deadline === '1970-01-01';
+            } else {
+                // If there's no deadline and it's not continuous, we might treat it as expired or skip this check.
+                // It's safer to not forcefully expire it here without a date, but let the LLM evaluate if needed.
+                // However, matching the previous logic: if deadline is null/undefined and not continuous, it could fail.
+                // Since the previous schema enforced a string, it was never null before our change.
+                isExpired = false;
+            }
+        }
 
         if (isExpired) {
             console.log(`Silently rejecting match for OSC ${oscId} and Edital ${editalId} due to expired deadline (${editalData.deadline})`);
@@ -1111,8 +1123,12 @@ export const agenticSearchWorker = onTaskDispatched({
         // Use Firestore Vector Search for tier 1 search
         // Check if oscEmbedding is already a VectorValue (from db) or an array (just generated)
         const vectorQuery = Array.isArray(oscEmbedding) ? FieldValue.vector(oscEmbedding) : oscEmbedding;
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const internalEditaisSnapshot = await (db.collection('editais') as any).findNearest('embedding', vectorQuery, { limit: 30, distanceMeasure: 'COSINE', distanceResultField: 'vectorDistance' }).get();
+        const internalEditaisSnapshot = await (db.collection('editais') as any)
+            .where('ativo', '==', true)
+            .findNearest('embedding', vectorQuery, { limit: 30, distanceMeasure: 'COSINE', distanceResultField: 'vectorDistance' })
+            .get();
 
         console.log('Top internal vector matches (raw):', internalEditaisSnapshot.docs.map((m: any) => ({ id: m.id, distance: m.get('vectorDistance') ?? m.data()?.vectorDistance })));
 
@@ -2148,7 +2164,10 @@ export const triggerBulkInternalMatch = onCall({
             const vectorQuery = Array.isArray(oscEmbedding) ? FieldValue.vector(oscEmbedding) : oscEmbedding;
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const internalEditaisSnapshot = await (db.collection('editais') as any).findNearest('embedding', vectorQuery, { limit: 100, distanceMeasure: 'COSINE', distanceResultField: 'vectorDistance' }).get();
+            const internalEditaisSnapshot = await (db.collection('editais') as any)
+                .where('ativo', '==', true)
+                .findNearest('embedding', vectorQuery, { limit: 100, distanceMeasure: 'COSINE', distanceResultField: 'vectorDistance' })
+                .get();
 
             const validInternalMatches = internalEditaisSnapshot.docs
                 .map((editalDoc: any) => {
@@ -4672,5 +4691,55 @@ export const scheduledIngestionTimeoutSweeper = onSchedule('*/30 * * * *', async
 
             await doc.ref.update(updates);
         }
+    }
+});
+export const cronDeactivateExpiredEditais = onSchedule({
+    schedule: 'every day 00:00',
+    timeZone: 'America/Sao_Paulo',
+    retryCount: 3,
+}, async (event) => {
+    const db = getFirestore();
+    const currentDate = new Date().toISOString().split('T')[0]!;
+
+    console.log(`[cronDeactivateExpiredEditais] Running grim reaper job for date: ${currentDate}`);
+
+    try {
+        const expiredEditaisSnapshot = await db.collection('editais')
+            .where('ativo', '==', true)
+            .where('deadline', '<', currentDate)
+            .get();
+
+        if (expiredEditaisSnapshot.empty) {
+            console.log(`[cronDeactivateExpiredEditais] No expired editais found.`);
+            return;
+        }
+
+        console.log(`[cronDeactivateExpiredEditais] Found ${expiredEditaisSnapshot.docs.length} expired editais. Deactivating...`);
+
+        let batch = db.batch();
+        let operationsCount = 0;
+
+        for (const doc of expiredEditaisSnapshot.docs) {
+            batch.update(doc.ref, {
+                ativo: false,
+                updatedAt: FieldValue.serverTimestamp()
+            });
+            operationsCount++;
+
+            // Firestore batch limit is 500
+            if (operationsCount === 500) {
+                await batch.commit();
+                batch = db.batch();
+                operationsCount = 0;
+            }
+        }
+
+        if (operationsCount > 0) {
+            await batch.commit();
+        }
+
+        console.log(`[cronDeactivateExpiredEditais] Successfully deactivated all expired editais.`);
+    } catch (error) {
+        console.error(`[cronDeactivateExpiredEditais] Error during execution:`, error);
     }
 });

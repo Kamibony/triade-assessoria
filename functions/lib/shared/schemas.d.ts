@@ -37,7 +37,9 @@ export declare const editalSchema: z.ZodObject<{
     title: z.ZodString;
     issuer: z.ZodString;
     publicationDate: z.ZodString;
-    deadline: z.ZodString;
+    deadline: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    isContinuous: z.ZodDefault<z.ZodBoolean>;
+    ativo: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
     totalBudget: z.ZodNumber;
     eligibilityCriteria: z.ZodObject<{
         minYearsActive: z.ZodNumber;
@@ -60,7 +62,9 @@ export declare const editalSchema: z.ZodObject<{
     title: string;
     issuer: string;
     publicationDate: string;
-    deadline: string;
+    deadline?: string | null | undefined;
+    isContinuous: boolean;
+    ativo: boolean;
     totalBudget: number;
     eligibilityCriteria: {
         minYearsActive: number;
@@ -73,7 +77,9 @@ export declare const editalSchema: z.ZodObject<{
     title: string;
     issuer: string;
     publicationDate: string;
-    deadline: string;
+    deadline?: string | null | undefined;
+    isContinuous?: boolean | undefined;
+    ativo?: boolean | undefined;
     totalBudget: number;
     eligibilityCriteria: {
         minYearsActive: number;
