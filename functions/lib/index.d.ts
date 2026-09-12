@@ -41,7 +41,9 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
         title: z.ZodString;
         issuer: z.ZodString;
         publicationDate: z.ZodString;
-        deadline: z.ZodString;
+        deadline: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        isContinuous: z.ZodDefault<z.ZodBoolean>;
+        ativo: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
         totalBudget: z.ZodNumber;
         eligibilityCriteria: z.ZodObject<{
             minYearsActive: z.ZodNumber;
@@ -64,7 +66,9 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
         title: string;
         issuer: string;
         publicationDate: string;
-        deadline: string;
+        deadline?: string | null | undefined;
+        isContinuous: boolean;
+        ativo: boolean;
         totalBudget: number;
         eligibilityCriteria: {
             minYearsActive: number;
@@ -77,7 +81,9 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
         title: string;
         issuer: string;
         publicationDate: string;
-        deadline: string;
+        deadline?: string | null | undefined;
+        isContinuous?: boolean | undefined;
+        ativo?: boolean | undefined;
         totalBudget: number;
         eligibilityCriteria: {
             minYearsActive: number;
@@ -104,7 +110,9 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
         title: string;
         issuer: string;
         publicationDate: string;
-        deadline: string;
+        deadline?: string | null | undefined;
+        isContinuous: boolean;
+        ativo: boolean;
         totalBudget: number;
         eligibilityCriteria: {
             minYearsActive: number;
@@ -131,7 +139,9 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
         title: string;
         issuer: string;
         publicationDate: string;
-        deadline: string;
+        deadline?: string | null | undefined;
+        isContinuous?: boolean | undefined;
+        ativo?: boolean | undefined;
         totalBudget: number;
         eligibilityCriteria: {
             minYearsActive: number;
@@ -190,7 +200,9 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
         title: z.ZodString;
         issuer: z.ZodString;
         publicationDate: z.ZodString;
-        deadline: z.ZodString;
+        deadline: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        isContinuous: z.ZodDefault<z.ZodBoolean>;
+        ativo: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
         totalBudget: z.ZodNumber;
         eligibilityCriteria: z.ZodObject<{
             minYearsActive: z.ZodNumber;
@@ -213,7 +225,9 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
         title: string;
         issuer: string;
         publicationDate: string;
-        deadline: string;
+        deadline?: string | null | undefined;
+        isContinuous: boolean;
+        ativo: boolean;
         totalBudget: number;
         eligibilityCriteria: {
             minYearsActive: number;
@@ -226,7 +240,9 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
         title: string;
         issuer: string;
         publicationDate: string;
-        deadline: string;
+        deadline?: string | null | undefined;
+        isContinuous?: boolean | undefined;
+        ativo?: boolean | undefined;
         totalBudget: number;
         eligibilityCriteria: {
             minYearsActive: number;
@@ -255,7 +271,9 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
         title: string;
         issuer: string;
         publicationDate: string;
-        deadline: string;
+        deadline?: string | null | undefined;
+        isContinuous: boolean;
+        ativo: boolean;
         totalBudget: number;
         eligibilityCriteria: {
             minYearsActive: number;
@@ -284,7 +302,9 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
         title: string;
         issuer: string;
         publicationDate: string;
-        deadline: string;
+        deadline?: string | null | undefined;
+        isContinuous?: boolean | undefined;
+        ativo?: boolean | undefined;
         totalBudget: number;
         eligibilityCriteria: {
             minYearsActive: number;
@@ -348,7 +368,9 @@ export declare const extractEditalRules: import("genkit").Action<z.ZodObject<{
     title: z.ZodString;
     issuer: z.ZodString;
     publicationDate: z.ZodString;
-    deadline: z.ZodString;
+    deadline: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    isContinuous: z.ZodDefault<z.ZodBoolean>;
+    ativo: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
     totalBudget: z.ZodNumber;
     eligibilityCriteria: z.ZodObject<{
         minYearsActive: z.ZodNumber;
@@ -371,7 +393,9 @@ export declare const extractEditalRules: import("genkit").Action<z.ZodObject<{
     title: string;
     issuer: string;
     publicationDate: string;
-    deadline: string;
+    deadline?: string | null | undefined;
+    isContinuous: boolean;
+    ativo: boolean;
     totalBudget: number;
     eligibilityCriteria: {
         minYearsActive: number;
@@ -384,7 +408,9 @@ export declare const extractEditalRules: import("genkit").Action<z.ZodObject<{
     title: string;
     issuer: string;
     publicationDate: string;
-    deadline: string;
+    deadline?: string | null | undefined;
+    isContinuous?: boolean | undefined;
+    ativo?: boolean | undefined;
     totalBudget: number;
     eligibilityCriteria: {
         minYearsActive: number;
@@ -537,4 +563,5 @@ export declare const triggerGlobalIngestion: import("firebase-functions/v2/https
 export declare const scheduledGlobalIngestion: import("firebase-functions/v2/scheduler").ScheduleFunction;
 export declare const rssWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
 export declare const scheduledIngestionTimeoutSweeper: import("firebase-functions/v2/scheduler").ScheduleFunction;
+export declare const cronDeactivateExpiredEditais: import("firebase-functions/v2/scheduler").ScheduleFunction;
 //# sourceMappingURL=index.d.ts.map
