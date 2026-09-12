@@ -878,11 +878,11 @@ async function processMatchEvaluation(oscId: string, editalId: string, forceReca
     if (!shouldRecalculate && existingMatchData) {
         if (existingMatchData.createdAt) {
             const matchTime = getMillis(existingMatchData.createdAt);
-            const oscUpdateTime = getMillis(rawOscData?.updatedAt);
-            const editalUpdateTime = getMillis(rawEditalData?.updatedAt);
+            const oscUpdateTime = getMillis(rawOscData?.updatedAt) || getMillis(rawOscData?.createdAt) || 0;
+            const editalUpdateTime = getMillis(rawEditalData?.updatedAt) || getMillis(rawEditalData?.createdAt) || 0;
 
             // If we can't reliably determine any timestamp, force recalculation
-            if (matchTime === null || oscUpdateTime === null || editalUpdateTime === null) {
+            if (matchTime === null) {
                 shouldRecalculate = true;
             } else if (matchTime >= oscUpdateTime && matchTime >= editalUpdateTime) {
                 console.log(`Returning cached match for OSC ${oscId} and Edital ${editalId}`);
@@ -894,6 +894,16 @@ async function processMatchEvaluation(oscId: string, editalId: string, forceReca
         } else {
             // Missing createdAt timestamp
             shouldRecalculate = true;
+        }
+
+        // Even if stale, do not recalculate firmly rejected items unless explicitly forced
+        if (!forceRecalculate && shouldRecalculate && (
+            (typeof existingMatchData.status === 'string' && existingMatchData.status.includes('Inelegível')) ||
+            existingMatchData.actionState === 'Rejeitado' ||
+            existingMatchData.status === 'Fora do Escopo'
+        )) {
+             console.log(`Skipping recalculation for firmly rejected match OSC ${oscId} and Edital ${editalId}`);
+             shouldRecalculate = false;
         }
     } else if (!existingMatchData) {
         shouldRecalculate = true;
@@ -975,32 +985,45 @@ async function processMatchEvaluation(oscId: string, editalId: string, forceReca
         } else {
             // Multi-Agent Pipeline
             console.log(`Similarity passed (${similarityScore}). Invoking Bureaucracy Agent...`);
-            const bureaucracyResult = await bureaucracyAgentFlow({
-                osc: oscData,
-                edital: editalData
-            });
+            try {
+                const bureaucracyResult = await bureaucracyAgentFlow({
+                    osc: oscData,
+                    edital: editalData
+                });
 
-            if (!bureaucracyResult.passesBureaucracy) {
-                console.log(`Bureaucracy Agent rejected match: ${bureaucracyResult.rejectionReason}`);
+                if (!bureaucracyResult.passesBureaucracy) {
+                    console.log(`Bureaucracy Agent rejected match: ${bureaucracyResult.rejectionReason}`);
+                    matchResult = {
+                        matchScore: 0,
+                        eligibility: false,
+                        status: 'Inelegível',
+                        badges: ['Restrição Burocrática'],
+                        aiSummary: 'A ONG não atende aos requisitos burocráticos do edital (prazos, localização ou idade).',
+                        reasoning: bureaucracyResult.rejectionReason,
+                        actionPlan: null
+                    };
+                } else {
+                    console.log(`Bureaucracy Agent passed. Invoking Thematic Agent...`);
+                    matchResult = await thematicAgentFlow({
+                        osc: oscData,
+                        edital: editalData,
+                        oscId: oscId,
+                        editalId: editalId
+                    });
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    (matchResult as any).status = 'Elegível';
+                }
+            } catch (error) {
+                console.error(`AI Evaluation failed for OSC ${oscId} and Edital ${editalId}:`, error);
                 matchResult = {
                     matchScore: 0,
                     eligibility: false,
-                    status: 'Inelegível',
-                    badges: ['Restrição Burocrática'],
-                    aiSummary: 'A ONG não atende aos requisitos burocráticos do edital (prazos, localização ou idade).',
-                    reasoning: bureaucracyResult.rejectionReason,
+                    status: 'Inelegível (Erro no Servidor)',
+                    badges: ['Erro'],
+                    aiSummary: 'Falha de comunicação com a IA durante a avaliação. O limite de requisições pode ter sido atingido.',
+                    reasoning: 'Erro interno ao processar a avaliação. Tente novamente mais tarde.',
                     actionPlan: null
                 };
-            } else {
-                console.log(`Bureaucracy Agent passed. Invoking Thematic Agent...`);
-                matchResult = await thematicAgentFlow({
-                    osc: oscData,
-                    edital: editalData,
-                    oscId: oscId,
-                    editalId: editalId
-                });
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                (matchResult as any).status = 'Elegível';
             }
         }
     }
