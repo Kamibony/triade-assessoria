@@ -37,7 +37,7 @@ import { vertexAI } from '@genkit-ai/google-genai';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import * as logger from 'firebase-functions/logger';
-import { ngoProfileSchema, editalSchema, matchSchema, bureaucracySchema, triageSchema, copilotResponseSchema } from './shared/schemas.js';
+import { ngoProfileSchema, editalSchema, matchSchema, bureaucracySchema, triageSchema, copilotResponseSchema, verificationResultSchema } from './shared/schemas.js';
 import * as cheerio from 'cheerio';
 const Parser = require('rss-parser');
 
@@ -274,6 +274,145 @@ Responda estritamente em português do Brasil (pt-BR).`;
         };
     }
 );
+
+
+export const verificationAgentFlow = ai.defineFlow(
+    {
+        name: 'verificationAgentFlow',
+        inputSchema: z.object({
+            osc: ngoProfileSchema,
+            editalText: z.string().describe("Texto bruto completo do edital"),
+        }),
+        outputSchema: verificationResultSchema,
+    },
+    async (input) => {
+        const currentDate = new Date().toISOString().split('T')[0];
+        const prompt = `Você é um auditor estrito atuando como "Advogado do Diabo". Sua tarefa é encontrar motivos para DESCLASSIFICAR esta ONG deste edital.
+Você deve analisar as regras presentes no texto completo do edital e compará-las com o perfil da ONG.
+
+Perfil da ONG:
+Nome: ${input.osc.name || 'Não especificada'}
+Localização: ${input.osc.location || 'Não especificada'}
+Atividades Principais: ${(input.osc.coreActivities || []).join(', ')}
+Data de Fundação: ${input.osc.foundationDate || 'Não especificada'}
+Status da Documentação: ${input.osc.documentationStatus || 'Pendente'}
+Data atual: ${currentDate}
+
+Regras estritas (GUARDRAILS):
+1. Se uma restrição (ex: "Apenas para ONGs do estado de SP") NÃO estiver explicitamente escrita no texto do edital, você DEVE gerar o status "Não Encontrado" para esse critério e "Não Encontrado" para a citação.
+2. NUNCA invente ou infira citações. A citação DEVE ser uma cópia exata ou um resumo muito fiel de um trecho REAL do texto fornecido.
+3. Se a ONG não cumprir um critério explícito, o status é "Reprovado". Se cumprir, é "Aprovado".
+
+Avalie os seguintes critérios mínimos (você pode adicionar outros se achar relevante no texto):
+- Geografia (A ONG está na região permitida?)
+- Prazo (O edital ainda está aberto considerando a data atual?)
+- Tempo de Fundação (A ONG tem a idade mínima exigida?)
+- Documentação/Certificações (A ONG possui o que é exigido?)
+
+Responda APENAS com o JSON no formato definido. Não adicione explicações extras.`;
+
+        const response = await ai.generate({
+            model: 'vertexai/gemini-1.5-flash',
+            messages: [
+                { role: 'system', content: [{ text: prompt }] },
+                { role: 'user', content: [{ text: `Texto completo do edital:\n\n${input.editalText}` }] }
+            ],
+            config: { temperature: 0.1 }, // Low temperature for deterministic behavior
+            output: { schema: verificationResultSchema }
+        });
+
+        if (!response.output) {
+            throw new Error("Falha ao gerar o resultado da verificação.");
+        }
+        return response.output;
+    }
+);
+
+
+export const verifyMatchConstraints = onCall({
+    cors: true,
+    timeoutSeconds: 300,
+    memory: '2GiB', // Needs higher memory to process potentially large raw texts
+    invoker: 'public',
+}, async (request) => {
+    if (!request.auth) {
+        throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    }
+
+    const { matchId } = request.data as { matchId?: string };
+
+    if (!matchId) {
+        throw new HttpsError('invalid-argument', 'O parâmetro matchId é obrigatório.');
+    }
+
+    const db = getFirestore();
+    const matchRef = db.collection('matches').doc(matchId);
+
+    try {
+        const matchDoc = await matchRef.get();
+        if (!matchDoc.exists) {
+            throw new HttpsError('not-found', 'Match não encontrado.');
+        }
+
+        const matchData = matchDoc.data()!;
+        const oscId = matchData.oscId;
+        const editalId = matchData.editalId;
+
+        if (!oscId || !editalId) {
+             throw new HttpsError('failed-precondition', 'O match não possui oscId ou editalId válidos.');
+        }
+
+        const oscDoc = await db.collection('oscs').doc(oscId).get();
+        const editalDoc = await db.collection('editais').doc(editalId).get();
+
+        if (!oscDoc.exists || !editalDoc.exists) {
+            throw new HttpsError('failed-precondition', 'OSC ou Edital não encontrados no banco de dados.');
+        }
+
+        const oscData = oscDoc.data()!;
+        const editalData = editalDoc.data()!;
+
+        const rawText = editalData.rawText || '';
+
+        if (!rawText) {
+             throw new HttpsError('failed-precondition', 'O texto bruto (rawText) do edital não está disponível para verificação.');
+        }
+
+        // Map and validate OSC data (same as match evaluator)
+        const enrichedOscData = {
+            name: oscData.name || 'ONG Desconhecida',
+            foundationDate: oscData.foundationDate || 'Data Desconhecida',
+            location: oscData.location || 'Localização Desconhecida',
+            documentationStatus: oscData.documentationStatus || 'Pendente',
+            previousProjectsApproved: oscData.previousProjectsApproved || false,
+            coreActivities: oscData.coreActivities || [],
+            ...oscData
+        };
+
+        const oscParseResult = ngoProfileSchema.safeParse(enrichedOscData);
+        if (!oscParseResult.success) {
+            throw new HttpsError('internal', 'Dados da OSC inválidos para verificação.');
+        }
+
+        // Run the agent flow
+        const verificationResult = await verificationAgentFlow({
+             osc: oscParseResult.data,
+             editalText: rawText
+        });
+
+        // Update the match document with the result
+        await matchRef.update({
+             verificationResult: verificationResult,
+             updatedAt: FieldValue.serverTimestamp()
+        });
+
+        return { success: true, verificationResult };
+
+    } catch (error: unknown) {
+        console.error(`Erro em verifyMatchConstraints para o match ${matchId}:`, error);
+        throw formatGenkitError(error, 'Falha ao executar a verificação do Advogado do Diabo.');
+    }
+});
 
 
 export const parsePdfProfileWorker = onTaskDispatched({

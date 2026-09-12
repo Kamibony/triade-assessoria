@@ -1,9 +1,13 @@
 
-import { FileText, ExternalLink } from 'lucide-react';
+import { useState } from 'react';
+import { FileText, ExternalLink, ShieldAlert, CheckCircle2, XCircle, HelpCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { MatchResult, Edital, NgoProfile } from '../../lib/types';
 import { FeedbackActionBar } from './FeedbackActionBar';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import toast from 'react-hot-toast';
+import { Skeleton } from '../ui/Skeleton';
 
 interface MatchDetailPanelProps {
     match: MatchResult;
@@ -14,6 +18,25 @@ interface MatchDetailPanelProps {
 }
 
 export function MatchDetailPanel({ match, edital, onFeedback, handleGlobalInvalidate }: MatchDetailPanelProps) {
+    const [isVerifying, setIsVerifying] = useState(false);
+
+    const handleVerifyClick = async () => {
+        if (!match.id) return;
+        setIsVerifying(true);
+        const functions = getFunctions();
+        const verifyFn = httpsCallable(functions, 'verifyMatchConstraints');
+
+        try {
+            await verifyFn({ matchId: match.id });
+            toast.success("Verificação concluída com sucesso!");
+        } catch (error: any) {
+            console.error("Erro na verificação:", error);
+            toast.error(error.message || "Falha ao executar a verificação.");
+        } finally {
+            setIsVerifying(false);
+        }
+    };
+
     return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
@@ -58,6 +81,62 @@ export function MatchDetailPanel({ match, edital, onFeedback, handleGlobalInvali
                         </ul>
                     </div>
                 )}
+
+                <div className="mt-6 border-t pt-6">
+                    <div className="flex items-center justify-between mb-4">
+                        <h4 className="font-bold text-sm flex items-center gap-2">
+                            <ShieldAlert className="w-4 h-4 text-orange-500" />
+                            Auditoria Restrita (Advogado do Diabo)
+                        </h4>
+                        {!match.verificationResult && !isVerifying && (
+                            <button
+                                onClick={handleVerifyClick}
+                                className="text-xs bg-orange-100 text-orange-700 hover:bg-orange-200 px-3 py-1.5 rounded-md font-medium transition-colors"
+                            >
+                                Iniciar Verificação
+                            </button>
+                        )}
+                    </div>
+
+                    {isVerifying ? (
+                        <div className="space-y-3">
+                            <Skeleton className="h-20 w-full" />
+                            <Skeleton className="h-20 w-full" />
+                            <Skeleton className="h-20 w-full" />
+                        </div>
+                    ) : match.verificationResult ? (
+                        <div className="space-y-3">
+                            {match.verificationResult.map((result, idx) => (
+                                <div key={idx} className="bg-background p-3 rounded-md border flex items-start gap-3">
+                                    <div className="mt-0.5">
+                                        {result.status === 'Aprovado' && <CheckCircle2 className="w-4 h-4 text-green-500" />}
+                                        {result.status === 'Reprovado' && <XCircle className="w-4 h-4 text-red-500" />}
+                                        {result.status === 'Não Encontrado' && <HelpCircle className="w-4 h-4 text-gray-400" />}
+                                    </div>
+                                    <div>
+                                        <div className="font-semibold text-sm flex items-center gap-2">
+                                            {result.criterion}
+                                            <span className={`text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-sm ${
+                                                result.status === 'Aprovado' ? 'bg-green-100 text-green-700' :
+                                                result.status === 'Reprovado' ? 'bg-red-100 text-red-700' :
+                                                'bg-gray-100 text-gray-600'
+                                            }`}>
+                                                {result.status}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground mt-1 italic">
+                                            "{result.citation}"
+                                        </p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="text-sm text-muted-foreground bg-accent/50 p-4 rounded-md text-center">
+                            Nenhuma auditoria estrita realizada para este match.
+                        </div>
+                    )}
+                </div>
 
                  {(match.sourceUrl || (edital as any)?.sourceUrl) && (
                     <div className="mt-4">

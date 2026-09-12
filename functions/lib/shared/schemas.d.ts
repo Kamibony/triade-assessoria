@@ -99,6 +99,19 @@ export declare const bureaucracySchema: z.ZodObject<{
     passesBureaucracy: boolean;
     rejectionReason?: string | null | undefined;
 }>;
+export declare const verificationResultSchema: z.ZodArray<z.ZodObject<{
+    criterion: z.ZodString;
+    status: z.ZodEnum<["Aprovado", "Reprovado", "Não Encontrado"]>;
+    citation: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    criterion: string;
+    status: "Aprovado" | "Não Encontrado" | "Reprovado";
+    citation: string;
+}, {
+    criterion: string;
+    status: "Aprovado" | "Não Encontrado" | "Reprovado";
+    citation: string;
+}>, "many">;
 export declare const matchSchema: z.ZodObject<{
     editalId: z.ZodString;
     oscId: z.ZodString;
@@ -110,6 +123,19 @@ export declare const matchSchema: z.ZodObject<{
     badges: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     actionPlan: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     actionState: z.ZodDefault<z.ZodOptional<z.ZodEnum<["Pendente", "Aprovado", "Rejeitado", "Revisao"]>>>;
+    verificationResult: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        criterion: z.ZodString;
+        status: z.ZodEnum<["Aprovado", "Reprovado", "Não Encontrado"]>;
+        citation: z.ZodString;
+    }, "strip", z.ZodTypeAny, {
+        criterion: string;
+        status: "Aprovado" | "Não Encontrado" | "Reprovado";
+        citation: string;
+    }, {
+        criterion: string;
+        status: "Aprovado" | "Não Encontrado" | "Reprovado";
+        citation: string;
+    }>, "many">>;
 }, "strip", z.ZodTypeAny, {
     editalId: string;
     oscId: string;
@@ -121,6 +147,11 @@ export declare const matchSchema: z.ZodObject<{
     badges?: string[] | undefined;
     actionPlan?: string[] | undefined;
     actionState: "Aprovado" | "Pendente" | "Rejeitado" | "Revisao";
+    verificationResult?: {
+        criterion: string;
+        status: "Aprovado" | "Não Encontrado" | "Reprovado";
+        citation: string;
+    }[] | undefined;
 }, {
     editalId: string;
     oscId: string;
@@ -132,6 +163,11 @@ export declare const matchSchema: z.ZodObject<{
     badges?: string[] | undefined;
     actionPlan?: string[] | undefined;
     actionState?: "Aprovado" | "Pendente" | "Rejeitado" | "Revisao" | undefined;
+    verificationResult?: {
+        criterion: string;
+        status: "Aprovado" | "Não Encontrado" | "Reprovado";
+        citation: string;
+    }[] | undefined;
 }>;
 export declare const triageSchema: z.ZodObject<{
     isValidEdital: z.ZodBoolean;

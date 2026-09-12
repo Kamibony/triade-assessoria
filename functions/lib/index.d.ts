@@ -327,6 +327,19 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
     badges: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     actionPlan: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     actionState: z.ZodDefault<z.ZodOptional<z.ZodEnum<["Pendente", "Aprovado", "Rejeitado", "Revisao"]>>>;
+    verificationResult: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        criterion: z.ZodString;
+        status: z.ZodEnum<["Aprovado", "Reprovado", "Não Encontrado"]>;
+        citation: z.ZodString;
+    }, "strip", z.ZodTypeAny, {
+        criterion: string;
+        status: "Aprovado" | "Não Encontrado" | "Reprovado";
+        citation: string;
+    }, {
+        criterion: string;
+        status: "Aprovado" | "Não Encontrado" | "Reprovado";
+        citation: string;
+    }>, "many">>;
 }, "strip", z.ZodTypeAny, {
     editalId: string;
     oscId: string;
@@ -338,6 +351,11 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
     badges?: string[] | undefined;
     actionPlan?: string[] | undefined;
     actionState: "Aprovado" | "Pendente" | "Rejeitado" | "Revisao";
+    verificationResult?: {
+        criterion: string;
+        status: "Aprovado" | "Não Encontrado" | "Reprovado";
+        citation: string;
+    }[] | undefined;
 }, {
     editalId: string;
     oscId: string;
@@ -349,7 +367,97 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
     badges?: string[] | undefined;
     actionPlan?: string[] | undefined;
     actionState?: "Aprovado" | "Pendente" | "Rejeitado" | "Revisao" | undefined;
+    verificationResult?: {
+        criterion: string;
+        status: "Aprovado" | "Não Encontrado" | "Reprovado";
+        citation: string;
+    }[] | undefined;
 }>, z.ZodTypeAny, any, z.ZodTypeAny>;
+export declare const verificationAgentFlow: import("genkit").Action<z.ZodObject<{
+    osc: z.ZodObject<{
+        name: z.ZodString;
+        cnpj: z.ZodOptional<z.ZodString>;
+        mission: z.ZodOptional<z.ZodString>;
+        boardValidity: z.ZodOptional<z.ZodString>;
+        foundationDate: z.ZodString;
+        location: z.ZodString;
+        documentationStatus: z.ZodEnum<["Em dia", "Pendente", "Irregular"]>;
+        previousProjectsApproved: z.ZodBoolean;
+        coreActivities: z.ZodArray<z.ZodString, "many">;
+        embedding: z.ZodOptional<z.ZodAny>;
+    }, "strip", z.ZodTypeAny, {
+        name: string;
+        cnpj?: string | undefined;
+        mission?: string | undefined;
+        boardValidity?: string | undefined;
+        foundationDate: string;
+        location: string;
+        documentationStatus: "Em dia" | "Irregular" | "Pendente";
+        previousProjectsApproved: boolean;
+        coreActivities: string[];
+        embedding?: any;
+    }, {
+        name: string;
+        cnpj?: string | undefined;
+        mission?: string | undefined;
+        boardValidity?: string | undefined;
+        foundationDate: string;
+        location: string;
+        documentationStatus: "Em dia" | "Irregular" | "Pendente";
+        previousProjectsApproved: boolean;
+        coreActivities: string[];
+        embedding?: any;
+    }>;
+    editalText: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    osc: {
+        name: string;
+        cnpj?: string | undefined;
+        mission?: string | undefined;
+        boardValidity?: string | undefined;
+        foundationDate: string;
+        location: string;
+        documentationStatus: "Em dia" | "Irregular" | "Pendente";
+        previousProjectsApproved: boolean;
+        coreActivities: string[];
+        embedding?: any;
+    };
+    editalText: string;
+}, {
+    osc: {
+        name: string;
+        cnpj?: string | undefined;
+        mission?: string | undefined;
+        boardValidity?: string | undefined;
+        foundationDate: string;
+        location: string;
+        documentationStatus: "Em dia" | "Irregular" | "Pendente";
+        previousProjectsApproved: boolean;
+        coreActivities: string[];
+        embedding?: any;
+    };
+    editalText: string;
+}>, z.ZodArray<z.ZodObject<{
+    criterion: z.ZodString;
+    status: z.ZodEnum<["Aprovado", "Reprovado", "Não Encontrado"]>;
+    citation: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    criterion: string;
+    status: "Aprovado" | "Não Encontrado" | "Reprovado";
+    citation: string;
+}, {
+    criterion: string;
+    status: "Aprovado" | "Não Encontrado" | "Reprovado";
+    citation: string;
+}>, "many">, z.ZodTypeAny, any, z.ZodTypeAny>;
+export declare const verifyMatchConstraints: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+    verificationResult: {
+        criterion: string;
+        status: "Aprovado" | "Não Encontrado" | "Reprovado";
+        citation: string;
+    }[];
+}>, unknown>;
 export declare const parsePdfProfileWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
 export declare const parsePdfProfileFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     trackingId: string;
