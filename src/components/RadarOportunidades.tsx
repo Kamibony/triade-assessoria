@@ -10,69 +10,45 @@ interface RadarOportunidadesProps {
   onDrillDown: (type: 'osc' | 'edital', id: string) => void;
 }
 
-export function RadarOportunidades({ matches, oscs, editais, onDrillDown }: RadarOportunidadesProps) {
-  // Filter out globally rejected matches and matches from inactive editais
-  const radarMatches = matches.filter(m => {
-      const edital = editais[m.editalId] as any;
-      const isEditalActive = edital?.ativo !== false;
-      return m.actionState !== 'Rejeitado' && isEditalActive;
-  });
-
-  // 1. Ranking de OSCs (Hot Leads) - matches > 80 score
-  const validOscMatches = radarMatches.filter(m => m.matchScore >= 80 && m.eligibility !== false);
-  const oscCountMap: Record<string, number> = {};
-  validOscMatches.forEach(m => {
-    oscCountMap[m.oscId] = (oscCountMap[m.oscId] || 0) + 1;
-  });
-  const hotLeads = Object.entries(oscCountMap)
-    .sort((a, b) => b[1] - a[1])
+export function RadarOportunidades({ matches, oscs, editais, onDrillDown, globalStats }: RadarOportunidadesProps & { globalStats?: any }) {
+    // 1. Ranking de OSCs (Hot Leads)
+  const hotLeadsMap = globalStats?.hotLeadsMap || {};
+  const hotLeads = Object.entries(hotLeadsMap)
+    .sort((a: any, b: any) => b[1] - a[1])
     .slice(0, 10)
     .map(([oscId, count]) => ({
       oscId,
-      name: oscs[oscId]?.name || radarMatches.find(m => m.oscId === oscId)?.oscName || oscId,
-      count
+      name: oscs[oscId]?.name || oscId,
+      count: count as number
     }));
 
   // 2. Ranking de Editais (Top Grants)
-  const validEditalMatches = radarMatches.filter(m => m.eligibility !== false);
-  const editalCountMap: Record<string, number> = {};
-  validEditalMatches.forEach(m => {
-    editalCountMap[m.editalId] = (editalCountMap[m.editalId] || 0) + 1;
-  });
+  const editalCountMap = globalStats?.editalCountMap || {};
   const topGrants = Object.entries(editalCountMap)
-    .sort((a, b) => b[1] - a[1])
+    .sort((a: any, b: any) => b[1] - a[1])
     .slice(0, 10)
     .map(([editalId, count]) => ({
       editalId,
       title: editais[editalId]?.title || 'Edital Desconhecido',
-      count
+      count: count as number
     }));
 
   // 3. Funil de Conversão
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
-      // Simulate loading for the radar dashboard to demonstrate the skeleton
-      // In a real scenario, this would be tied to actual data fetching states
       const timer = setTimeout(() => setLoading(false), 500);
       return () => clearTimeout(timer);
   }, [matches, oscs, editais]);
 
-  const totalMatches = radarMatches.length;
-  const aiApproved = radarMatches.filter(m => m.eligibility === true).length;
-  const manuallyApproved = radarMatches.filter(m => m.actionState === 'Aprovado').length;
+  const totalMatches = globalStats?.total || 0;
+  const aiApproved = globalStats?.aiApproved || 0;
+  const manuallyApproved = globalStats?.manuallyApproved || 0;
 
   // 4. Nuvem de Insights (Tags)
-  const tagCountMap: Record<string, number> = {};
-  radarMatches.filter(m => m.eligibility === true).forEach(m => {
-    if (m.badges && Array.isArray(m.badges)) {
-      m.badges.forEach(badge => {
-        tagCountMap[badge] = (tagCountMap[badge] || 0) + 1;
-      });
-    }
-  });
+  const tagCountMap = globalStats?.tagCountMap || {};
   const topTags = Object.entries(tagCountMap)
-    .sort((a, b) => b[1] - a[1])
+    .sort((a: any, b: any) => b[1] - a[1])
     .slice(0, 15);
 
   if (loading) {
@@ -225,7 +201,7 @@ export function RadarOportunidades({ matches, oscs, editais, onDrillDown }: Rada
              <div className="flex flex-wrap gap-2">
                {topTags.length > 0 ? topTags.map(([tag, count]) => (
                  <span key={tag} className="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium bg-secondary text-secondary-foreground border">
-                   {tag} <span className="ml-2 text-xs opacity-70">({count})</span>
+                   {tag} <span className="ml-2 text-xs opacity-70">({count as number})</span>
                  </span>
                )) : (
                  <p className="text-sm text-muted-foreground italic">Nenhuma tag gerada pela IA disponível.</p>
