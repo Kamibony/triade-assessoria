@@ -406,7 +406,7 @@ export function MatchesDashboard() {
                />
 
                <MatchesTable
-                   matches={filteredMatches}
+                   matches={filteredMatches.slice(0, matchLimit)}
                    editais={editais}
                    oscs={oscs}
                    groupBy={groupBy}
@@ -430,6 +430,17 @@ export function MatchesDashboard() {
            </>
        ) : (
            <RadarOportunidades matches={filteredMatches} oscs={oscs} editais={editais} onDrillDown={handleDrillDown} globalStats={globalStats} />
+       )}
+
+       {matches.length >= matchLimit && (
+           <div className="flex justify-center mt-6">
+               <button
+                   onClick={() => setMatchLimit(prev => prev + 100)}
+                   className="px-6 py-2 bg-secondary text-secondary-foreground rounded-md text-sm font-medium hover:bg-secondary/80 transition-colors"
+               >
+                   Carregar Mais
+               </button>
+           </div>
        )}
 
        {selectedDrillDown && (
