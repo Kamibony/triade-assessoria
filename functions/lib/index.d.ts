@@ -526,16 +526,7 @@ export declare const manualTriggerRssSyncFunction: import("firebase-functions/v2
     message: string;
 }>, unknown>;
 export declare const scheduledMatchSweeper: import("firebase-functions/v2/scheduler").ScheduleFunction;
-export declare const computeDashboardStats: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
-    total: number;
-    aiApproved: number;
-    manuallyApproved: number;
-    pendentes: number;
-    reprovados: number;
-    hotLeadsMap: Record<string, number>;
-    editalCountMap: Record<string, number>;
-    tagCountMap: Record<string, number>;
-}>, unknown>;
+export declare const recalculateDashboardStats: import("firebase-functions/v2/https").HttpsFunction;
 export declare const onMatchGenerated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").Change<import("firebase-functions/v2/firestore").DocumentSnapshot> | undefined, {
     matchId: string;
 }>>;

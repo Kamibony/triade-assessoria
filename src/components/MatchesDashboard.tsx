@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { collection, query, getDocs, getFirestore, updateDoc, doc, where, orderBy, limit, startAfter, onSnapshot } from 'firebase/firestore';
 import type { QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
-import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Activity, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { MatchResult, Edital, NgoProfile } from '../lib/types';
@@ -38,17 +37,20 @@ export function MatchesDashboard() {
   const [matchLimit, setMatchLimit] = useState<number>(50);
 
   useEffect(() => {
-    const fetchGlobalStats = async () => {
-      try {
-        const functions = getFunctions();
-        const computeDashboardStats = httpsCallable(functions, 'computeDashboardStats');
-        const result = await computeDashboardStats();
-        setGlobalStats(result.data);
-      } catch (error) {
-        console.error("Error fetching global stats:", error);
+    const db = getFirestore();
+    const statsDocRef = doc(db, 'system_metadata', 'dashboard_stats');
+
+    const unsubscribeStats = onSnapshot(statsDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setGlobalStats(docSnap.data());
+      } else {
+        setGlobalStats(null);
       }
-    };
-    fetchGlobalStats();
+    }, (error) => {
+      console.error("Error fetching global stats:", error);
+    });
+
+    return () => unsubscribeStats();
   }, []);
 
   useEffect(() => {

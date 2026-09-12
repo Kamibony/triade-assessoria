@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cronDeactivateExpiredEditais = exports.scheduledIngestionTimeoutSweeper = exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.computeDashboardStats = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.triggerBulkInternalMatch = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.runVectorMigration = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
+exports.cronDeactivateExpiredEditais = exports.scheduledIngestionTimeoutSweeper = exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.recalculateDashboardStats = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.triggerBulkInternalMatch = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.runVectorMigration = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
 exports.formatGenkitError = formatGenkitError;
 exports.fetchAndExtractText = fetchAndExtractText;
 exports.enqueueEditalExtraction = enqueueEditalExtraction;
@@ -2738,12 +2738,12 @@ exports.scheduledMatchSweeper = (0, scheduler_1.onSchedule)('0 0 * * 0', async (
     console.log(`Weekly sweeper complete. Enqueued ${enqueuedCount} missing matches.`);
 });
 const notifications_js_1 = require("./services/notifications.js");
-exports.computeDashboardStats = (0, https_1.onCall)({
+exports.recalculateDashboardStats = (0, https_2.onRequest)({
     cors: true,
     invoker: 'public',
-    timeoutSeconds: 300,
-    memory: '512MiB',
-}, async (request) => {
+    timeoutSeconds: 540,
+    memory: '1GiB',
+}, async (req, res) => {
     const db = (0, firestore_1.getFirestore)();
     try {
         const matchesSnapshot = await db.collection('matches').get();
@@ -2770,11 +2770,23 @@ exports.computeDashboardStats = (0, https_1.onCall)({
                 });
             }
         });
-        return { total, aiApproved, manuallyApproved, pendentes, reprovados, hotLeadsMap, editalCountMap, tagCountMap };
+        const stats = {
+            total,
+            aiApproved,
+            manuallyApproved,
+            pendentes,
+            reprovados,
+            hotLeadsMap,
+            editalCountMap,
+            tagCountMap,
+            updatedAt: firestore_1.FieldValue.serverTimestamp()
+        };
+        await db.collection('system_metadata').doc('dashboard_stats').set(stats);
+        res.status(200).json({ success: true, message: "Dashboard stats recalculated successfully", stats });
     }
     catch (error) {
         console.error("Error computing dashboard stats", error);
-        throw new https_1.HttpsError("internal", "Failed to compute stats");
+        res.status(500).json({ success: false, error: "Failed to compute stats" });
     }
 });
 exports.onMatchGenerated = (0, firestore_2.onDocumentWritten)('matches/{matchId}', async (event) => {
