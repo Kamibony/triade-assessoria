@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { collection, query, getDocs, getFirestore, updateDoc, doc, where, orderBy, limit, startAfter, onSnapshot } from 'firebase/firestore';
+import type { QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Activity, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -30,9 +31,11 @@ export function MatchesDashboard() {
   const [selectedDrillDown, setSelectedDrillDown] = useState<{ type: 'osc' | 'edital', id: string } | null>(null);
 
   const [activeJob, setActiveJob] = useState<any>(null);
-  const [lastVisible, setLastVisible] = useState<any>(null);
+  const [lastVisible, setLastVisible] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [globalStats, setGlobalStats] = useState<any>(null);
+  const [matchLimit, setMatchLimit] = useState<number>(50);
 
   useEffect(() => {
     const fetchGlobalStats = async () => {
@@ -73,6 +76,10 @@ export function MatchesDashboard() {
   }, []);
 
   const fetchMatches = async (isLoadMore = false) => {
+      if (isLoadMore) {
+          setIsLoadingMore(true);
+      }
+
       const db = getFirestore();
       let q = query(collection(db, 'matches'), orderBy('matchScore', 'desc'), limit(50));
 
@@ -85,6 +92,7 @@ export function MatchesDashboard() {
       if (snapshot.empty) {
           setHasMore(false);
           if (!isLoadMore) setLoading(false);
+          if (isLoadMore) setIsLoadingMore(false);
           return;
       }
 
@@ -150,6 +158,9 @@ export function MatchesDashboard() {
       }
 
       setLoading(false);
+      if (isLoadMore) {
+          setIsLoadingMore(false);
+      }
   };
 
   useEffect(() => {
@@ -421,9 +432,10 @@ export function MatchesDashboard() {
                    <div className="flex justify-center mt-6">
                        <button
                            onClick={handleLoadMore}
-                           className="px-6 py-2 bg-secondary text-secondary-foreground rounded-md text-sm font-medium hover:bg-secondary/80 transition-colors"
+                           disabled={isLoadingMore}
+                           className="px-6 py-2 bg-secondary text-secondary-foreground rounded-md text-sm font-medium hover:bg-secondary/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                        >
-                           Carregar Mais
+                           {isLoadingMore ? 'Carregando...' : 'Carregar Mais'}
                        </button>
                    </div>
                )}
@@ -435,7 +447,7 @@ export function MatchesDashboard() {
        {matches.length >= matchLimit && (
            <div className="flex justify-center mt-6">
                <button
-                   onClick={() => setMatchLimit(prev => prev + 100)}
+                   onClick={() => setMatchLimit((prev: number) => prev + 50)}
                    className="px-6 py-2 bg-secondary text-secondary-foreground rounded-md text-sm font-medium hover:bg-secondary/80 transition-colors"
                >
                    Carregar Mais
