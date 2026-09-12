@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cronDeactivateExpiredEditais = exports.scheduledIngestionTimeoutSweeper = exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.triggerBulkInternalMatch = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.runVectorMigration = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
+exports.cronDeactivateExpiredEditais = exports.scheduledIngestionTimeoutSweeper = exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.computeDashboardStats = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.triggerBulkInternalMatch = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.runVectorMigration = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
 exports.formatGenkitError = formatGenkitError;
 exports.fetchAndExtractText = fetchAndExtractText;
 exports.enqueueEditalExtraction = enqueueEditalExtraction;
@@ -2738,6 +2738,45 @@ exports.scheduledMatchSweeper = (0, scheduler_1.onSchedule)('0 0 * * 0', async (
     console.log(`Weekly sweeper complete. Enqueued ${enqueuedCount} missing matches.`);
 });
 const notifications_js_1 = require("./services/notifications.js");
+exports.computeDashboardStats = (0, https_1.onCall)({
+    cors: true,
+    invoker: 'public',
+    timeoutSeconds: 300,
+    memory: '512MiB',
+}, async (request) => {
+    const db = (0, firestore_1.getFirestore)();
+    try {
+        const matchesSnapshot = await db.collection('matches').get();
+        const matches = matchesSnapshot.docs.map(d => d.data());
+        const total = matches.length;
+        const aiApproved = matches.filter(m => m.eligibility === true).length;
+        const manuallyApproved = matches.filter(m => m.actionState === 'Aprovado').length;
+        const pendentes = matches.filter(m => (!m.actionState && m.eligibility !== false) || m.actionState === 'Pendente').length;
+        const reprovados = matches.filter(m => m.actionState === 'Rejeitado' || (!m.actionState && m.eligibility === false)).length;
+        const hotLeadsMap = {};
+        matches.filter(m => m.matchScore >= 80).forEach(m => {
+            hotLeadsMap[m.oscId] = (hotLeadsMap[m.oscId] || 0) + 1;
+        });
+        const validEditalMatches = matches.filter(m => m.eligibility !== false);
+        const editalCountMap = {};
+        validEditalMatches.forEach(m => {
+            editalCountMap[m.editalId] = (editalCountMap[m.editalId] || 0) + 1;
+        });
+        const tagCountMap = {};
+        matches.filter(m => m.eligibility === true).forEach(m => {
+            if (m.badges && Array.isArray(m.badges)) {
+                m.badges.forEach((badge) => {
+                    tagCountMap[badge] = (tagCountMap[badge] || 0) + 1;
+                });
+            }
+        });
+        return { total, aiApproved, manuallyApproved, pendentes, reprovados, hotLeadsMap, editalCountMap, tagCountMap };
+    }
+    catch (error) {
+        console.error("Error computing dashboard stats", error);
+        throw new https_1.HttpsError("internal", "Failed to compute stats");
+    }
+});
 exports.onMatchGenerated = (0, firestore_2.onDocumentWritten)('matches/{matchId}', async (event) => {
     const MATCH_THRESHOLD = 85;
     const beforeData = event.data?.before.data();

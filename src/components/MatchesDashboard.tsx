@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { collection, query, onSnapshot, getDocs, getFirestore, updateDoc, doc, where, orderBy } from 'firebase/firestore';
+import { collection, query, getDocs, getFirestore, updateDoc, doc, where, orderBy, limit, startAfter, onSnapshot } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Activity, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { MatchResult, Edital, NgoProfile } from '../lib/types';
@@ -29,7 +30,23 @@ export function MatchesDashboard() {
   const [selectedDrillDown, setSelectedDrillDown] = useState<{ type: 'osc' | 'edital', id: string } | null>(null);
 
   const [activeJob, setActiveJob] = useState<any>(null);
-  const [matchLimit, setMatchLimit] = useState(100);
+  const [lastVisible, setLastVisible] = useState<any>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [globalStats, setGlobalStats] = useState<any>(null);
+
+  useEffect(() => {
+    const fetchGlobalStats = async () => {
+      try {
+        const functions = getFunctions();
+        const computeDashboardStats = httpsCallable(functions, 'computeDashboardStats');
+        const result = await computeDashboardStats();
+        setGlobalStats(result.data);
+      } catch (error) {
+        console.error("Error fetching global stats:", error);
+      }
+    };
+    fetchGlobalStats();
+  }, []);
 
   useEffect(() => {
     const db = getFirestore();
@@ -55,18 +72,36 @@ export function MatchesDashboard() {
     return () => unsubscribeJob();
   }, []);
 
-  useEffect(() => {
-    const db = getFirestore();
-    const q = query(collection(db, 'matches'), orderBy('matchScore', 'desc'));
+  const fetchMatches = async (isLoadMore = false) => {
+      const db = getFirestore();
+      let q = query(collection(db, 'matches'), orderBy('matchScore', 'desc'), limit(50));
 
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const matchesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MatchResult));
+      if (isLoadMore && lastVisible) {
+          q = query(collection(db, 'matches'), orderBy('matchScore', 'desc'), startAfter(lastVisible), limit(50));
+      }
 
-      // Default Sort by Match Score Descending
-      matchesData.sort((a, b) => b.matchScore - a.matchScore);
+      const snapshot = await getDocs(q);
 
-      // Optimistically set matches first
-      setMatches(matchesData);
+      if (snapshot.empty) {
+          setHasMore(false);
+          if (!isLoadMore) setLoading(false);
+          return;
+      }
+
+      const lastDoc = snapshot.docs[snapshot.docs.length - 1];
+      setLastVisible(lastDoc);
+      setHasMore(snapshot.docs.length === 50);
+
+      const newMatches = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MatchResult));
+
+      setMatches(prev => {
+          const current = isLoadMore ? prev : [];
+          const existingIds = new Set(current.map(m => m.id));
+          const uniqueNew = newMatches.filter(m => !existingIds.has(m.id));
+          return [...current, ...uniqueNew];
+      });
+
+      const matchesData = newMatches;
 
       const { documentId, where } = await import("firebase/firestore");
 
@@ -115,10 +150,15 @@ export function MatchesDashboard() {
       }
 
       setLoading(false);
-    });
+  };
 
-    return () => unsubscribe();
-  }, [matchLimit]);
+  useEffect(() => {
+      fetchMatches();
+  }, []);
+
+  const handleLoadMore = () => {
+      fetchMatches(true);
+  };
 
   const handleGlobalInvalidate = async (editalId: string) => {
       const relatedMatches = matches.filter(m => m.editalId === editalId);
@@ -304,7 +344,7 @@ export function MatchesDashboard() {
              onClick={() => { setViewMode('table'); setStatusFilter('all'); }}
            >
                <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Total Matches</p>
-               <p className="text-3xl font-bold mt-1">{matches.length}</p>
+               <p className="text-3xl font-bold mt-1">{globalStats?.total || 0}</p>
            </div>
            <div
              className={`bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center cursor-pointer transition-colors ${statusFilter === 'Pendente' ? 'ring-2 ring-amber-500 bg-amber-500/5' : 'hover:bg-muted/50'}`}
@@ -312,7 +352,7 @@ export function MatchesDashboard() {
            >
                <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Pendentes</p>
                <p className="text-3xl font-bold mt-1 text-amber-500">
-                   {matches.filter(m => (!m.actionState && m.eligibility !== false) || m.actionState === 'Pendente').length}
+                   {globalStats?.pendentes || 0}
                </p>
            </div>
            <div
@@ -321,7 +361,7 @@ export function MatchesDashboard() {
            >
                <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Aprovados</p>
                <p className="text-3xl font-bold mt-1 text-emerald-500">
-                   {matches.filter(m => m.actionState === 'Aprovado').length}
+                   {globalStats?.manuallyApproved || 0}
                </p>
            </div>
            <div
@@ -330,7 +370,7 @@ export function MatchesDashboard() {
            >
                <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Reprovados</p>
                <p className="text-3xl font-bold mt-1 text-red-500">
-                   {matches.filter(m => m.actionState === 'Rejeitado' || (!m.actionState && m.eligibility === false)).length}
+                   {globalStats?.reprovados || 0}
                </p>
            </div>
        </div>
@@ -377,10 +417,10 @@ export function MatchesDashboard() {
                    handleGlobalInvalidate={handleGlobalInvalidate}
                />
 
-               {filteredMatches.length > matchLimit && (
+               {hasMore && (
                    <div className="flex justify-center mt-6">
                        <button
-                           onClick={() => setMatchLimit(prev => prev + 100)}
+                           onClick={handleLoadMore}
                            className="px-6 py-2 bg-secondary text-secondary-foreground rounded-md text-sm font-medium hover:bg-secondary/80 transition-colors"
                        >
                            Carregar Mais
@@ -389,7 +429,7 @@ export function MatchesDashboard() {
                )}
            </>
        ) : (
-           <RadarOportunidades matches={filteredMatches} oscs={oscs} editais={editais} onDrillDown={handleDrillDown} />
+           <RadarOportunidades matches={filteredMatches} oscs={oscs} editais={editais} onDrillDown={handleDrillDown} globalStats={globalStats} />
        )}
 
        {matches.length >= matchLimit && (
