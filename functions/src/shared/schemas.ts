@@ -35,6 +35,12 @@ export const bureaucracySchema = z.object({
     rejectionReason: z.string().nullable().optional().describe("Se rejeitada, o motivo claro. Se aprovada, null.")
 });
 
+export const verificationResultSchema = z.array(z.object({
+    criterion: z.string().describe("O critério avaliado (ex: Geografia, Prazo, Idade da ONG, Documentação)"),
+    status: z.enum(['Aprovado', 'Reprovado', 'Não Encontrado']).describe("Status da avaliação do critério"),
+    citation: z.string().describe("Citação exata do edital que justifica o status ou 'Não Encontrado'")
+})).describe("Resultado da verificação do advogado do diabo");
+
 export const matchSchema = z.object({
     editalId: z.string().describe("ID do edital analisado"),
     oscId: z.string().describe("ID da ONG analisada"),
@@ -45,7 +51,8 @@ export const matchSchema = z.object({
     aiSummary: z.string().optional().describe("Um resumo conciso de 1-2 frases sobre a compatibilidade"),
     badges: z.array(z.string()).optional().describe("Lista de tags ou selos (ex: 'Alto Alinhamento', 'Prazo Curto', 'Regional')"),
     actionPlan: z.array(z.string()).optional().describe("Plano de Ação sugerido caso a ONG não seja elegível ou tenha score baixo (opcional/pular para poupar tokens se inelegível claro)"),
-    actionState: z.enum(['Pendente', 'Aprovado', 'Rejeitado', 'Revisao']).optional().default('Pendente').describe("Estado de feedback humano sobre o match")
+    actionState: z.enum(['Pendente', 'Aprovado', 'Rejeitado', 'Revisao']).optional().default('Pendente').describe("Estado de feedback humano sobre o match"),
+    verificationResult: verificationResultSchema.optional()
 });
 
 export const triageSchema = z.object({

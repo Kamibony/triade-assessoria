@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scrapingTargetSchema = exports.copilotResponseSchema = exports.triageSchema = exports.matchSchema = exports.bureaucracySchema = exports.editalSchema = exports.ngoProfileSchema = void 0;
+exports.scrapingTargetSchema = exports.copilotResponseSchema = exports.triageSchema = exports.matchSchema = exports.verificationResultSchema = exports.bureaucracySchema = exports.editalSchema = exports.ngoProfileSchema = void 0;
 const zod_1 = require("zod");
 exports.ngoProfileSchema = zod_1.z.object({
     name: zod_1.z.string().describe("Nome da ONG"),
@@ -34,6 +34,11 @@ exports.bureaucracySchema = zod_1.z.object({
     passesBureaucracy: zod_1.z.boolean().describe("Se a ONG passa nas regras burocráticas (tempo, localização, documentos, prazo)"),
     rejectionReason: zod_1.z.string().nullable().optional().describe("Se rejeitada, o motivo claro. Se aprovada, null.")
 });
+exports.verificationResultSchema = zod_1.z.array(zod_1.z.object({
+    criterion: zod_1.z.string().describe("O critério avaliado (ex: Geografia, Prazo, Idade da ONG, Documentação)"),
+    status: zod_1.z.enum(['Aprovado', 'Reprovado', 'Não Encontrado']).describe("Status da avaliação do critério"),
+    citation: zod_1.z.string().describe("Citação exata do edital que justifica o status ou 'Não Encontrado'")
+})).describe("Resultado da verificação do advogado do diabo");
 exports.matchSchema = zod_1.z.object({
     editalId: zod_1.z.string().describe("ID do edital analisado"),
     oscId: zod_1.z.string().describe("ID da ONG analisada"),
@@ -44,7 +49,8 @@ exports.matchSchema = zod_1.z.object({
     aiSummary: zod_1.z.string().optional().describe("Um resumo conciso de 1-2 frases sobre a compatibilidade"),
     badges: zod_1.z.array(zod_1.z.string()).optional().describe("Lista de tags ou selos (ex: 'Alto Alinhamento', 'Prazo Curto', 'Regional')"),
     actionPlan: zod_1.z.array(zod_1.z.string()).optional().describe("Plano de Ação sugerido caso a ONG não seja elegível ou tenha score baixo (opcional/pular para poupar tokens se inelegível claro)"),
-    actionState: zod_1.z.enum(['Pendente', 'Aprovado', 'Rejeitado', 'Revisao']).optional().default('Pendente').describe("Estado de feedback humano sobre o match")
+    actionState: zod_1.z.enum(['Pendente', 'Aprovado', 'Rejeitado', 'Revisao']).optional().default('Pendente').describe("Estado de feedback humano sobre o match"),
+    verificationResult: exports.verificationResultSchema.optional()
 });
 exports.triageSchema = zod_1.z.object({
     isValidEdital: zod_1.z.boolean().describe("True se a página contiver as regras de um edital ou for o documento oficial do edital. False se for apenas uma notícia SOBRE o edital.")

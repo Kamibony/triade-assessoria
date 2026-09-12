@@ -9,4 +9,9 @@ export type MatchResult = z.infer<typeof matchSchema> & {
     id?: string;
     sourceUrl?: string;
     createdAt?: { toMillis?: () => number; seconds?: number; nanoseconds?: number; };
+    verificationResult?: {
+        criterion: string;
+        status: 'Aprovado' | 'Reprovado' | 'Não Encontrado';
+        citation: string;
+    }[];
 };
