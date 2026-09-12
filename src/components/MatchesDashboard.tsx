@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, query, onSnapshot, getDocs, getFirestore, updateDoc, doc, where } from 'firebase/firestore';
+import { collection, query, onSnapshot, getDocs, getFirestore, updateDoc, doc, where, limit, orderBy } from 'firebase/firestore';
 import { Activity, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { MatchResult, Edital, NgoProfile } from '../lib/types';
@@ -29,6 +29,7 @@ export function MatchesDashboard() {
   const [selectedDrillDown, setSelectedDrillDown] = useState<{ type: 'osc' | 'edital', id: string } | null>(null);
 
   const [activeJob, setActiveJob] = useState<any>(null);
+  const [matchLimit, setMatchLimit] = useState(100);
 
   useEffect(() => {
     const db = getFirestore();
@@ -56,7 +57,7 @@ export function MatchesDashboard() {
 
   useEffect(() => {
     const db = getFirestore();
-    const q = query(collection(db, 'matches'));
+    const q = query(collection(db, 'matches'), orderBy('matchScore', 'desc'), limit(matchLimit));
 
     const unsubscribe = onSnapshot(q, async (snapshot) => {
       const matchesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MatchResult));
@@ -117,7 +118,7 @@ export function MatchesDashboard() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [matchLimit]);
 
   const handleGlobalInvalidate = async (editalId: string) => {
       const relatedMatches = matches.filter(m => m.editalId === editalId);
@@ -228,7 +229,7 @@ export function MatchesDashboard() {
 
   const filteredMatches = matches.filter(match => {
       // Exclude globally inactive editais
-      const isEditalActive = (editais[match.editalId] as any)?.ativo !== false;
+      const isEditalActive = editais[match.editalId]?.ativo !== false;
       if (!isEditalActive) return false;
 
       const matchesSearch =
@@ -378,6 +379,17 @@ export function MatchesDashboard() {
            </>
        ) : (
            <RadarOportunidades matches={filteredMatches} oscs={oscs} editais={editais} onDrillDown={handleDrillDown} />
+       )}
+
+       {matches.length >= matchLimit && (
+           <div className="flex justify-center mt-6">
+               <button
+                   onClick={() => setMatchLimit(prev => prev + 100)}
+                   className="px-6 py-2 bg-secondary text-secondary-foreground rounded-md text-sm font-medium hover:bg-secondary/80 transition-colors"
+               >
+                   Carregar Mais
+               </button>
+           </div>
        )}
 
        {selectedDrillDown && (
