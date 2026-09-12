@@ -2003,6 +2003,15 @@ exports.triggerBulkInternalMatch = (0, https_1.onCall)({
             matchesTriggered: matchesTriggered,
             updatedAt: firestore_1.FieldValue.serverTimestamp()
         });
+        // Resolve race condition where evaluations finish before job dispatch is complete
+        const finalJobDoc = await jobRef.get();
+        const finalJobData = finalJobDoc.data();
+        if (finalJobData && finalJobData.matchesEvaluated >= matchesTriggered) {
+            await jobRef.update({
+                evaluationsCompleted: true,
+                updatedAt: firestore_1.FieldValue.serverTimestamp()
+            });
+        }
         return { success: true, message: `Disparados ${matchesTriggered} matches internos para o lote ${importBatchId}.` };
     }
     catch (error) {
