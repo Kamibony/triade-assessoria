@@ -3071,12 +3071,12 @@ export const scheduledMatchSweeper = onSchedule('0 0 * * 0', async () => {
 
 import { NotificationService, MockNotificationProvider } from './services/notifications.js';
 
-export const computeDashboardStats = onCall({
+export const recalculateDashboardStats = onRequest({
     cors: true,
     invoker: 'public',
-    timeoutSeconds: 300,
-    memory: '512MiB',
-}, async (request) => {
+    timeoutSeconds: 540,
+    memory: '1GiB',
+}, async (req, res) => {
     const db = getFirestore();
     try {
         const matchesSnapshot = await db.collection('matches').get();
@@ -3108,10 +3108,24 @@ export const computeDashboardStats = onCall({
             }
         });
 
-        return { total, aiApproved, manuallyApproved, pendentes, reprovados, hotLeadsMap, editalCountMap, tagCountMap };
+        const stats = {
+            total,
+            aiApproved,
+            manuallyApproved,
+            pendentes,
+            reprovados,
+            hotLeadsMap,
+            editalCountMap,
+            tagCountMap,
+            updatedAt: FieldValue.serverTimestamp()
+        };
+
+        await db.collection('system_metadata').doc('dashboard_stats').set(stats);
+
+        res.status(200).json({ success: true, message: "Dashboard stats recalculated successfully", stats });
     } catch (error) {
         console.error("Error computing dashboard stats", error);
-        throw new HttpsError("internal", "Failed to compute stats");
+        res.status(500).json({ success: false, error: "Failed to compute stats" });
     }
 });
 
