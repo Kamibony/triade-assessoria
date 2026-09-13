@@ -41,9 +41,9 @@ export function RadarOportunidades({ matches, oscs, editais, onDrillDown, global
       return () => clearTimeout(timer);
   }, [matches, oscs, editais]);
 
-  const totalMatches = globalStats?.total || 0;
-  const aiApproved = globalStats?.aiApproved || 0;
-  const manuallyApproved = globalStats?.manuallyApproved || 0;
+  const totalMatches = globalStats?.total ?? 0;
+  const aiApproved = globalStats?.aiApproved ?? 0;
+  const manuallyApproved = globalStats?.manuallyApproved ?? 0;
 
   // 4. Nuvem de Insights (Tags)
   const tagCountMap = globalStats?.tagCountMap || {};
