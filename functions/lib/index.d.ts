@@ -462,6 +462,16 @@ export declare const verifyMatchConstraints: import("firebase-functions/v2/https
         citation: string;
     }[];
 }>, unknown>;
+export declare const verifyMatchConstraintWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
+export declare const triggerBatchVerification: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+    message: string;
+    jobId: null;
+} | {
+    success: boolean;
+    jobId: string;
+    message: string;
+}>, unknown>;
 export declare const parsePdfProfileWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
 export declare const parsePdfProfileFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     trackingId: string;

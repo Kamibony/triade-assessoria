@@ -419,6 +419,163 @@ export const verifyMatchConstraints = onCall({
 });
 
 
+export const verifyMatchConstraintWorker = onTaskDispatched({
+    retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
+    rateLimits: { maxConcurrentDispatches: 5, maxDispatchesPerSecond: 2 },
+    timeoutSeconds: 300,
+    memory: '2GiB'
+}, async (request) => {
+    const { matchId, jobId } = request.data as { matchId: string, jobId: string };
+    const db = getFirestore();
+    const matchRef = db.collection('matches').doc(matchId);
+    const jobRef = db.collection('system_jobs').doc(jobId);
+
+    try {
+        try {
+            const matchDoc = await matchRef.get();
+            if (!matchDoc.exists) {
+                console.log(`Match ${matchId} não encontrado. Abortando.`);
+                await jobRef.update({ failedTasks: FieldValue.increment(1) });
+                return;
+            }
+
+            const matchData = matchDoc.data()!;
+            if (matchData.verificationResult || matchData.actionState === 'Aprovado' || matchData.actionState === 'Rejeitado') {
+                console.log(`Match ${matchId} já verificado ou resolvido. Pulando.`);
+                await jobRef.update({ completedTasks: FieldValue.increment(1) });
+                return;
+            }
+
+            const oscId = matchData.oscId;
+            const editalId = matchData.editalId;
+
+            const oscDoc = await db.collection('oscs').doc(oscId).get();
+            const editalDoc = await db.collection('editais').doc(editalId).get();
+
+            if (!oscDoc.exists || !editalDoc.exists) {
+                console.log(`OSC ou Edital não encontrado para match ${matchId}.`);
+                await jobRef.update({ failedTasks: FieldValue.increment(1) });
+                return;
+            }
+
+            const oscData = oscDoc.data()!;
+            const editalData = editalDoc.data()!;
+            const rawText = editalData.rawText || '';
+
+            if (!rawText) {
+                console.log(`Texto bruto do edital ausente para match ${matchId}.`);
+                await matchRef.update({ verificationStatus: 'Error', errorReason: 'O texto bruto (rawText) do edital não está disponível para verificação.' });
+                await jobRef.update({ failedTasks: FieldValue.increment(1) });
+                return;
+            }
+
+            const enrichedOscData = {
+                name: oscData.name || 'ONG Desconhecida',
+                foundationDate: oscData.foundationDate || 'Data Desconhecida',
+                location: oscData.location || 'Localização Desconhecida',
+                documentationStatus: oscData.documentationStatus || 'Pendente',
+                previousProjectsApproved: oscData.previousProjectsApproved || false,
+                coreActivities: oscData.coreActivities || [],
+                ...oscData
+            };
+
+            const oscParseResult = ngoProfileSchema.safeParse(enrichedOscData);
+            if (!oscParseResult.success) {
+                console.log(`Dados da OSC inválidos para match ${matchId}.`);
+                await matchRef.update({ verificationStatus: 'Error', errorReason: 'Dados da OSC inválidos para verificação.' });
+                await jobRef.update({ failedTasks: FieldValue.increment(1) });
+                return;
+            }
+
+            const verificationResult = await verificationAgentFlow({
+                 osc: oscParseResult.data,
+                 editalText: rawText
+            });
+
+            await matchRef.update({
+                 verificationResult: verificationResult,
+                 updatedAt: FieldValue.serverTimestamp()
+            });
+
+            await jobRef.update({ completedTasks: FieldValue.increment(1) });
+        } catch (error: any) {
+            console.error(`Erro em verifyMatchConstraintWorker para o match ${matchId}:`, error);
+            await matchRef.update({ verificationStatus: 'Error', errorReason: error?.message || 'AI Execution Failed' });
+            await jobRef.update({ failedTasks: FieldValue.increment(1) });
+        }
+    } finally {
+        try {
+            await db.runTransaction(async (transaction) => {
+                const jobSnap = await transaction.get(jobRef);
+                if (jobSnap.exists) {
+                    const jobData = jobSnap.data()!;
+                    if (jobData.completedTasks + jobData.failedTasks >= jobData.totalTasks && jobData.status !== 'completed') {
+                        transaction.update(jobRef, { status: 'completed', updatedAt: FieldValue.serverTimestamp() });
+                    }
+                }
+            });
+        } catch (txError) {
+            console.error(`Erro ao atualizar status do job ${jobId}:`, txError);
+        }
+    }
+});
+
+
+export const triggerBatchVerification = onCall({
+    cors: true,
+    invoker: 'public',
+}, async (request) => {
+    if (!request.auth) {
+        throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    }
+
+    const { targetId, targetType } = request.data as { targetId?: string, targetType?: 'osc' | 'edital' };
+
+    if (!targetId || !targetType) {
+        throw new HttpsError('invalid-argument', 'targetId e targetType são obrigatórios.');
+    }
+
+    const db = getFirestore();
+    const q = db.collection('matches').where(targetType === 'osc' ? 'oscId' : 'editalId', '==', targetId);
+
+    const matchesSnap = await q.get();
+
+    const pendingMatches = matchesSnap.docs.filter(doc => {
+        const data = doc.data();
+        return data.actionState !== 'Aprovado' && data.actionState !== 'Rejeitado' && !data.verificationResult;
+    });
+
+    if (pendingMatches.length === 0) {
+        return { success: true, message: 'Nenhum match pendente para verificação.', jobId: null };
+    }
+
+    const jobRef = db.collection('system_jobs').doc();
+    const jobId = jobRef.id;
+
+    await jobRef.set({
+        targetId,
+        targetType,
+        type: 'batch_verification',
+        totalTasks: pendingMatches.length,
+        completedTasks: 0,
+        failedTasks: 0,
+        status: 'running',
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp()
+    });
+
+    const queue = getFunctions().taskQueue('verifyMatchConstraintWorker');
+
+    const enqueuePromises = pendingMatches.map(matchDoc =>
+        queue.enqueue({ matchId: matchDoc.id, jobId })
+    );
+
+    await Promise.all(enqueuePromises);
+
+    return { success: true, jobId, message: `${pendingMatches.length} tarefas enfileiradas.` };
+});
+
+
 export const parsePdfProfileWorker = onTaskDispatched({
     retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
     rateLimits: { maxConcurrentDispatches: 2 },

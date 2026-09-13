@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cronDeactivateExpiredEditais = exports.scheduledIngestionTimeoutSweeper = exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.recalculateDashboardStats = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.triggerBulkInternalMatch = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.runVectorMigration = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.verifyMatchConstraints = exports.verificationAgentFlow = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
+exports.cronDeactivateExpiredEditais = exports.scheduledIngestionTimeoutSweeper = exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.recalculateDashboardStats = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.triggerBulkInternalMatch = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.runVectorMigration = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.triggerBatchVerification = exports.verifyMatchConstraintWorker = exports.verifyMatchConstraints = exports.verificationAgentFlow = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
 exports.formatGenkitError = formatGenkitError;
 exports.fetchAndExtractText = fetchAndExtractText;
 exports.enqueueEditalExtraction = enqueueEditalExtraction;
@@ -399,6 +399,136 @@ exports.verifyMatchConstraints = (0, https_1.onCall)({
         console.error(`Erro em verifyMatchConstraints para o match ${matchId}:`, error);
         throw formatGenkitError(error, 'Falha ao executar a verificação do Advogado do Diabo.');
     }
+});
+exports.verifyMatchConstraintWorker = (0, tasks_1.onTaskDispatched)({
+    retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
+    rateLimits: { maxConcurrentDispatches: 5, maxDispatchesPerSecond: 2 },
+    timeoutSeconds: 300,
+    memory: '2GiB'
+}, async (request) => {
+    const { matchId, jobId } = request.data;
+    const db = (0, firestore_1.getFirestore)();
+    const matchRef = db.collection('matches').doc(matchId);
+    const jobRef = db.collection('system_jobs').doc(jobId);
+    try {
+        try {
+            const matchDoc = await matchRef.get();
+            if (!matchDoc.exists) {
+                console.log(`Match ${matchId} não encontrado. Abortando.`);
+                await jobRef.update({ failedTasks: firestore_1.FieldValue.increment(1) });
+                return;
+            }
+            const matchData = matchDoc.data();
+            if (matchData.verificationResult || matchData.actionState === 'Aprovado' || matchData.actionState === 'Rejeitado') {
+                console.log(`Match ${matchId} já verificado ou resolvido. Pulando.`);
+                await jobRef.update({ completedTasks: firestore_1.FieldValue.increment(1) });
+                return;
+            }
+            const oscId = matchData.oscId;
+            const editalId = matchData.editalId;
+            const oscDoc = await db.collection('oscs').doc(oscId).get();
+            const editalDoc = await db.collection('editais').doc(editalId).get();
+            if (!oscDoc.exists || !editalDoc.exists) {
+                console.log(`OSC ou Edital não encontrado para match ${matchId}.`);
+                await jobRef.update({ failedTasks: firestore_1.FieldValue.increment(1) });
+                return;
+            }
+            const oscData = oscDoc.data();
+            const editalData = editalDoc.data();
+            const rawText = editalData.rawText || '';
+            if (!rawText) {
+                console.log(`Texto bruto do edital ausente para match ${matchId}.`);
+                await matchRef.update({ verificationStatus: 'Error', errorReason: 'O texto bruto (rawText) do edital não está disponível para verificação.' });
+                await jobRef.update({ failedTasks: firestore_1.FieldValue.increment(1) });
+                return;
+            }
+            const enrichedOscData = {
+                name: oscData.name || 'ONG Desconhecida',
+                foundationDate: oscData.foundationDate || 'Data Desconhecida',
+                location: oscData.location || 'Localização Desconhecida',
+                documentationStatus: oscData.documentationStatus || 'Pendente',
+                previousProjectsApproved: oscData.previousProjectsApproved || false,
+                coreActivities: oscData.coreActivities || [],
+                ...oscData
+            };
+            const oscParseResult = schemas_js_1.ngoProfileSchema.safeParse(enrichedOscData);
+            if (!oscParseResult.success) {
+                console.log(`Dados da OSC inválidos para match ${matchId}.`);
+                await matchRef.update({ verificationStatus: 'Error', errorReason: 'Dados da OSC inválidos para verificação.' });
+                await jobRef.update({ failedTasks: firestore_1.FieldValue.increment(1) });
+                return;
+            }
+            const verificationResult = await (0, exports.verificationAgentFlow)({
+                osc: oscParseResult.data,
+                editalText: rawText
+            });
+            await matchRef.update({
+                verificationResult: verificationResult,
+                updatedAt: firestore_1.FieldValue.serverTimestamp()
+            });
+            await jobRef.update({ completedTasks: firestore_1.FieldValue.increment(1) });
+        }
+        catch (error) {
+            console.error(`Erro em verifyMatchConstraintWorker para o match ${matchId}:`, error);
+            await matchRef.update({ verificationStatus: 'Error', errorReason: error?.message || 'AI Execution Failed' });
+            await jobRef.update({ failedTasks: firestore_1.FieldValue.increment(1) });
+        }
+    }
+    finally {
+        try {
+            await db.runTransaction(async (transaction) => {
+                const jobSnap = await transaction.get(jobRef);
+                if (jobSnap.exists) {
+                    const jobData = jobSnap.data();
+                    if (jobData.completedTasks + jobData.failedTasks >= jobData.totalTasks && jobData.status !== 'completed') {
+                        transaction.update(jobRef, { status: 'completed', updatedAt: firestore_1.FieldValue.serverTimestamp() });
+                    }
+                }
+            });
+        }
+        catch (txError) {
+            console.error(`Erro ao atualizar status do job ${jobId}:`, txError);
+        }
+    }
+});
+exports.triggerBatchVerification = (0, https_1.onCall)({
+    cors: true,
+    invoker: 'public',
+}, async (request) => {
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'User must be authenticated.');
+    }
+    const { targetId, targetType } = request.data;
+    if (!targetId || !targetType) {
+        throw new https_1.HttpsError('invalid-argument', 'targetId e targetType são obrigatórios.');
+    }
+    const db = (0, firestore_1.getFirestore)();
+    const q = db.collection('matches').where(targetType === 'osc' ? 'oscId' : 'editalId', '==', targetId);
+    const matchesSnap = await q.get();
+    const pendingMatches = matchesSnap.docs.filter(doc => {
+        const data = doc.data();
+        return data.actionState !== 'Aprovado' && data.actionState !== 'Rejeitado' && !data.verificationResult;
+    });
+    if (pendingMatches.length === 0) {
+        return { success: true, message: 'Nenhum match pendente para verificação.', jobId: null };
+    }
+    const jobRef = db.collection('system_jobs').doc();
+    const jobId = jobRef.id;
+    await jobRef.set({
+        targetId,
+        targetType,
+        type: 'batch_verification',
+        totalTasks: pendingMatches.length,
+        completedTasks: 0,
+        failedTasks: 0,
+        status: 'running',
+        createdAt: firestore_1.FieldValue.serverTimestamp(),
+        updatedAt: firestore_1.FieldValue.serverTimestamp()
+    });
+    const queue = (0, functions_1.getFunctions)().taskQueue('verifyMatchConstraintWorker');
+    const enqueuePromises = pendingMatches.map(matchDoc => queue.enqueue({ matchId: matchDoc.id, jobId }));
+    await Promise.all(enqueuePromises);
+    return { success: true, jobId, message: `${pendingMatches.length} tarefas enfileiradas.` };
 });
 exports.parsePdfProfileWorker = (0, tasks_1.onTaskDispatched)({
     retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
