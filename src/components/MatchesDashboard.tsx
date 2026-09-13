@@ -30,6 +30,7 @@ export function MatchesDashboard() {
   const [selectedDrillDown, setSelectedDrillDown] = useState<{ type: 'osc' | 'edital', id: string } | null>(null);
 
   const [activeJob, setActiveJob] = useState<any>(null);
+  const [activeVerificationJob, setActiveVerificationJob] = useState<any>(null);
   const [lastVisible, setLastVisible] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -79,7 +80,29 @@ export function MatchesDashboard() {
       });
     });
 
-    return () => unsubscribeJob();
+    const verifyJobQuery = query(
+      collection(db, 'system_jobs'),
+      where('type', '==', 'batch_verification'),
+      where('status', 'in', ['running', 'completed'])
+    );
+
+    const unsubscribeVerifyJob = onSnapshot(verifyJobQuery, (snapshot) => {
+      const jobs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      jobs.sort((a: any, b: any) => b.createdAt?.toMillis() - a.createdAt?.toMillis());
+      const currentActive = jobs[0];
+
+      setActiveVerificationJob((prev: any) => {
+        if (prev && prev.status !== 'completed' && (currentActive as any)?.status === 'completed') {
+          toast.success('Verificação em lote concluída com sucesso');
+        }
+        return currentActive || null;
+      });
+    });
+
+    return () => {
+      unsubscribeJob();
+      unsubscribeVerifyJob();
+    };
   }, []);
 
   const fetchMatches = async (isLoadMore = false) => {
@@ -187,6 +210,23 @@ export function MatchesDashboard() {
         toast.error('Erro ao atualizar os dados.');
     } finally {
         setIsRefreshingStats(false);
+    }
+  };
+
+  const handleVerifyPending = async () => {
+    if (!filterOscId) {
+      toast.error('A verificação em lote precisa estar filtrada por uma OSC específica no momento.');
+      return;
+    }
+
+    try {
+      const functionsLib = await import('firebase/functions');
+      const triggerBatchVerification = functionsLib.httpsCallable(functionsLib.getFunctions(), 'triggerBatchVerification');
+      toast.success('Iniciando verificação em lote...');
+      await triggerBatchVerification({ targetId: filterOscId, targetType: 'osc' });
+    } catch (error: any) {
+      console.error('Error triggering batch verification:', error);
+      toast.error(`Erro: ${error.message || 'Falha ao iniciar verificação'}`);
     }
   };
 
@@ -361,6 +401,16 @@ export function MatchesDashboard() {
              Atualizar Dados
            </button>
 
+           <button
+             onClick={handleVerifyPending}
+             disabled={!!activeVerificationJob && activeVerificationJob.status !== 'completed'}
+             className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-secondary rounded-md hover:bg-secondary/90 transition-colors disabled:opacity-50"
+             title="Verificar todos os matches pendentes para o filtro atual"
+           >
+             <CheckCircle2 className={`w-4 h-4 ${activeVerificationJob && activeVerificationJob.status !== 'completed' ? 'animate-pulse' : ''}`} />
+             Verificar Pendentes
+           </button>
+
            {activeJob && (
              <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${activeJob.evaluationsCompleted ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
                {activeJob.evaluationsCompleted ? (
@@ -372,6 +422,21 @@ export function MatchesDashboard() {
                  <>
                    <Activity className="w-4 h-4 mr-1.5 animate-pulse" />
                    Processando Avaliações...
+                 </>
+               )}
+             </span>
+           )}
+           {activeVerificationJob && (
+             <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${activeVerificationJob.status === 'completed' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
+               {activeVerificationJob.status === 'completed' ? (
+                 <>
+                   <CheckCircle2 className="w-4 h-4 mr-1.5" />
+                   Verificação Concluída ({activeVerificationJob.completedTasks}/{activeVerificationJob.totalTasks})
+                 </>
+               ) : (
+                 <>
+                   <Activity className="w-4 h-4 mr-1.5 animate-pulse" />
+                   Verificando ({activeVerificationJob.completedTasks + activeVerificationJob.failedTasks}/{activeVerificationJob.totalTasks})...
                  </>
                )}
              </span>
