@@ -450,6 +450,10 @@ export declare const verificationAgentFlow: import("genkit").Action<z.ZodObject<
     status: "Aprovado" | "Não Encontrado" | "Reprovado";
     citation: string;
 }>, "many">, z.ZodTypeAny, any, z.ZodTypeAny>;
+/**
+ * Cloud Function to verify match constraints using an AI agent.
+ * Explicitly exported for Firebase deployment.
+ */
 export declare const verifyMatchConstraints: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
     verificationResult: {
@@ -637,17 +641,6 @@ export declare const scheduledMatchSweeper: import("firebase-functions/v2/schedu
 export declare const recalculateDashboardStats: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
     message: string;
-    stats: {
-        total: number;
-        aiApproved: number;
-        manuallyApproved: number;
-        pendentes: number;
-        reprovados: number;
-        hotLeadsMap: Record<string, number>;
-        editalCountMap: Record<string, number>;
-        tagCountMap: Record<string, number>;
-        updatedAt: FieldValue;
-    };
 }>, unknown>;
 export declare const onMatchGenerated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").Change<import("firebase-functions/v2/firestore").DocumentSnapshot> | undefined, {
     matchId: string;

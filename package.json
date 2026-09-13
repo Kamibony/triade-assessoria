@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "storage:cors": "gsutil cors set storage-cors.json gs://triade-assessoria.firebasestorage.app"
+    "storage:cors": "gsutil cors set storage-cors.json gs://triade-assessoria.firebasestorage.app",
+    "deploy": "npm --prefix functions run build && npx firebase deploy"
   },
   "dependencies": {
     "clsx": "^2.1.1",
