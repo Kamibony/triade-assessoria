@@ -312,7 +312,7 @@ Avalie os seguintes critérios mínimos (você pode adicionar outros se achar re
 Responda APENAS com o JSON no formato definido. Não adicione explicações extras.`;
 
         const response = await ai.generate({
-            model: 'vertexai/gemini-1.5-flash',
+            model: 'vertexai/gemini-2.5-flash',
             messages: [
                 { role: 'system', content: [{ text: prompt }] },
                 { role: 'user', content: [{ text: `Texto completo do edital:\n\n${input.editalText}` }] }
@@ -329,6 +329,10 @@ Responda APENAS com o JSON no formato definido. Não adicione explicações extr
 );
 
 
+/**
+ * Cloud Function to verify match constraints using an AI agent.
+ * Explicitly exported for Firebase deployment.
+ */
 export const verifyMatchConstraints = onCall({
     cors: true,
     timeoutSeconds: 300,
@@ -3263,7 +3267,7 @@ export const recalculateDashboardStats = onCall({
 
         await db.collection('system_metadata').doc('dashboard_stats').set(stats);
 
-        return { success: true, message: 'Dashboard stats recalculated successfully', stats };
+        return { success: true, message: 'Dashboard stats recalculated successfully' };
     } catch (error) {
         console.error("Error computing dashboard stats", error);
         throw new HttpsError('internal', 'Failed to compute stats');
