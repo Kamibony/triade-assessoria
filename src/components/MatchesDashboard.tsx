@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { collection, query, getDocs, getFirestore, updateDoc, doc, where, orderBy, limit, startAfter, onSnapshot } from 'firebase/firestore';
 import type { QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
-import { Activity, CheckCircle2 } from 'lucide-react';
+import { Activity, CheckCircle2, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { MatchResult, Edital, NgoProfile } from '../lib/types';
 import { useSearchParams } from 'react-router-dom';
@@ -34,6 +34,8 @@ export function MatchesDashboard() {
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [globalStats, setGlobalStats] = useState<any>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [isRefreshingStats, setIsRefreshingStats] = useState(false);
   const [matchLimit, setMatchLimit] = useState<number>(50);
 
   useEffect(() => {
@@ -43,11 +45,14 @@ export function MatchesDashboard() {
     const unsubscribeStats = onSnapshot(statsDocRef, (docSnap) => {
       if (docSnap.exists()) {
         setGlobalStats(docSnap.data());
+        setStatsLoading(false);
       } else {
         setGlobalStats(null);
+        setStatsLoading(false);
       }
     }, (error) => {
       console.error("Error fetching global stats:", error);
+      setStatsLoading(false);
     });
 
     return () => unsubscribeStats();
@@ -168,6 +173,22 @@ export function MatchesDashboard() {
   useEffect(() => {
       fetchMatches();
   }, []);
+
+
+  const handleRefreshStats = async () => {
+    setIsRefreshingStats(true);
+    try {
+        const functions = await import('firebase/functions');
+        const func = functions.httpsCallable(functions.getFunctions(), 'recalculateDashboardStats');
+        await func();
+        toast.success('Dados atualizados com sucesso!');
+    } catch (error) {
+        console.error('Erro ao atualizar stats:', error);
+        toast.error('Erro ao atualizar os dados.');
+    } finally {
+        setIsRefreshingStats(false);
+    }
+  };
 
   const handleLoadMore = () => {
       fetchMatches(true);
@@ -328,8 +349,18 @@ export function MatchesDashboard() {
   return (
     <div className="space-y-6">
        <div>
+
          <div className="flex items-center gap-4">
            <h2 className="text-2xl font-bold tracking-tight">Dashboard de Matches (V2)</h2>
+           <button
+             onClick={handleRefreshStats}
+             disabled={isRefreshingStats}
+             className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50"
+           >
+             <RefreshCw className={`w-4 h-4 ${isRefreshingStats ? 'animate-spin' : ''}`} />
+             Atualizar Dados
+           </button>
+
            {activeJob && (
              <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${activeJob.evaluationsCompleted ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
                {activeJob.evaluationsCompleted ? (
@@ -357,7 +388,7 @@ export function MatchesDashboard() {
              onClick={() => { setViewMode('table'); setStatusFilter('all'); }}
            >
                <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Total Matches</p>
-               <p className="text-3xl font-bold mt-1">{globalStats?.total || 0}</p>
+               <p className="text-3xl font-bold mt-1">{statsLoading ? <Skeleton className="h-8 w-16" /> : (globalStats?.total ?? "-")}</p>
            </div>
            <div
              className={`bg-card border rounded-lg p-4 shadow-sm flex flex-col items-center justify-center cursor-pointer transition-colors ${statusFilter === 'Pendente' ? 'ring-2 ring-amber-500 bg-amber-500/5' : 'hover:bg-muted/50'}`}
@@ -365,7 +396,7 @@ export function MatchesDashboard() {
            >
                <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Pendentes</p>
                <p className="text-3xl font-bold mt-1 text-amber-500">
-                   {globalStats?.pendentes || 0}
+                   {statsLoading ? <Skeleton className="h-8 w-16" /> : (globalStats?.pendentes ?? "-")}
                </p>
            </div>
            <div
@@ -374,7 +405,7 @@ export function MatchesDashboard() {
            >
                <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Aprovados</p>
                <p className="text-3xl font-bold mt-1 text-emerald-500">
-                   {globalStats?.manuallyApproved || 0}
+                   {statsLoading ? <Skeleton className="h-8 w-16" /> : (globalStats?.manuallyApproved ?? "-")}
                </p>
            </div>
            <div
@@ -383,7 +414,7 @@ export function MatchesDashboard() {
            >
                <p className="text-sm text-muted-foreground font-medium uppercase tracking-wide">Reprovados</p>
                <p className="text-3xl font-bold mt-1 text-red-500">
-                   {globalStats?.reprovados || 0}
+                   {statsLoading ? <Skeleton className="h-8 w-16" /> : (globalStats?.reprovados ?? "-")}
                </p>
            </div>
        </div>

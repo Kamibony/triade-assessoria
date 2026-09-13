@@ -634,7 +634,9 @@ export declare const manualTriggerRssSyncFunction: import("firebase-functions/v2
     message: string;
 }>, unknown>;
 export declare const scheduledMatchSweeper: import("firebase-functions/v2/scheduler").ScheduleFunction;
-export declare const recalculateDashboardStats: import("firebase-functions/v2/https").HttpsFunction;
+export declare const recalculateDashboardStats: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+}>, unknown>;
 export declare const onMatchGenerated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").Change<import("firebase-functions/v2/firestore").DocumentSnapshot> | undefined, {
     matchId: string;
 }>>;

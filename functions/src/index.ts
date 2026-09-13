@@ -3210,16 +3210,27 @@ export const scheduledMatchSweeper = onSchedule('0 0 * * 0', async () => {
 
 import { NotificationService, MockNotificationProvider } from './services/notifications.js';
 
-export const recalculateDashboardStats = onRequest({
+export const recalculateDashboardStats = onCall({
     cors: true,
     invoker: 'public',
     timeoutSeconds: 540,
     memory: '1GiB',
-}, async (req, res) => {
+}, async (req) => {
+
+
     const db = getFirestore();
     try {
-        const matchesSnapshot = await db.collection('matches').get();
-        const matches = matchesSnapshot.docs.map(d => d.data());
+        // Fetch matches and active editais
+        const [matchesSnapshot, editaisSnapshot] = await Promise.all([
+            db.collection('matches').get(),
+            db.collection('editais').where('ativo', '==', true).get()
+        ]);
+
+        const activeEditalIds = new Set(editaisSnapshot.docs.map(d => d.id));
+        const allMatches = matchesSnapshot.docs.map(d => d.data());
+
+        // Exclude matches associated with inactive editais
+        const matches = allMatches.filter(m => activeEditalIds.has(m.editalId));
 
         const total = matches.length;
         const aiApproved = matches.filter(m => m.eligibility === true).length;
@@ -3228,18 +3239,21 @@ export const recalculateDashboardStats = onRequest({
         const reprovados = matches.filter(m => m.actionState === 'Rejeitado' || (!m.actionState && m.eligibility === false)).length;
 
         const hotLeadsMap: Record<string, number> = {};
-        matches.filter(m => m.matchScore >= 80).forEach(m => {
+        // Explicitly exclude Rejeitado matches
+        matches.filter(m => m.matchScore >= 80 && m.actionState !== 'Rejeitado').forEach(m => {
             hotLeadsMap[m.oscId] = (hotLeadsMap[m.oscId] || 0) + 1;
         });
 
-        const validEditalMatches = matches.filter(m => m.eligibility !== false);
+        // Explicitly exclude Rejeitado matches
+        const validEditalMatches = matches.filter(m => m.eligibility !== false && m.actionState !== 'Rejeitado');
         const editalCountMap: Record<string, number> = {};
         validEditalMatches.forEach(m => {
             editalCountMap[m.editalId] = (editalCountMap[m.editalId] || 0) + 1;
         });
 
         const tagCountMap: Record<string, number> = {};
-        matches.filter(m => m.eligibility === true).forEach(m => {
+        // Explicitly exclude Rejeitado matches
+        matches.filter(m => m.eligibility === true && m.actionState !== 'Rejeitado').forEach(m => {
             if (m.badges && Array.isArray(m.badges)) {
                 m.badges.forEach((badge: string) => {
                     tagCountMap[badge] = (tagCountMap[badge] || 0) + 1;
@@ -3261,10 +3275,10 @@ export const recalculateDashboardStats = onRequest({
 
         await db.collection('system_metadata').doc('dashboard_stats').set(stats);
 
-        res.status(200).json({ success: true, message: "Dashboard stats recalculated successfully", stats });
+        return { success: true };
     } catch (error) {
         console.error("Error computing dashboard stats", error);
-        res.status(500).json({ success: false, error: "Failed to compute stats" });
+        throw new HttpsError('internal', 'Failed to compute stats');
     }
 });
 
