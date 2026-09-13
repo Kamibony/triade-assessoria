@@ -315,7 +315,7 @@ Avalie os seguintes critérios mínimos (você pode adicionar outros se achar re
 
 Responda APENAS com o JSON no formato definido. Não adicione explicações extras.`;
     const response = await ai.generate({
-        model: 'vertexai/gemini-1.5-flash',
+        model: 'vertexai/gemini-2.5-flash',
         messages: [
             { role: 'system', content: [{ text: prompt }] },
             { role: 'user', content: [{ text: `Texto completo do edital:\n\n${input.editalText}` }] }
