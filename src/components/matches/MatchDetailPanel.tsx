@@ -1,11 +1,12 @@
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { FileText, ExternalLink, ShieldAlert, CheckCircle2, XCircle, HelpCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { MatchResult, Edital, NgoProfile } from '../../lib/types';
 import { FeedbackActionBar } from './FeedbackActionBar';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getFirestore, doc, onSnapshot } from 'firebase/firestore';
 import toast from 'react-hot-toast';
 import { Skeleton } from '../ui/Skeleton';
 
@@ -17,17 +18,35 @@ interface MatchDetailPanelProps {
     handleGlobalInvalidate?: (editalId: string) => void;
 }
 
-export function MatchDetailPanel({ match, edital, onFeedback, handleGlobalInvalidate }: MatchDetailPanelProps) {
+export function MatchDetailPanel({ match: initialMatch, edital, onFeedback, handleGlobalInvalidate }: MatchDetailPanelProps) {
     const [isVerifying, setIsVerifying] = useState(false);
+    const [localMatch, setLocalMatch] = useState<MatchResult>(initialMatch);
+
+    useEffect(() => {
+        setLocalMatch(initialMatch);
+
+        if (!initialMatch.id) return;
+
+        const db = getFirestore();
+        const matchRef = doc(db, 'matches', initialMatch.id);
+
+        const unsubscribe = onSnapshot(matchRef, (docSnap) => {
+            if (docSnap.exists()) {
+                setLocalMatch({ id: docSnap.id, ...docSnap.data() } as MatchResult);
+            }
+        });
+
+        return () => unsubscribe();
+    }, [initialMatch.id]);
 
     const handleVerifyClick = async () => {
-        if (!match.id) return;
+        if (!localMatch.id) return;
         setIsVerifying(true);
         const functions = getFunctions();
         const verifyFn = httpsCallable(functions, 'verifyMatchConstraints');
 
         try {
-            await verifyFn({ matchId: match.id });
+            await verifyFn({ matchId: localMatch.id });
             toast.success("Verificação concluída com sucesso!");
         } catch (error: any) {
             console.error("Erro na verificação:", error);
@@ -46,9 +65,9 @@ export function MatchDetailPanel({ match, edital, onFeedback, handleGlobalInvali
                         Justificativa da IA (Explainability)
                     </h4>
                     <div className="text-sm text-foreground/80 leading-relaxed bg-background p-4 rounded-lg border prose prose-sm dark:prose-invert max-w-none">
-                        {match.reasoning ? (
+                        {localMatch.reasoning ? (
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                {match.reasoning}
+                                {localMatch.reasoning}
                             </ReactMarkdown>
                         ) : (
                             <p>Nenhuma justificativa fornecida (geralmente ocorre quando falha no Gate 1).</p>
@@ -56,23 +75,23 @@ export function MatchDetailPanel({ match, edital, onFeedback, handleGlobalInvali
                     </div>
 
                     {/* Simulated Vector Context / Key Terms (Placeholder for future actual XAI data) */}
-                     {match.eligibility && (
+                     {localMatch.eligibility && (
                         <div className="mt-3 text-xs text-muted-foreground flex flex-wrap gap-2">
                              <span className="font-medium text-foreground">Tags (Gate 2):</span>
-                             {match.badges && match.badges.length > 0 ? match.badges.map((badge, i) => (
+                             {localMatch.badges && localMatch.badges.length > 0 ? localMatch.badges.map((badge, i) => (
                                  <span key={i} className="bg-primary/10 text-primary px-2 py-0.5 rounded-full">{badge}</span>
                              )) : <span className="italic">Nenhuma tag gerada.</span>}
                         </div>
                     )}
                 </div>
 
-                {match.actionPlan && match.actionPlan.length > 0 && (
+                {localMatch.actionPlan && localMatch.actionPlan.length > 0 && (
                     <div>
                         <h4 className="font-bold mb-3 text-sm text-destructive flex items-center gap-2">
                             Plano de Ação Sugerido
                         </h4>
                         <ul className="space-y-2">
-                            {match.actionPlan.map((step, idx) => (
+                            {localMatch.actionPlan.map((step, idx) => (
                                 <li key={idx} className="flex gap-3 text-sm items-start bg-destructive/5 p-3 rounded-lg border border-destructive/10">
                                     <span className="font-bold text-destructive min-w-[20px] mt-0.5">{idx + 1}.</span>
                                     <span className="text-foreground/90 leading-relaxed">{step.replace(/^\d+\.\s*/, '')}</span>
@@ -88,7 +107,7 @@ export function MatchDetailPanel({ match, edital, onFeedback, handleGlobalInvali
                             <ShieldAlert className="w-4 h-4 text-orange-500" />
                             Auditoria Restrita (Advogado do Diabo)
                         </h4>
-                        {!match.verificationResult && !isVerifying && (
+                        {!localMatch.verificationResult && !isVerifying && (
                             <button
                                 onClick={handleVerifyClick}
                                 className="text-xs bg-orange-100 text-orange-700 hover:bg-orange-200 px-3 py-1.5 rounded-md font-medium transition-colors"
@@ -104,9 +123,9 @@ export function MatchDetailPanel({ match, edital, onFeedback, handleGlobalInvali
                             <Skeleton className="h-20 w-full" />
                             <Skeleton className="h-20 w-full" />
                         </div>
-                    ) : match.verificationResult ? (
+                    ) : localMatch.verificationResult ? (
                         <div className="space-y-3">
-                            {match.verificationResult.map((result, idx) => (
+                            {localMatch.verificationResult.map((result, idx) => (
                                 <div key={idx} className="bg-background p-3 rounded-md border flex items-start gap-3">
                                     <div className="mt-0.5">
                                         {result.status === 'Aprovado' && <CheckCircle2 className="w-4 h-4 text-green-500" />}
@@ -138,10 +157,10 @@ export function MatchDetailPanel({ match, edital, onFeedback, handleGlobalInvali
                     )}
                 </div>
 
-                 {(match.sourceUrl || (edital as any)?.sourceUrl) && (
+                 {(localMatch.sourceUrl || (edital as any)?.sourceUrl) && (
                     <div className="mt-4">
                         <a
-                            href={match.sourceUrl || (edital as any)?.sourceUrl}
+                            href={localMatch.sourceUrl || (edital as any)?.sourceUrl}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
@@ -159,12 +178,12 @@ export function MatchDetailPanel({ match, edital, onFeedback, handleGlobalInvali
                      <p className="text-xs text-muted-foreground mb-4">
                          Seu feedback calibra a IA (Few-Shot Learning) para futuros matches.
                      </p>
-                     {match.id && (
+                     {localMatch.id && (
                          <FeedbackActionBar
-                             matchId={match.id}
-                             currentState={match.actionState || 'Pendente'}
+                             matchId={localMatch.id}
+                             currentState={localMatch.actionState || 'Pendente'}
                              onFeedback={onFeedback}
-                             editalId={match.editalId}
+                             editalId={localMatch.editalId}
                              handleGlobalInvalidate={handleGlobalInvalidate}
                          />
                      )}
