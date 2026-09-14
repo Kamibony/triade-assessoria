@@ -494,6 +494,7 @@ exports.verifyMatchConstraintWorker = (0, tasks_1.onTaskDispatched)({
 exports.triggerBatchVerification = (0, https_1.onCall)({
     cors: true,
     invoker: 'public',
+    memory: '1GiB',
 }, async (request) => {
     if (!request.auth) {
         throw new https_1.HttpsError('unauthenticated', 'User must be authenticated.');
