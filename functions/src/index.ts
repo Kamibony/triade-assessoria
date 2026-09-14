@@ -524,6 +524,7 @@ export const verifyMatchConstraintWorker = onTaskDispatched({
 export const triggerBatchVerification = onCall({
     cors: true,
     invoker: 'public',
+    memory: '1GiB',
 }, async (request) => {
     if (!request.auth) {
         throw new HttpsError('unauthenticated', 'User must be authenticated.');

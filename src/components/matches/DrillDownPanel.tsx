@@ -81,7 +81,7 @@ export function DrillDownPanel({ type, id, onClose, handleFeedback, handleGlobal
         const fetchedMatches = matchesSnap.docs.map(d => ({ id: d.id, ...d.data() } as MatchResult));
 
         // Exclude completely globally inactive editais if we are looking at an OSC
-        let activeMatches = fetchedMatches;
+        let activeMatches = fetchedMatches.filter(m => m.eligibility !== false && m.actionState !== 'Rejeitado');
 
         setRelatedMatches(activeMatches);
 
