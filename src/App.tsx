@@ -23,6 +23,8 @@ import { IngestionRadar } from './components/IngestionRadar';
 import { ManualOscIngest } from './components/ManualOscIngest';
 import { Login } from './components/Login';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { PortalLayout } from './components/portal/PortalLayout';
+import { PortalDiscover } from './components/portal/PortalDiscover';
 import { AuthProvider } from './contexts/AuthContext';
 import { Toaster } from 'react-hot-toast';
 
@@ -80,6 +82,10 @@ function App() {
           <Route path="/login" element={<Login />} />
 
           <Route element={<ProtectedRoute />}>
+            <Route path="/portal" element={<PortalLayout />}>
+              <Route path="discover" element={<PortalDiscover />} />
+            </Route>
+
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<AdminDashboard />} />
               <Route path="directory" element={<OscDirectoryView />} />
