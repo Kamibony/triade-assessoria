@@ -2168,8 +2168,9 @@ exports.triggerBulkInternalMatch = (0, https_1.onCall)({
     }
     const db = (0, firestore_1.getFirestore)();
     const userDoc = await db.collection('users').doc(request.auth.uid).get();
-    if (userDoc.data()?.role !== 'admin') {
-        throw new https_1.HttpsError('permission-denied', 'User must be an admin.');
+    const userRole = userDoc.data()?.role;
+    if (userRole !== 'admin' && userRole !== 'client') {
+        throw new https_1.HttpsError('permission-denied', 'User must be an admin or client.');
     }
     const { importBatchId, limit = 100 } = request.data;
     if (!importBatchId) {
@@ -2685,8 +2686,9 @@ exports.ingestManualOscFunction = (0, https_1.onCall)({
     }
     const db = (0, firestore_1.getFirestore)();
     const userDoc = await db.collection('users').doc(request.auth.uid).get();
-    if (userDoc.data()?.role !== 'admin') {
-        throw new https_1.HttpsError('permission-denied', 'User must be an admin.');
+    const userRole = userDoc.data()?.role;
+    if (userRole !== 'admin' && userRole !== 'client') {
+        throw new https_1.HttpsError('permission-denied', 'User must be an admin or client.');
     }
     const { storagePaths } = request.data;
     if (!storagePaths || !Array.isArray(storagePaths) || storagePaths.length === 0) {
@@ -2720,6 +2722,13 @@ exports.ingestManualOscFunction = (0, https_1.onCall)({
         const finalDataToSave = Object.fromEntries(Object.entries(dataToSave).filter(([_, v]) => v !== undefined));
         // Save to Firestore
         await (0, firestore_1.getFirestore)().collection('oscs').doc(cleanCnpj).set(finalDataToSave);
+        if (userRole === 'client') {
+            await db.collection('users').doc(request.auth.uid).update({
+                oscId: cleanCnpj,
+                updatedAt: firestore_1.FieldValue.serverTimestamp()
+            });
+            console.log(`[ingestManualOscFunction] Mapped OSC ID ${cleanCnpj} to client user ${request.auth.uid}`);
+        }
         // Cleanup: Delete temporary files
         for (const path of storagePaths) {
             try {
