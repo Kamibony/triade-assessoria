@@ -524,6 +524,7 @@ export const verifyMatchConstraintWorker = onTaskDispatched({
 export const triggerBatchVerification = onCall({
     cors: true,
     invoker: 'public',
+    memory: '1GiB',
 }, async (request) => {
     if (!request.auth) {
         throw new HttpsError('unauthenticated', 'User must be authenticated.');
@@ -536,13 +537,18 @@ export const triggerBatchVerification = onCall({
     }
 
     const db = getFirestore();
-    const q = db.collection('matches').where(targetType === 'osc' ? 'oscId' : 'editalId', '==', targetId);
+    let q;
+    if (targetType === 'osc') {
+        q = db.collection('matches').where('oscId', '==', targetId);
+    } else {
+        q = db.collection('matches').where('editalId', '==', targetId);
+    }
 
     const matchesSnap = await q.get();
 
     const pendingMatches = matchesSnap.docs.filter(doc => {
         const data = doc.data();
-        return data.actionState !== 'Aprovado' && data.actionState !== 'Rejeitado' && !data.verificationResult;
+        return data.actionState !== 'Aprovado' && data.actionState !== 'Rejeitado' && data.eligibility !== false && !data.verificationResult;
     });
 
     if (pendingMatches.length === 0) {

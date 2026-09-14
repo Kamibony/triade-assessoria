@@ -81,7 +81,7 @@ export function DrillDownPanel({ type, id, onClose, handleFeedback, handleGlobal
         const fetchedMatches = matchesSnap.docs.map(d => ({ id: d.id, ...d.data() } as MatchResult));
 
         // Exclude completely globally inactive editais if we are looking at an OSC
-        let activeMatches = fetchedMatches;
+        let activeMatches = fetchedMatches.filter(m => m.eligibility !== false && m.actionState !== 'Rejeitado');
 
         setRelatedMatches(activeMatches);
 
@@ -136,7 +136,7 @@ export function DrillDownPanel({ type, id, onClose, handleFeedback, handleGlobal
       const functionsLib = await import('firebase/functions');
       const triggerBatchVerification = functionsLib.httpsCallable(functionsLib.getFunctions(), 'triggerBatchVerification');
       toast.success('Iniciando verificação em lote...');
-      await triggerBatchVerification({ targetId: id, targetType: 'osc' });
+      await triggerBatchVerification({ targetId: id, targetType: type });
     } catch (error: any) {
       console.error('Error triggering batch verification:', error);
       toast.error(`Erro: ${error.message || 'Falha ao iniciar verificação'}`);
