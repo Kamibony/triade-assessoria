@@ -136,7 +136,7 @@ export function DrillDownPanel({ type, id, onClose, handleFeedback, handleGlobal
       const functionsLib = await import('firebase/functions');
       const triggerBatchVerification = functionsLib.httpsCallable(functionsLib.getFunctions(), 'triggerBatchVerification');
       toast.success('Iniciando verificação em lote...');
-      await triggerBatchVerification({ targetId: id, targetType: 'osc' });
+      await triggerBatchVerification({ targetId: id, targetType: type });
     } catch (error: any) {
       console.error('Error triggering batch verification:', error);
       toast.error(`Erro: ${error.message || 'Falha ao iniciar verificação'}`);

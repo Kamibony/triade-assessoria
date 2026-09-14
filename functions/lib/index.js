@@ -504,11 +504,17 @@ exports.triggerBatchVerification = (0, https_1.onCall)({
         throw new https_1.HttpsError('invalid-argument', 'targetId e targetType são obrigatórios.');
     }
     const db = (0, firestore_1.getFirestore)();
-    const q = db.collection('matches').where(targetType === 'osc' ? 'oscId' : 'editalId', '==', targetId);
+    let q;
+    if (targetType === 'osc') {
+        q = db.collection('matches').where('oscId', '==', targetId);
+    }
+    else {
+        q = db.collection('matches').where('editalId', '==', targetId);
+    }
     const matchesSnap = await q.get();
     const pendingMatches = matchesSnap.docs.filter(doc => {
         const data = doc.data();
-        return data.actionState !== 'Aprovado' && data.actionState !== 'Rejeitado' && !data.verificationResult;
+        return data.actionState !== 'Aprovado' && data.actionState !== 'Rejeitado' && data.eligibility !== false && !data.verificationResult;
     });
     if (pendingMatches.length === 0) {
         return { success: true, message: 'Nenhum match pendente para verificação.', jobId: null };
