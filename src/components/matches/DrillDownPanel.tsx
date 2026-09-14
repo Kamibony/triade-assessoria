@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { X, ExternalLink, Target, Users, Lock, Loader2 } from 'lucide-react';
+import { X, ExternalLink, Target, Users, Lock, Loader2, CheckCircle2, Activity } from 'lucide-react';
 import type { MatchResult, Edital, NgoProfile } from '../../lib/types';
 import { MatchRow } from './MatchRow';
-import { getFirestore, collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { getFirestore, collection, query, where, getDocs, doc, getDoc, onSnapshot } from 'firebase/firestore';
+import toast from 'react-hot-toast';
 
 interface DrillDownPanelProps {
   type: 'osc' | 'edital';
@@ -20,6 +21,33 @@ export function DrillDownPanel({ type, id, onClose, handleFeedback, handleGlobal
   const [editais, setEditais] = useState<Record<string, Edital>>({});
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState(id);
+  const [activeVerificationJob, setActiveVerificationJob] = useState<any>(null);
+
+  useEffect(() => {
+    const db = getFirestore();
+    const verifyJobQuery = query(
+      collection(db, 'system_jobs'),
+      where('type', '==', 'batch_verification'),
+      where('status', 'in', ['running', 'completed'])
+    );
+
+    const unsubscribeVerifyJob = onSnapshot(verifyJobQuery, (snapshot) => {
+      const jobs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      jobs.sort((a: any, b: any) => b.createdAt?.toMillis() - a.createdAt?.toMillis());
+      const currentActive = jobs[0];
+
+      setActiveVerificationJob((prev: any) => {
+        if (prev && prev.status !== 'completed' && (currentActive as any)?.status === 'completed') {
+          toast.success('Verificação em lote concluída com sucesso');
+        }
+        return currentActive || null;
+      });
+    });
+
+    return () => {
+      unsubscribeVerifyJob();
+    };
+  }, []);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -103,6 +131,18 @@ export function DrillDownPanel({ type, id, onClose, handleFeedback, handleGlobal
 
   const validMatchesCount = relatedMatches.filter(m => m.eligibility !== false && m.actionState !== 'Rejeitado').length;
 
+  const handleVerifyPending = async () => {
+    try {
+      const functionsLib = await import('firebase/functions');
+      const triggerBatchVerification = functionsLib.httpsCallable(functionsLib.getFunctions(), 'triggerBatchVerification');
+      toast.success('Iniciando verificação em lote...');
+      await triggerBatchVerification({ targetId: id, targetType: 'osc' });
+    } catch (error: any) {
+      console.error('Error triggering batch verification:', error);
+      toast.error(`Erro: ${error.message || 'Falha ao iniciar verificação'}`);
+    }
+  };
+
   const onGlobalInvalidateClick = () => {
       if (handleGlobalInvalidate) {
           handleGlobalInvalidate(id);
@@ -134,6 +174,44 @@ export function DrillDownPanel({ type, id, onClose, handleFeedback, handleGlobal
                 </div>
             ) : (
                 <>
+            {type === 'osc' && (
+                <div className="bg-secondary/10 border border-secondary/20 rounded-lg p-4 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+                    <div>
+                        <h4 className="font-bold text-secondary-foreground text-sm flex items-center gap-1">
+                            <Target className="w-4 h-4" /> Verificação em Lote
+                        </h4>
+                        <p className="text-xs text-secondary-foreground/80 mt-1">
+                            Verificar todos os matches pendentes para esta OSC.
+                        </p>
+                        {activeVerificationJob && (
+                          <div className="mt-2">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${activeVerificationJob.status === 'completed' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
+                              {activeVerificationJob.status === 'completed' ? (
+                                <>
+                                  <CheckCircle2 className="w-3 h-3 mr-1" />
+                                  Verificação Concluída ({activeVerificationJob.completedTasks}/{activeVerificationJob.totalTasks})
+                                </>
+                              ) : (
+                                <>
+                                  <Activity className="w-3 h-3 mr-1 animate-pulse" />
+                                  Verificando ({activeVerificationJob.completedTasks + activeVerificationJob.failedTasks}/{activeVerificationJob.totalTasks})...
+                                </>
+                              )}
+                            </span>
+                          </div>
+                        )}
+                    </div>
+                    <button
+                        onClick={handleVerifyPending}
+                        disabled={!!activeVerificationJob && activeVerificationJob.status !== 'completed'}
+                        className="whitespace-nowrap inline-flex items-center gap-2 bg-secondary hover:bg-secondary/90 text-secondary-foreground px-4 py-2 rounded-md text-sm font-medium transition-colors disabled:opacity-50"
+                    >
+                        <CheckCircle2 className={`w-4 h-4 ${activeVerificationJob && activeVerificationJob.status !== 'completed' ? 'animate-pulse' : ''}`} />
+                        Verificar Todos
+                    </button>
+                </div>
+            )}
+
             {type === 'edital' && (
                 <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
                     <div>
