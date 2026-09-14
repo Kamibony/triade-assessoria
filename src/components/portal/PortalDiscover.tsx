@@ -1,0 +1,322 @@
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
+import { motion, AnimatePresence } from 'framer-motion';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db, functions } from '../../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { Search, ChevronRight, CheckCircle2, Clock, AlertCircle, RefreshCw } from 'lucide-react';
+import { Button } from '../ui/Button';
+import type { MatchResult } from '../../lib/types';
+import toast from 'react-hot-toast';
+
+type PortalState = 'IDLE' | 'PROCESSING' | 'RESULTS';
+
+export const PortalDiscover: React.FC = () => {
+  const { user } = useAuth();
+  const [currentState, setCurrentState] = useState<PortalState>('IDLE');
+  const [matches, setMatches] = useState<MatchResult[]>([]);
+  const [isInitializing, setIsInitializing] = useState(true);
+
+  // For the labor illusion
+  const [processingStep, setProcessingStep] = useState(0);
+
+  // Fallback oscId (since external users must have one, we derive it from user id or claims,
+  // but for this blueprint, we'll assume the user ID is the oscId or we fetch it.
+  // We'll use a mocked oscId or user.uid for demonstration).
+  const oscId = user?.uid || 'mock-osc-id';
+
+  useEffect(() => {
+    // Optimistic Initialization: Check for existing valid matches on mount
+    const checkExistingMatches = async () => {
+      try {
+        const matchesRef = collection(db, 'matches');
+        const q = query(
+          matchesRef,
+          where('oscId', '==', oscId)
+        );
+
+        const snapshot = await getDocs(q);
+        const existingMatches = snapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() } as MatchResult))
+          // Strictly filter out noise locally as per memory
+          .filter(m => m.eligibility !== false && m.actionState !== 'Rejeitado');
+
+        if (existingMatches.length > 0) {
+          setMatches(existingMatches);
+          setCurrentState('RESULTS');
+        }
+      } catch (error) {
+        console.error("Error checking existing matches:", error);
+      } finally {
+        setIsInitializing(false);
+      }
+    };
+
+    if (user) {
+      checkExistingMatches();
+    }
+  }, [user, oscId]);
+
+
+  const startDiscovery = async () => {
+    setCurrentState('PROCESSING');
+    setProcessingStep(0);
+
+    // Trigger the backend verification asynchronously so it doesn't block UI animations
+    const triggerBatchVerification = httpsCallable(functions, 'triggerBatchVerification');
+    triggerBatchVerification({ oscId }).catch(err => {
+        console.error("Error triggering batch:", err);
+        toast.error("Houve um erro ao iniciar a busca. Tentando continuar localmente.");
+    });
+
+    // Labor Illusion Steps
+    const steps = [
+      { delay: 1500, label: "Lendo seu Perfil OSC e Histórico de Impacto..." },
+      { delay: 3500, label: "Mapeando Editais Nacionais e Globais..." },
+      { delay: 5500, label: "Aplicando análise semântica de restrições (Devil's Advocate)..." },
+      { delay: 7500, label: "Curadoria das melhores oportunidades finalizada." }
+    ];
+
+    let currentDelay = 0;
+    steps.forEach((step, index) => {
+        currentDelay += step.delay;
+        setTimeout(() => {
+            setProcessingStep(index + 1);
+        }, currentDelay);
+    });
+
+    // Listen to system_jobs for actual completion (Simulated here with a timeout fallback)
+    // In production, this would be an onSnapshot on system_jobs
+    setTimeout(() => {
+        fetchResults();
+    }, currentDelay + 1000);
+  };
+
+  const fetchResults = async () => {
+      try {
+        const matchesRef = collection(db, 'matches');
+        const q = query(
+          matchesRef,
+          where('oscId', '==', oscId)
+        );
+
+        const snapshot = await getDocs(q);
+        const fetchedMatches = snapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() } as MatchResult))
+          .filter(m => m.eligibility !== false && m.actionState !== 'Rejeitado');
+
+        // Mock some data if empty just for visual testing of the blueprint
+        if (fetchedMatches.length === 0) {
+            fetchedMatches.push({
+                id: 'mock-1',
+                editalId: 'e-1',
+                oscId,
+                matchScore: 94,
+                eligibility: true,
+                actionState: 'Pendente',
+                aiSummary: "Alto alinhamento com seu histórico de projetos educacionais. Pede 2 anos de fundação (você tem 5).",
+                reasoning: "Baseado no Edital X, a cláusula 4.2 exige atuação em educação infantil, o que consta expressamente no estatuto da sua organização.",
+                badges: ["Alto Alinhamento", "Encerra em 15 dias"]
+            });
+        }
+
+        setMatches(fetchedMatches);
+        setCurrentState('RESULTS');
+      } catch (error) {
+        console.error("Error fetching results:", error);
+        toast.error("Erro ao carregar resultados.");
+        setCurrentState('IDLE');
+      }
+  };
+
+  const handleRetrigger = () => {
+      setMatches([]);
+      startDiscovery();
+  };
+
+  if (isInitializing) {
+    return (
+      <div className="flex items-center justify-center min-h-[50vh]">
+        <div className="animate-pulse flex flex-col items-center gap-4">
+          <div className="w-12 h-12 bg-primary/20 rounded-full"></div>
+          <div className="h-4 w-32 bg-muted rounded"></div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-5xl mx-auto w-full">
+      <AnimatePresence mode="wait">
+
+        {/* IDLE STATE */}
+        {currentState === 'IDLE' && (
+          <motion.div
+            key="idle"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="flex flex-col items-center justify-center min-h-[60vh] text-center space-y-8"
+          >
+            <div className="w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center mb-4">
+              <Search className="w-10 h-10 text-primary" />
+            </div>
+            <div className="space-y-4 max-w-2xl">
+              <h1 className="text-4xl font-extrabold tracking-tight">Encontre as Oportunidades Certas</h1>
+              <p className="text-xl text-muted-foreground">
+                Nossa IA vai mapear milhares de editais ativos, ler seus manuais de 100 páginas e encontrar as verbas exatas que combinam com o estatuto e histórico da sua OSC.
+              </p>
+            </div>
+            <Button size="lg" onClick={startDiscovery} className="text-lg px-8 py-6 rounded-full group">
+              Analisar Oportunidades Agora
+              <ChevronRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
+            </Button>
+          </motion.div>
+        )}
+
+        {/* PROCESSING STATE (Labor Illusion) */}
+        {currentState === 'PROCESSING' && (
+          <motion.div
+            key="processing"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 1.05 }}
+            className="flex flex-col items-center justify-center min-h-[60vh] max-w-xl mx-auto"
+          >
+            <div className="w-full bg-card border shadow-lg rounded-2xl p-8 space-y-6">
+              <div className="flex items-center gap-4 mb-8">
+                <div className="relative flex items-center justify-center w-12 h-12">
+                   <div className="absolute inset-0 border-4 border-muted rounded-full"></div>
+                   <div className="absolute inset-0 border-4 border-primary rounded-full border-t-transparent animate-spin"></div>
+                </div>
+                <div>
+                  <h3 className="text-xl font-semibold">Analisando o cenário...</h3>
+                  <p className="text-sm text-muted-foreground">Isso pode levar alguns minutos</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                {[
+                  "Lendo seu Perfil OSC e Histórico de Impacto...",
+                  "Mapeando Editais Nacionais e Globais...",
+                  "Aplicando análise semântica de restrições (Devil's Advocate)...",
+                  "Curadoria das melhores oportunidades finalizada."
+                ].map((label, i) => {
+                  const isActive = i === processingStep;
+                  const isDone = i < processingStep;
+                  return (
+                    <motion.div
+                      key={i}
+                      initial={{ opacity: 0.3, x: -10 }}
+                      animate={{
+                          opacity: isDone ? 1 : isActive ? 1 : 0.3,
+                          x: isDone ? 0 : isActive ? 0 : -10
+                      }}
+                      className="flex items-center gap-3"
+                    >
+                      {isDone ? (
+                        <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
+                      ) : isActive ? (
+                         <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin shrink-0" />
+                      ) : (
+                        <div className="w-5 h-5 border-2 border-muted rounded-full shrink-0" />
+                      )}
+                      <span className={`text-sm ${isActive ? 'font-medium text-foreground' : 'text-muted-foreground'}`}>
+                        {label}
+                      </span>
+                    </motion.div>
+                  )
+                })}
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* RESULTS STATE */}
+        {currentState === 'RESULTS' && (
+          <motion.div
+            key="results"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="space-y-8"
+          >
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-card p-6 rounded-2xl border shadow-sm">
+              <div>
+                <h2 className="text-3xl font-bold">Suas Oportunidades</h2>
+                <p className="text-muted-foreground">Encontramos {matches.length} oportunidades de alto alinhamento para sua OSC.</p>
+              </div>
+              <Button onClick={handleRetrigger} variant="outline" className="gap-2">
+                <RefreshCw className="w-4 h-4" />
+                Buscar Novos Editais
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {matches.map((match) => (
+                <OpportunityCard key={match.id} match={match} />
+              ))}
+            </div>
+
+            {matches.length === 0 && (
+                <div className="text-center py-20 bg-muted/20 rounded-2xl border border-dashed">
+                    <AlertCircle className="w-10 h-10 mx-auto text-muted-foreground mb-4" />
+                    <h3 className="text-lg font-medium">Nenhum edital elegível no momento</h3>
+                    <p className="text-muted-foreground mt-2">Nossa IA está monitorando constantemente. Volte em alguns dias.</p>
+                </div>
+            )}
+          </motion.div>
+        )}
+
+      </AnimatePresence>
+    </div>
+  );
+};
+
+
+// Opportunity Card Component (Inline for the blueprint)
+const OpportunityCard: React.FC<{ match: MatchResult }> = ({ match }) => {
+    return (
+        <div className="bg-card border rounded-2xl overflow-hidden hover:shadow-lg transition-all duration-300 flex flex-col h-full group">
+            <div className="p-6 flex-grow space-y-4">
+                <div className="flex justify-between items-start">
+                    <div className="space-y-1">
+                        {match.badges?.map(badge => (
+                            <span key={badge} className="inline-block px-2 py-1 bg-primary/10 text-primary text-xs font-semibold rounded-md mr-2 mb-2">
+                                {badge}
+                            </span>
+                        ))}
+                    </div>
+                    {/* Score Ring */}
+                    <div className="flex flex-col items-center justify-center w-12 h-12 bg-green-50 rounded-full border border-green-100 shrink-0">
+                        <span className="text-sm font-bold text-green-700">{match.matchScore}%</span>
+                    </div>
+                </div>
+
+                <div>
+                    <h3 className="text-lg font-bold leading-tight line-clamp-2">Edital {match.editalId} (Mock Title)</h3>
+                    <div className="flex items-center gap-1 mt-2 text-sm text-muted-foreground font-medium">
+                        <Clock className="w-4 h-4" />
+                        <span>Encerra em breve</span>
+                    </div>
+                </div>
+
+                <div className="pt-4 border-t border-muted">
+                    <p className="text-sm text-muted-foreground line-clamp-3">
+                        {match.aiSummary || match.reasoning || "Match encontrado com sucesso base nas suas qualificações."}
+                    </p>
+                </div>
+            </div>
+
+            <div className="p-4 bg-muted/30 border-t">
+                 {/* Detail View triggered here - simplified to a toast for the blueprint */}
+                <Button
+                    variant="default"
+                    className="w-full group-hover:bg-primary transition-colors"
+                    onClick={() => toast.success("Abre o modal de detalhes (OpportunityDetailsModal) com a justificativa completa em Markdown.")}
+                >
+                    Ver Detalhes e Justificativa
+                </Button>
+            </div>
+        </div>
+    );
+};
