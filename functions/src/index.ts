@@ -2437,8 +2437,9 @@ export const triggerBulkInternalMatch = onCall({
     }
     const db = getFirestore();
     const userDoc = await db.collection('users').doc(request.auth.uid).get();
-    if (userDoc.data()?.role !== 'admin') {
-        throw new HttpsError('permission-denied', 'User must be an admin.');
+    const userRole = userDoc.data()?.role;
+    if (userRole !== 'admin' && userRole !== 'client') {
+        throw new HttpsError('permission-denied', 'User must be an admin or client.');
     }
 
     const { importBatchId, limit = 100 } = request.data as { importBatchId: string, limit?: number };
@@ -3013,8 +3014,9 @@ export const ingestManualOscFunction = onCall({
     }
     const db = getFirestore();
     const userDoc = await db.collection('users').doc(request.auth.uid).get();
-    if (userDoc.data()?.role !== 'admin') {
-        throw new HttpsError('permission-denied', 'User must be an admin.');
+    const userRole = userDoc.data()?.role;
+    if (userRole !== 'admin' && userRole !== 'client') {
+        throw new HttpsError('permission-denied', 'User must be an admin or client.');
     }
 
     const { storagePaths } = request.data as { storagePaths?: string[] };
@@ -3056,6 +3058,14 @@ export const ingestManualOscFunction = onCall({
 
         // Save to Firestore
         await getFirestore().collection('oscs').doc(cleanCnpj).set(finalDataToSave);
+
+        if (userRole === 'client') {
+            await db.collection('users').doc(request.auth.uid).update({
+                oscId: cleanCnpj,
+                updatedAt: FieldValue.serverTimestamp()
+            });
+            console.log(`[ingestManualOscFunction] Mapped OSC ID ${cleanCnpj} to client user ${request.auth.uid}`);
+        }
 
         // Cleanup: Delete temporary files
         for (const path of storagePaths) {

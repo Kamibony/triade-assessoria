@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '../lib/firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { auth, db } from '../lib/firebase';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from './ui/Button';
 import { Loader2, AlertCircle } from 'lucide-react';
@@ -10,6 +11,7 @@ export const Login = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -21,11 +23,25 @@ export const Login = () => {
     setLoading(true);
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      navigate(from, { replace: true });
+      if (isRegistering) {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const user = userCredential.user;
+
+        // Write to users collection
+        await setDoc(doc(db, 'users', user.uid), {
+          email: user.email,
+          role: 'client',
+          createdAt: serverTimestamp()
+        });
+
+        navigate('/admin/import-osc-manual', { replace: true });
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+        navigate(from, { replace: true });
+      }
     } catch (err: unknown) {
       console.error(err);
-      setError('Falha ao fazer login. Verifique suas credenciais.');
+      setError(isRegistering ? 'Falha ao registrar. Verifique os dados e tente novamente.' : 'Falha ao fazer login. Verifique suas credenciais.');
     } finally {
       setLoading(false);
     }
@@ -36,7 +52,7 @@ export const Login = () => {
       <div className="bg-card p-8 rounded-lg shadow-lg max-w-md w-full border border-border">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold tracking-tighter mb-2">TRÍADE<span className="text-primary">.</span></h1>
-          <p className="text-muted-foreground">Faça login para acessar o painel</p>
+          <p className="text-muted-foreground">{isRegistering ? 'Crie sua conta para começar' : 'Faça login para acessar o painel'}</p>
         </div>
 
         {error && (
@@ -73,9 +89,19 @@ export const Login = () => {
           </div>
           <Button type="submit" disabled={loading} className="w-full py-2">
             {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-            Entrar
+            {isRegistering ? 'Registrar' : 'Entrar'}
           </Button>
         </form>
+
+        <div className="mt-4 text-center text-sm">
+          <button
+            type="button"
+            onClick={() => setIsRegistering(!isRegistering)}
+            className="text-primary hover:underline"
+          >
+            {isRegistering ? 'Já tem uma conta? Faça login' : 'Não tem uma conta? Registre-se'}
+          </button>
+        </div>
       </div>
     </div>
   );
