@@ -3390,12 +3390,14 @@ export const recalculateDashboardStats = onCall({
         const pendentes = matches.filter(m => (!m.actionState && m.eligibility !== false) || m.actionState === 'Pendente').length;
         const reprovados = matches.filter(m => m.actionState === 'Rejeitado' || (!m.actionState && m.eligibility === false)).length;
 
+        const isNotReprovado = (m: any) => !(m.actionState === 'Rejeitado' || (!m.actionState && m.eligibility === false));
+
         const hotLeadsMap: Record<string, number> = {};
-        matches.filter(m => m.matchScore >= 80).forEach(m => {
+        matches.filter(m => m.matchScore >= 80 && isNotReprovado(m)).forEach(m => {
             hotLeadsMap[m.oscId] = (hotLeadsMap[m.oscId] || 0) + 1;
         });
 
-        const validEditalMatches = matches.filter(m => m.eligibility !== false);
+        const validEditalMatches = matches.filter(m => isNotReprovado(m));
         const editalCountMap: Record<string, number> = {};
         validEditalMatches.forEach(m => {
             editalCountMap[m.editalId] = (editalCountMap[m.editalId] || 0) + 1;
