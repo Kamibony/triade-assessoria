@@ -558,9 +558,6 @@ export function MatchesDashboard() {
                type={selectedDrillDown.type}
                id={selectedDrillDown.id}
                onClose={() => setSelectedDrillDown(null)}
-               matches={matches}
-               oscs={oscs}
-               editais={editais}
                handleFeedback={handleFeedback}
                handleGlobalInvalidate={handleGlobalInvalidate}
            />

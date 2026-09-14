@@ -1,28 +1,107 @@
-import React from 'react';
-import { X, ExternalLink, Target, Users, Lock } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { X, ExternalLink, Target, Users, Lock, Loader2 } from 'lucide-react';
 import type { MatchResult, Edital, NgoProfile } from '../../lib/types';
 import { MatchRow } from './MatchRow';
+import { getFirestore, collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 
 interface DrillDownPanelProps {
   type: 'osc' | 'edital';
   id: string;
   onClose: () => void;
-  matches: MatchResult[];
-  oscs: Record<string, NgoProfile>;
-  editais: Record<string, Edital>;
   handleFeedback: (matchId: string, action: 'Aprovado' | 'Rejeitado' | 'Revisao') => void;
   handleGlobalInvalidate?: (editalId: string) => void;
 }
 
-export function DrillDownPanel({ type, id, onClose, matches, oscs, editais, handleFeedback, handleGlobalInvalidate }: DrillDownPanelProps) {
-  const [expandedMatch, setExpandedMatch] = React.useState<string | null>(null);
+export function DrillDownPanel({ type, id, onClose, handleFeedback, handleGlobalInvalidate }: DrillDownPanelProps) {
+  const [expandedMatch, setExpandedMatch] = useState<string | null>(null);
 
-  const relatedMatches = matches.filter(m => type === 'osc' ? m.oscId === id : m.editalId === id);
-  const title = type === 'osc'
-      ? oscs[id]?.name || relatedMatches[0]?.oscName || id
-      : editais[id]?.title || id;
+  const [relatedMatches, setRelatedMatches] = useState<MatchResult[]>([]);
+  const [oscs, setOscs] = useState<Record<string, NgoProfile>>({});
+  const [editais, setEditais] = useState<Record<string, Edital>>({});
+  const [loading, setLoading] = useState(true);
+  const [title, setTitle] = useState(id);
 
-  const validMatchesCount = relatedMatches.filter(m => m.eligibility !== false).length;
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      const db = getFirestore();
+
+      try {
+        // Fetch specific OSC or Edital to get the title and details
+        if (type === 'osc') {
+          const oscDoc = await getDoc(doc(db, 'oscs', id));
+          if (oscDoc.exists()) {
+            const oscData = oscDoc.data() as NgoProfile;
+            setOscs({ [id]: oscData });
+            setTitle(oscData.name || id);
+          }
+        } else {
+          const editalDoc = await getDoc(doc(db, 'editais', id));
+          if (editalDoc.exists()) {
+            const editalData = editalDoc.data() as Edital;
+            setEditais({ [id]: editalData });
+            setTitle(editalData.title || id);
+          }
+        }
+
+        // Fetch all related matches
+        const matchesQuery = query(
+          collection(db, 'matches'),
+          where(type === 'osc' ? 'oscId' : 'editalId', '==', id)
+        );
+        const matchesSnap = await getDocs(matchesQuery);
+        const fetchedMatches = matchesSnap.docs.map(d => ({ id: d.id, ...d.data() } as MatchResult));
+
+        // Exclude completely globally inactive editais if we are looking at an OSC
+        let activeMatches = fetchedMatches;
+
+        setRelatedMatches(activeMatches);
+
+        // Fetch associated editais/oscs for the matches
+        if (activeMatches.length > 0) {
+            if (type === 'osc') {
+                const editalIds = [...new Set(activeMatches.map(m => m.editalId))];
+                const editaisMap: Record<string, Edital> = {};
+                for (let i = 0; i < editalIds.length; i += 10) {
+                    const chunk = editalIds.slice(i, i + 10);
+                    const q = query(collection(db, 'editais'), where('__name__', 'in', chunk));
+                    const snap = await getDocs(q);
+                    snap.docs.forEach(d => {
+                        editaisMap[d.id] = d.data() as Edital;
+                    });
+                }
+                setEditais(prev => ({ ...prev, ...editaisMap }));
+
+                // Now filter out inactive editais
+                activeMatches = activeMatches.filter(m => editaisMap[m.editalId]?.ativo !== false);
+                setRelatedMatches(activeMatches);
+
+            } else {
+                const oscIds = [...new Set(activeMatches.map(m => m.oscId))];
+                const oscsMap: Record<string, NgoProfile> = {};
+                for (let i = 0; i < oscIds.length; i += 10) {
+                    const chunk = oscIds.slice(i, i + 10);
+                    const q = query(collection(db, 'oscs'), where('__name__', 'in', chunk));
+                    const snap = await getDocs(q);
+                    snap.docs.forEach(d => {
+                        oscsMap[d.id] = d.data() as NgoProfile;
+                    });
+                }
+                setOscs(prev => ({ ...prev, ...oscsMap }));
+            }
+        }
+
+      } catch (error) {
+        console.error("Error fetching drilldown data:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [type, id]);
+
+  const validMatchesCount = relatedMatches.filter(m => m.eligibility !== false && m.actionState !== 'Rejeitado').length;
 
   const onGlobalInvalidateClick = () => {
       if (handleGlobalInvalidate) {
@@ -49,6 +128,12 @@ export function DrillDownPanel({ type, id, onClose, matches, oscs, editais, hand
         </div>
 
         <div className="p-6 flex-1 space-y-6">
+            {loading ? (
+                <div className="flex justify-center items-center py-12">
+                    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                </div>
+            ) : (
+                <>
             {type === 'edital' && (
                 <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
                     <div>
@@ -129,6 +214,8 @@ export function DrillDownPanel({ type, id, onClose, matches, oscs, editais, hand
                     </table>
                  </div>
             </div>
+                </>
+            )}
         </div>
       </div>
     </>
