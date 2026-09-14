@@ -2994,8 +2994,16 @@ exports.recalculateDashboardStats = (0, https_1.onCall)({
 }, async (req) => {
     const db = (0, firestore_1.getFirestore)();
     try {
-        const matchesSnapshot = await db.collection('matches').get();
-        const matches = matchesSnapshot.docs.map(d => d.data());
+        const editaisSnapshot = await db.collection('editais').get();
+        const editaisMap = {};
+        editaisSnapshot.docs.forEach(d => {
+            editaisMap[d.id] = d.data();
+        });
+        const allMatchesSnapshot = await db.collection('matches').get();
+        const matches = allMatchesSnapshot.docs.map(d => d.data()).filter(m => {
+            // Exclude globally inactive editais
+            return editaisMap[m.editalId]?.ativo !== false;
+        });
         const total = matches.length;
         const aiApproved = matches.filter(m => m.eligibility === true).length;
         const manuallyApproved = matches.filter(m => m.actionState === 'Aprovado').length;

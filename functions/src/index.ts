@@ -3381,8 +3381,17 @@ export const recalculateDashboardStats = onCall({
 
     const db = getFirestore();
     try {
-        const matchesSnapshot = await db.collection('matches').get();
-        const matches = matchesSnapshot.docs.map(d => d.data());
+        const editaisSnapshot = await db.collection('editais').get();
+        const editaisMap: Record<string, any> = {};
+        editaisSnapshot.docs.forEach(d => {
+            editaisMap[d.id] = d.data();
+        });
+
+        const allMatchesSnapshot = await db.collection('matches').get();
+        const matches = allMatchesSnapshot.docs.map(d => d.data()).filter(m => {
+            // Exclude globally inactive editais
+            return editaisMap[m.editalId]?.ativo !== false;
+        });
 
         const total = matches.length;
         const aiApproved = matches.filter(m => m.eligibility === true).length;
