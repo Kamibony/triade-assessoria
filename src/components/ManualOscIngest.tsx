@@ -175,6 +175,7 @@ export function ManualOscIngest({ onSuccess }: ManualOscIngestProps = {}) {
                     </div>
                 </div>
             ) : (
+              <>
                 <div
               onDrop={handleDrop}
               onDragOver={handleDragOver}
@@ -218,7 +219,7 @@ export function ManualOscIngest({ onSuccess }: ManualOscIngestProps = {}) {
               </div>
             )}
 
-            </div>
+            </>
             )}
 
             <Button
