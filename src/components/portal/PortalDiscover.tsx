@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useOutletContext } from 'react-router-dom';
+import { useOutletContext, useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db, functions } from '../../lib/firebase';
@@ -14,10 +14,21 @@ type PortalState = 'IDLE' | 'PROCESSING' | 'RESULTS';
 
 export const PortalDiscover: React.FC = () => {
   const { user } = useAuth();
-  const { oscId } = useOutletContext<{ oscId: string | null }>();
+  const { oscIds } = useOutletContext<{ oscIds: string[] }>();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const oscId = searchParams.get('oscId');
+
   const [currentState, setCurrentState] = useState<PortalState>('IDLE');
   const [matches, setMatches] = useState<MatchResult[]>([]);
   const [isInitializing, setIsInitializing] = useState(true);
+
+  useEffect(() => {
+    // Security check: Ensure oscId is present and authorized
+    if (!isInitializing && (!oscId || !oscIds.includes(oscId))) {
+       navigate('/portal');
+    }
+  }, [oscId, oscIds, isInitializing, navigate]);
 
   // For the labor illusion
   const [processingStep, setProcessingStep] = useState(0);

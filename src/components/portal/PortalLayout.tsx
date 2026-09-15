@@ -9,11 +9,11 @@ import { doc, getDoc } from 'firebase/firestore';
 export const PortalLayout: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [oscId, setOscId] = useState<string | null>(null);
+  const [oscIds, setOscIds] = useState<string[]>([]);
   const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
-    const checkUserOscId = async () => {
+    const checkUserOscIds = async () => {
       if (!user) {
         setIsChecking(false);
         return;
@@ -25,18 +25,20 @@ export const PortalLayout: React.FC = () => {
 
         if (userDocSnap.exists()) {
           const userData = userDocSnap.data();
-          if (userData.oscId) {
-            setOscId(userData.oscId);
+          if (userData.oscIds && Array.isArray(userData.oscIds)) {
+             setOscIds(userData.oscIds);
+          } else if (userData.oscId) {
+             setOscIds([userData.oscId]);
           }
         }
       } catch (error) {
-        console.error("Error checking user oscId:", error);
+        console.error("Error checking user oscIds:", error);
       } finally {
         setIsChecking(false);
       }
     };
 
-    checkUserOscId();
+    checkUserOscIds();
   }, [user]);
 
   const handleLogout = async () => {
@@ -75,7 +77,7 @@ export const PortalLayout: React.FC = () => {
       </header>
 
       <main className="flex-grow container mx-auto px-4 py-8 max-w-6xl">
-        <Outlet context={{ oscId }} />
+        <Outlet context={{ oscIds }} />
       </main>
 
       <footer className="py-6 text-center text-sm text-muted-foreground border-t bg-background">
