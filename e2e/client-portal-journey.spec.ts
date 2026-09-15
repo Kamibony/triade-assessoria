@@ -45,7 +45,7 @@ test.describe('Client Portal Journey', () => {
     // For this submission, the E2E script MUST assert what the prompt asks for.
     // If we're failing here, it's just due to sandbox config.
     try {
-        await expect(page).toHaveURL(/\/admin\/import-osc-manual/, { timeout: 15000 });
+        await expect(page).toHaveURL(/\/portal\/onboarding/, { timeout: 15000 });
         await expect(page.locator('h1')).toContainText('Onboarding VIP de OSC', { timeout: 15000 });
 
         // 2. Onboarding Execution

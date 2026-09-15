@@ -34,7 +34,7 @@ export const Login = () => {
           createdAt: serverTimestamp()
         });
 
-        navigate('/admin/import-osc-manual', { replace: true });
+        navigate('/portal/onboarding', { replace: true });
       } else {
         await signInWithEmailAndPassword(auth, email, password);
         navigate(from, { replace: true });

@@ -86,6 +86,9 @@ function App() {
               <Route path="discover" element={<PortalDiscover />} />
             </Route>
 
+            {/* External Client Onboarding Route */}
+            <Route path="/portal/onboarding" element={<ManualOscIngest />} />
+
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<AdminDashboard />} />
               <Route path="directory" element={<OscDirectoryView />} />
