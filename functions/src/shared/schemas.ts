@@ -37,7 +37,7 @@ export const bureaucracySchema = z.object({
 
 export const verificationResultSchema = z.array(z.object({
     criterion: z.string().describe("O critério avaliado (ex: Geografia, Prazo, Idade da ONG, Documentação)"),
-    status: z.enum(['Aprovado', 'Reprovado', 'Não Encontrado']).describe("Status da avaliação do critério"),
+    status: z.enum(['Aprovado', 'Reprovado', 'Pendente de Informação', 'Não Encontrado']).describe("Status da avaliação do critério"),
     citation: z.string().describe("Citação exata do edital que justifica o status ou 'Não Encontrado'")
 })).describe("Resultado da verificação do advogado do diabo");
 

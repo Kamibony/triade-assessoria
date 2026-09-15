@@ -329,15 +329,15 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
     actionState: z.ZodDefault<z.ZodOptional<z.ZodEnum<["Pendente", "Aprovado", "Rejeitado", "Revisao"]>>>;
     verificationResult: z.ZodOptional<z.ZodArray<z.ZodObject<{
         criterion: z.ZodString;
-        status: z.ZodEnum<["Aprovado", "Reprovado", "Não Encontrado"]>;
+        status: z.ZodEnum<["Aprovado", "Reprovado", "Pendente de Informação", "Não Encontrado"]>;
         citation: z.ZodString;
     }, "strip", z.ZodTypeAny, {
         criterion: string;
-        status: "Aprovado" | "Não Encontrado" | "Reprovado";
+        status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
         citation: string;
     }, {
         criterion: string;
-        status: "Aprovado" | "Não Encontrado" | "Reprovado";
+        status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
         citation: string;
     }>, "many">>;
 }, "strip", z.ZodTypeAny, {
@@ -353,7 +353,7 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
     actionState: "Aprovado" | "Pendente" | "Rejeitado" | "Revisao";
     verificationResult?: {
         criterion: string;
-        status: "Aprovado" | "Não Encontrado" | "Reprovado";
+        status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
         citation: string;
     }[] | undefined;
 }, {
@@ -369,7 +369,7 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
     actionState?: "Aprovado" | "Pendente" | "Rejeitado" | "Revisao" | undefined;
     verificationResult?: {
         criterion: string;
-        status: "Aprovado" | "Não Encontrado" | "Reprovado";
+        status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
         citation: string;
     }[] | undefined;
 }>, z.ZodTypeAny, any, z.ZodTypeAny>;
@@ -439,15 +439,15 @@ export declare const verificationAgentFlow: import("genkit").Action<z.ZodObject<
     editalText: string;
 }>, z.ZodArray<z.ZodObject<{
     criterion: z.ZodString;
-    status: z.ZodEnum<["Aprovado", "Reprovado", "Não Encontrado"]>;
+    status: z.ZodEnum<["Aprovado", "Reprovado", "Pendente de Informação", "Não Encontrado"]>;
     citation: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     criterion: string;
-    status: "Aprovado" | "Não Encontrado" | "Reprovado";
+    status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
     citation: string;
 }, {
     criterion: string;
-    status: "Aprovado" | "Não Encontrado" | "Reprovado";
+    status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
     citation: string;
 }>, "many">, z.ZodTypeAny, any, z.ZodTypeAny>;
 /**
@@ -458,7 +458,7 @@ export declare const verifyMatchConstraints: import("firebase-functions/v2/https
     success: boolean;
     verificationResult: {
         criterion: string;
-        status: "Aprovado" | "Não Encontrado" | "Reprovado";
+        status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
         citation: string;
     }[];
 }>, unknown>;
@@ -606,6 +606,17 @@ export declare const onOscUpdated: import("firebase-functions/core").CloudFuncti
     oscId: string;
 }>>;
 export declare function checkAndUpdateGlobalRunStatus(runId: string): Promise<void>;
+export declare const ingestSingleOscByCnpj: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+    oscId: string;
+    profile: {
+        name: string;
+        cnpj: string | undefined;
+        mission: string | undefined;
+        boardValidity: string | undefined;
+    };
+    message: string;
+}>, unknown>;
 export declare const ingestManualOscFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
     oscId: string;

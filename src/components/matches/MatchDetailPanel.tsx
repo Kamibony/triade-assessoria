@@ -130,6 +130,7 @@ export function MatchDetailPanel({ match: initialMatch, edital, onFeedback, hand
                                     <div className="mt-0.5">
                                         {result.status === 'Aprovado' && <CheckCircle2 className="w-4 h-4 text-green-500" />}
                                         {result.status === 'Reprovado' && <XCircle className="w-4 h-4 text-red-500" />}
+                                        {result.status === 'Pendente de Informação' && <AlertCircle className="w-4 h-4 text-orange-500" />}
                                         {result.status === 'Não Encontrado' && <HelpCircle className="w-4 h-4 text-gray-400" />}
                                     </div>
                                     <div>
@@ -138,6 +139,7 @@ export function MatchDetailPanel({ match: initialMatch, edital, onFeedback, hand
                                             <span className={`text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-sm ${
                                                 result.status === 'Aprovado' ? 'bg-green-100 text-green-700' :
                                                 result.status === 'Reprovado' ? 'bg-red-100 text-red-700' :
+                                                result.status === 'Pendente de Informação' ? 'bg-orange-100 text-orange-700' :
                                                 'bg-gray-100 text-gray-600'
                                             }`}>
                                                 {result.status}

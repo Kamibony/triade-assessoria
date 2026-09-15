@@ -101,15 +101,15 @@ export declare const bureaucracySchema: z.ZodObject<{
 }>;
 export declare const verificationResultSchema: z.ZodArray<z.ZodObject<{
     criterion: z.ZodString;
-    status: z.ZodEnum<["Aprovado", "Reprovado", "Não Encontrado"]>;
+    status: z.ZodEnum<["Aprovado", "Reprovado", "Pendente de Informação", "Não Encontrado"]>;
     citation: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     criterion: string;
-    status: "Aprovado" | "Não Encontrado" | "Reprovado";
+    status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
     citation: string;
 }, {
     criterion: string;
-    status: "Aprovado" | "Não Encontrado" | "Reprovado";
+    status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
     citation: string;
 }>, "many">;
 export declare const matchSchema: z.ZodObject<{
@@ -125,15 +125,15 @@ export declare const matchSchema: z.ZodObject<{
     actionState: z.ZodDefault<z.ZodOptional<z.ZodEnum<["Pendente", "Aprovado", "Rejeitado", "Revisao"]>>>;
     verificationResult: z.ZodOptional<z.ZodArray<z.ZodObject<{
         criterion: z.ZodString;
-        status: z.ZodEnum<["Aprovado", "Reprovado", "Não Encontrado"]>;
+        status: z.ZodEnum<["Aprovado", "Reprovado", "Pendente de Informação", "Não Encontrado"]>;
         citation: z.ZodString;
     }, "strip", z.ZodTypeAny, {
         criterion: string;
-        status: "Aprovado" | "Não Encontrado" | "Reprovado";
+        status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
         citation: string;
     }, {
         criterion: string;
-        status: "Aprovado" | "Não Encontrado" | "Reprovado";
+        status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
         citation: string;
     }>, "many">>;
 }, "strip", z.ZodTypeAny, {
@@ -149,7 +149,7 @@ export declare const matchSchema: z.ZodObject<{
     actionState: "Aprovado" | "Pendente" | "Rejeitado" | "Revisao";
     verificationResult?: {
         criterion: string;
-        status: "Aprovado" | "Não Encontrado" | "Reprovado";
+        status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
         citation: string;
     }[] | undefined;
 }, {
@@ -165,7 +165,7 @@ export declare const matchSchema: z.ZodObject<{
     actionState?: "Aprovado" | "Pendente" | "Rejeitado" | "Revisao" | undefined;
     verificationResult?: {
         criterion: string;
-        status: "Aprovado" | "Não Encontrado" | "Reprovado";
+        status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
         citation: string;
     }[] | undefined;
 }>;

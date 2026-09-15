@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cronDeactivateExpiredEditais = exports.scheduledIngestionTimeoutSweeper = exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.recalculateDashboardStats = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.triggerBulkInternalMatch = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.runVectorMigration = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.triggerBatchVerification = exports.verifyMatchConstraintWorker = exports.verifyMatchConstraints = exports.verificationAgentFlow = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
+exports.cronDeactivateExpiredEditais = exports.scheduledIngestionTimeoutSweeper = exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.recalculateDashboardStats = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestSingleOscByCnpj = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.triggerBulkInternalMatch = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.runVectorMigration = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.triggerBatchVerification = exports.verifyMatchConstraintWorker = exports.verifyMatchConstraints = exports.verificationAgentFlow = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
 exports.formatGenkitError = formatGenkitError;
 exports.fetchAndExtractText = fetchAndExtractText;
 exports.enqueueEditalExtraction = enqueueEditalExtraction;
@@ -306,6 +306,7 @@ Regras estritas (GUARDRAILS):
 1. Se uma restrição (ex: "Apenas para ONGs do estado de SP") NÃO estiver explicitamente escrita no texto do edital, você DEVE gerar o status "Não Encontrado" para esse critério e "Não Encontrado" para a citação.
 2. NUNCA invente ou infira citações. A citação DEVE ser uma cópia exata ou um resumo muito fiel de um trecho REAL do texto fornecido.
 3. Se a ONG não cumprir um critério explícito, o status é "Reprovado". Se cumprir, é "Aprovado".
+4. Se o edital exigir um critério (ex: comprovar atuação numa área), mas o perfil da ONG não fornecer informações suficientes para você ter certeza absoluta (ex: a Atividade Principal ou Missão estão vazias, ou data de fundação é 'Data Desconhecida'), VOCÊ NÃO PODE REPROVAR. O status para este critério DEVE SER OBRIGATORIAMENTE 'Pendente de Informação'. Só gere 'Reprovado' se a informação da ONG for explicitamente contrária ao edital.
 
 Avalie os seguintes critérios mínimos (você pode adicionar outros se achar relevante no texto):
 - Geografia (A ONG está na região permitida?)
@@ -388,9 +389,12 @@ exports.verifyMatchConstraints = (0, https_1.onCall)({
             osc: oscParseResult.data,
             editalText: rawText
         });
+        // Check if there are any explicit rejections
+        const hasRejections = verificationResult.some(r => r.status === 'Reprovado');
         // Update the match document with the result
         await matchRef.update({
             verificationResult: verificationResult,
+            ...(hasRejections ? { eligibility: false } : {}),
             updatedAt: firestore_1.FieldValue.serverTimestamp()
         });
         return { success: true, verificationResult };
@@ -462,8 +466,10 @@ exports.verifyMatchConstraintWorker = (0, tasks_1.onTaskDispatched)({
                 osc: oscParseResult.data,
                 editalText: rawText
             });
+            const hasRejections = verificationResult.some(r => r.status === 'Reprovado');
             await matchRef.update({
                 verificationResult: verificationResult,
+                ...(hasRejections ? { eligibility: false } : {}),
                 updatedAt: firestore_1.FieldValue.serverTimestamp()
             });
             await jobRef.update({ completedTasks: firestore_1.FieldValue.increment(1) });
@@ -2675,6 +2681,100 @@ async function processRssFeeds(runId) {
         }
     };
 }
+exports.ingestSingleOscByCnpj = (0, https_1.onCall)({
+    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
+    invoker: 'public',
+    timeoutSeconds: 60,
+    memory: '512MiB',
+}, async (request) => {
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'User must be authenticated.');
+    }
+    const db = (0, firestore_1.getFirestore)();
+    const userDoc = await db.collection('users').doc(request.auth.uid).get();
+    const userRole = userDoc.data()?.role;
+    if (userRole !== 'admin' && userRole !== 'client') {
+        throw new https_1.HttpsError('permission-denied', 'User must be an admin or client.');
+    }
+    const { cnpj } = request.data;
+    if (!cnpj) {
+        throw new https_1.HttpsError('invalid-argument', 'CNPJ é obrigatório.');
+    }
+    const cleanCnpj = cnpj.replace(/\D/g, '');
+    if (cleanCnpj.length !== 14) {
+        throw new https_1.HttpsError('invalid-argument', 'CNPJ inválido.');
+    }
+    try {
+        const brasilApiResponse = await fetchWithRetry(`https://brasilapi.com.br/api/cnpj/v1/${cleanCnpj}`);
+        const brasilApiData = await brasilApiResponse.json();
+        const name = brasilApiData.razao_social || brasilApiData.nome_fantasia || 'ONG Desconhecida';
+        const location = `${brasilApiData.municipio || 'Desconhecido'} / ${brasilApiData.uf || 'Desconhecido'}`;
+        const foundationDate = brasilApiData.data_inicio_atividade || 'Data Desconhecida';
+        const coreActivities = [];
+        if (brasilApiData.cnae_fiscal_descricao)
+            coreActivities.push(brasilApiData.cnae_fiscal_descricao);
+        if (Array.isArray(brasilApiData.cnaes_secundarios)) {
+            brasilApiData.cnaes_secundarios.forEach((cnae) => {
+                if (cnae.descricao)
+                    coreActivities.push(cnae.descricao);
+            });
+        }
+        const profileData = {
+            name,
+            cnpj: cleanCnpj,
+            mission: coreActivities.join(', ') || 'Não especificada', // Fallback to CNAE description
+            boardValidity: 'Não especificada',
+            foundationDate,
+            location,
+            documentationStatus: 'Pendente',
+            previousProjectsApproved: false,
+            coreActivities,
+        };
+        const parseResult = schemas_js_1.ngoProfileSchema.safeParse(profileData);
+        if (!parseResult.success) {
+            console.error("Schema validation failed for BrasilAPI data:", parseResult.error);
+            throw new https_1.HttpsError('internal', 'Falha ao mapear dados da Receita Federal.');
+        }
+        let embedding = null;
+        try {
+            const oscText = `Missão: ${parseResult.data.mission || ''}. Foco: ${(parseResult.data.coreActivities || []).join(', ')}. Nome: ${parseResult.data.name || ''}`;
+            embedding = await generateTextEmbedding(oscText);
+        }
+        catch (embedError) {
+            console.warn("Failed to generate embedding for manually ingested OSC:", embedError);
+        }
+        const dataToSave = {
+            ...parseResult.data,
+            embedding: embedding ? firestore_1.FieldValue.vector(embedding) : null,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+            updatedAt: firestore_1.FieldValue.serverTimestamp(),
+            source: 'manual_cnpj_ingest'
+        };
+        await db.collection('oscs').doc(cleanCnpj).set(dataToSave);
+        if (userRole === 'client') {
+            await db.collection('users').doc(request.auth.uid).update({
+                oscId: cleanCnpj,
+                updatedAt: firestore_1.FieldValue.serverTimestamp()
+            });
+            console.log(`[ingestSingleOscByCnpj] Mapped OSC ID ${cleanCnpj} to client user ${request.auth.uid}`);
+        }
+        return {
+            success: true,
+            oscId: cleanCnpj,
+            profile: {
+                name: dataToSave.name,
+                cnpj: dataToSave.cnpj,
+                mission: dataToSave.mission,
+                boardValidity: dataToSave.boardValidity
+            },
+            message: 'OSC processada com sucesso via Receita Federal!'
+        };
+    }
+    catch (error) {
+        console.error("Error in ingestSingleOscByCnpj:", error);
+        throw new https_1.HttpsError('internal', error.message || 'Erro ao processar o CNPJ.');
+    }
+});
 exports.ingestManualOscFunction = (0, https_1.onCall)({
     cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
     invoker: 'public',
