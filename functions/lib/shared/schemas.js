@@ -36,7 +36,7 @@ exports.bureaucracySchema = zod_1.z.object({
 });
 exports.verificationResultSchema = zod_1.z.array(zod_1.z.object({
     criterion: zod_1.z.string().describe("O critério avaliado (ex: Geografia, Prazo, Idade da ONG, Documentação)"),
-    status: zod_1.z.enum(['Aprovado', 'Reprovado', 'Não Encontrado']).describe("Status da avaliação do critério"),
+    status: zod_1.z.enum(['Aprovado', 'Reprovado', 'Pendente de Informação', 'Não Encontrado']).describe("Status da avaliação do critério"),
     citation: zod_1.z.string().describe("Citação exata do edital que justifica o status ou 'Não Encontrado'")
 })).describe("Resultado da verificação do advogado do diabo");
 exports.matchSchema = zod_1.z.object({

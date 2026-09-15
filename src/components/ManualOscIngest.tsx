@@ -3,7 +3,7 @@ import { httpsCallable } from 'firebase/functions';
 import { functions, storage } from '../lib/firebase';
 import { ref, uploadBytes } from 'firebase/storage';
 import { Button } from './ui/Button';
-import { Loader2, UploadCloud, CheckCircle2, AlertCircle, File, X } from 'lucide-react';
+import { Loader2, UploadCloud, CheckCircle2, AlertCircle, File, X, Building2 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 interface ManualOscIngestProps {
@@ -13,6 +13,8 @@ interface ManualOscIngestProps {
 export function ManualOscIngest({ onSuccess }: ManualOscIngestProps = {}) {
   const navigate = useNavigate();
   const location = useLocation();
+  const [ingestMode, setIngestMode] = useState<'cnpj' | 'pdf'>('cnpj');
+  const [cnpjInput, setCnpjInput] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
@@ -45,44 +47,76 @@ export function ManualOscIngest({ onSuccess }: ManualOscIngestProps = {}) {
   };
 
   const handleSubmit = async () => {
-    if (files.length === 0) return;
+    if (ingestMode === 'pdf' && files.length === 0) return;
+    if (ingestMode === 'cnpj' && cnpjInput.replace(/\D/g, '').length !== 14) {
+        setResult({ type: 'error', message: 'Por favor, insira um CNPJ válido com 14 dígitos.' });
+        return;
+    }
 
     setIsProcessing(true);
     setResult(null);
 
     try {
-      const timestamp = Date.now();
-      const storagePaths: string[] = [];
+      if (ingestMode === 'pdf') {
+          const timestamp = Date.now();
+          const storagePaths: string[] = [];
 
-      // 1. Upload files to Firebase Storage
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const path = `temp_osc_docs/${timestamp}/${file.name}`;
-        const storageRef = ref(storage, path);
-        await uploadBytes(storageRef, file);
-        storagePaths.push(path);
-      }
+          // 1. Upload files to Firebase Storage
+          for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            const path = `temp_osc_docs/${timestamp}/${file.name}`;
+            const storageRef = ref(storage, path);
+            await uploadBytes(storageRef, file);
+            storagePaths.push(path);
+          }
 
-      // 2. Call backend function with storage paths
-      const ingestManualOsc = httpsCallable(functions, 'ingestManualOscFunction');
-      const response = await ingestManualOsc({ storagePaths });
+          // 2. Call backend function with storage paths
+          const ingestManualOsc = httpsCallable(functions, 'ingestManualOscFunction');
+          const response = await ingestManualOsc({ storagePaths });
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const data = response.data as { success: boolean; oscId?: string; profile?: any; message?: string };
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const data = response.data as { success: boolean; oscId?: string; profile?: any; message?: string };
 
-      if (data.success) {
-        setResult({
-          type: 'success',
-          message: 'OSC processada com sucesso!',
-          profile: data.profile,
-          oscId: data.oscId
-        });
-        // Form Clearing Bug Fix: Do not clear files automatically
+          if (data.success) {
+            setResult({
+              type: 'success',
+              message: 'OSC processada com sucesso!',
+              profile: data.profile,
+              oscId: data.oscId
+            });
+            // Form Clearing Bug Fix: Do not clear files automatically
+          } else {
+            setResult({
+              type: 'error',
+              message: data.message || 'Erro desconhecido ao processar os arquivos.'
+            });
+          }
       } else {
-        setResult({
-          type: 'error',
-          message: data.message || 'Erro desconhecido ao processar os arquivos.'
-        });
+          // CNPJ Fast-Track mode
+          const ingestSingleOscByCnpj = httpsCallable(functions, 'ingestSingleOscByCnpj');
+          const response = await ingestSingleOscByCnpj({ cnpj: cnpjInput });
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const data = response.data as { success: boolean; oscId?: string; profile?: any; message?: string };
+
+          if (data.success) {
+            setResult({
+              type: 'success',
+              message: data.message || 'OSC cadastrada com sucesso via Receita Federal!',
+              profile: data.profile,
+              oscId: data.oscId
+            });
+            if (onSuccess && data.oscId) {
+                onSuccess(data.oscId);
+            } else if (location.pathname.startsWith('/portal')) {
+                navigate(`/portal/discover?oscId=${data.oscId}`);
+            }
+          } else {
+            setResult({
+              type: 'error',
+              message: data.message || 'Erro desconhecido ao buscar o CNPJ.'
+            });
+          }
       }
     } catch (error: unknown) {
       console.error("Error processing manual OSC:", error);
@@ -99,14 +133,49 @@ export function ManualOscIngest({ onSuccess }: ManualOscIngestProps = {}) {
     <div className="container mx-auto py-8 px-4 max-w-4xl">
       <div className="mb-8">
         <h1 className="text-3xl font-bold mb-2">Onboarding VIP de OSC</h1>
-        <p className="text-muted-foreground">Arraste e solte o Cartão CNPJ, Estatuto Social e a ATA para extrair automaticamente o perfil completo.</p>
+        <p className="text-muted-foreground">Cadastre o perfil da OSC de forma rápida via CNPJ ou completa através de PDFs.</p>
       </div>
 
       <div className="bg-card text-card-foreground rounded-lg border shadow-sm p-6 flex flex-col space-y-6">
 
         {!result?.profile && (
           <>
-            <div
+            <div className="flex space-x-4 mb-2 p-1 bg-muted rounded-lg">
+                <button
+                    onClick={() => { setIngestMode('cnpj'); setResult(null); }}
+                    className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${ingestMode === 'cnpj' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                    Cadastro Rápido (Só CNPJ)
+                </button>
+                <button
+                    onClick={() => { setIngestMode('pdf'); setResult(null); }}
+                    className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${ingestMode === 'pdf' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                    Cadastro Completo (PDFs)
+                </button>
+            </div>
+
+            {ingestMode === 'cnpj' ? (
+                <div className="flex flex-col space-y-4">
+                    <div className="p-6 border rounded-lg bg-muted/20 text-center">
+                        <Building2 className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
+                        <h3 className="text-lg font-medium">Busca Automática na Receita Federal</h3>
+                        <p className="text-sm text-muted-foreground mt-1">Basta informar o CNPJ para preenchermos os dados básicos da OSC.</p>
+
+                        <div className="mt-6 max-w-sm mx-auto">
+                            <input
+                                type="text"
+                                placeholder="Digite o CNPJ (apenas números)"
+                                value={cnpjInput}
+                                onChange={(e) => setCnpjInput(e.target.value.replace(/\D/g, '').substring(0, 14))}
+                                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 text-center text-lg tracking-widest"
+                                disabled={isProcessing}
+                            />
+                        </div>
+                    </div>
+                </div>
+            ) : (
+                <div
               onDrop={handleDrop}
               onDragOver={handleDragOver}
               onClick={() => fileInputRef.current?.click()}
@@ -149,18 +218,21 @@ export function ManualOscIngest({ onSuccess }: ManualOscIngestProps = {}) {
               </div>
             )}
 
+            </div>
+            )}
+
             <Button
               onClick={handleSubmit}
-              disabled={isProcessing || files.length === 0}
+              disabled={isProcessing || (ingestMode === 'pdf' && files.length === 0) || (ingestMode === 'cnpj' && cnpjInput.length < 14)}
               className="w-full py-6 text-lg"
             >
               {isProcessing ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                  Processando com IA...
+                  {ingestMode === 'pdf' ? 'Processando com IA...' : 'Buscando dados na Receita Federal...'}
                 </>
               ) : (
-                'Extrair Perfil Mágico'
+                ingestMode === 'pdf' ? 'Extrair Perfil Mágico' : 'Buscar e Cadastrar OSC'
               )}
             </Button>
           </>
