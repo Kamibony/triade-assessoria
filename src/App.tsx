@@ -24,6 +24,7 @@ import { ManualOscIngest } from './components/ManualOscIngest';
 import { Login } from './components/Login';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { PortalLayout } from './components/portal/PortalLayout';
+import { PortalWelcome } from './components/portal/PortalWelcome';
 import { PortalDiscover } from './components/portal/PortalDiscover';
 import { AuthProvider } from './contexts/AuthContext';
 import { Toaster } from 'react-hot-toast';
@@ -83,11 +84,10 @@ function App() {
 
           <Route element={<ProtectedRoute />}>
             <Route path="/portal" element={<PortalLayout />}>
+              <Route index element={<PortalWelcome />} />
               <Route path="discover" element={<PortalDiscover />} />
+              <Route path="onboarding" element={<ManualOscIngest />} />
             </Route>
-
-            {/* External Client Onboarding Route */}
-            <Route path="/portal/onboarding" element={<ManualOscIngest />} />
 
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<AdminDashboard />} />

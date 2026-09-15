@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useOutletContext } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db, functions } from '../../lib/firebase';
@@ -13,6 +14,7 @@ type PortalState = 'IDLE' | 'PROCESSING' | 'RESULTS';
 
 export const PortalDiscover: React.FC = () => {
   const { user } = useAuth();
+  const { oscId } = useOutletContext<{ oscId: string | null }>();
   const [currentState, setCurrentState] = useState<PortalState>('IDLE');
   const [matches, setMatches] = useState<MatchResult[]>([]);
   const [isInitializing, setIsInitializing] = useState(true);
@@ -20,14 +22,13 @@ export const PortalDiscover: React.FC = () => {
   // For the labor illusion
   const [processingStep, setProcessingStep] = useState(0);
 
-  // Fallback oscId (since external users must have one, we derive it from user id or claims,
-  // but for this blueprint, we'll assume the user ID is the oscId or we fetch it.
-  // We'll use a mocked oscId or user.uid for demonstration).
-  const oscId = user?.uid || 'mock-osc-id';
-
   useEffect(() => {
     // Optimistic Initialization: Check for existing valid matches on mount
     const checkExistingMatches = async () => {
+      if (!oscId) {
+        setIsInitializing(false);
+        return;
+      }
       try {
         const matchesRef = collection(db, 'matches');
         const q = query(
@@ -64,7 +65,7 @@ export const PortalDiscover: React.FC = () => {
 
     // Trigger the backend verification asynchronously so it doesn't block UI animations
     const triggerBatchVerification = httpsCallable(functions, 'triggerBatchVerification');
-    triggerBatchVerification({ oscId }).catch(err => {
+    triggerBatchVerification({ targetId: oscId, targetType: 'osc' }).catch(err => {
         console.error("Error triggering batch:", err);
         toast.error("Houve um erro ao iniciar a busca. Tentando continuar localmente.");
     });
@@ -104,21 +105,6 @@ export const PortalDiscover: React.FC = () => {
         const fetchedMatches = snapshot.docs
           .map(doc => ({ id: doc.id, ...doc.data() } as MatchResult))
           .filter(m => m.eligibility !== false && m.actionState !== 'Rejeitado');
-
-        // Mock some data if empty just for visual testing of the blueprint
-        if (fetchedMatches.length === 0) {
-            fetchedMatches.push({
-                id: 'mock-1',
-                editalId: 'e-1',
-                oscId,
-                matchScore: 94,
-                eligibility: true,
-                actionState: 'Pendente',
-                aiSummary: "Alto alinhamento com seu histórico de projetos educacionais. Pede 2 anos de fundação (você tem 5).",
-                reasoning: "Baseado no Edital X, a cláusula 4.2 exige atuação em educação infantil, o que consta expressamente no estatuto da sua organização.",
-                badges: ["Alto Alinhamento", "Encerra em 15 dias"]
-            });
-        }
 
         setMatches(fetchedMatches);
         setCurrentState('RESULTS');
