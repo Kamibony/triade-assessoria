@@ -1,18 +1,67 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Outlet, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { LogOut } from 'lucide-react';
-import { auth } from '../../lib/firebase';
+import { LogOut, Loader2 } from 'lucide-react';
+import { auth, db } from '../../lib/firebase';
 import { signOut } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
 
 export const PortalLayout: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [oscId, setOscId] = useState<string | null>(null);
+  const [isChecking, setIsChecking] = useState(true);
+
+  useEffect(() => {
+    const checkUserOscId = async () => {
+      if (!user) {
+        setIsChecking(false);
+        return;
+      }
+
+      try {
+        const userDocRef = doc(db, 'users', user.uid);
+        const userDocSnap = await getDoc(userDocRef);
+
+        if (userDocSnap.exists()) {
+          const userData = userDocSnap.data();
+          if (userData.oscId) {
+            setOscId(userData.oscId);
+          } else {
+            // No oscId, redirect to onboarding VIP flow
+            navigate('/portal/onboarding', { replace: true });
+          }
+        } else {
+           // No user doc, redirect to onboarding VIP flow
+           navigate('/portal/onboarding', { replace: true });
+        }
+      } catch (error) {
+        console.error("Error checking user oscId:", error);
+      } finally {
+        setIsChecking(false);
+      }
+    };
+
+    checkUserOscId();
+  }, [user, navigate]);
 
   const handleLogout = async () => {
     await signOut(auth);
     navigate('/login');
   };
+
+  if (isChecking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  // We only render layout if we are not redirecting (either we have oscId or user isn't fully loaded yet, which ProtectedRoute handles)
+  if (user && !oscId) {
+     return null; // Will be redirected by useEffect
+  }
 
   return (
     <div className="min-h-screen bg-muted/10 text-foreground selection:bg-primary/30 selection:text-primary-foreground font-sans flex flex-col">
@@ -37,7 +86,7 @@ export const PortalLayout: React.FC = () => {
       </header>
 
       <main className="flex-grow container mx-auto px-4 py-8 max-w-6xl">
-        <Outlet />
+        <Outlet context={{ oscId }} />
       </main>
 
       <footer className="py-6 text-center text-sm text-muted-foreground border-t bg-background">
