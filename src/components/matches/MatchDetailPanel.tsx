@@ -1,6 +1,6 @@
 
 import { useState, useEffect } from 'react';
-import { FileText, ExternalLink, ShieldAlert, CheckCircle2, XCircle, HelpCircle } from 'lucide-react';
+import { FileText, ExternalLink, ShieldAlert, CheckCircle2, XCircle, HelpCircle, AlertCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { MatchResult, Edital, NgoProfile } from '../../lib/types';
