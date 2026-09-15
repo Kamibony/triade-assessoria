@@ -27,13 +27,7 @@ export const PortalLayout: React.FC = () => {
           const userData = userDocSnap.data();
           if (userData.oscId) {
             setOscId(userData.oscId);
-          } else {
-            // No oscId, redirect to onboarding VIP flow
-            navigate('/portal/onboarding', { replace: true });
           }
-        } else {
-           // No user doc, redirect to onboarding VIP flow
-           navigate('/portal/onboarding', { replace: true });
         }
       } catch (error) {
         console.error("Error checking user oscId:", error);
@@ -43,7 +37,7 @@ export const PortalLayout: React.FC = () => {
     };
 
     checkUserOscId();
-  }, [user, navigate]);
+  }, [user]);
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -56,11 +50,6 @@ export const PortalLayout: React.FC = () => {
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
       </div>
     );
-  }
-
-  // We only render layout if we are not redirecting (either we have oscId or user isn't fully loaded yet, which ProtectedRoute handles)
-  if (user && !oscId) {
-     return null; // Will be redirected by useEffect
   }
 
   return (
