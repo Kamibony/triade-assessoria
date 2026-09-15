@@ -4,10 +4,15 @@ import { functions, storage } from '../lib/firebase';
 import { ref, uploadBytes } from 'firebase/storage';
 import { Button } from './ui/Button';
 import { Loader2, UploadCloud, CheckCircle2, AlertCircle, File, X } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 
-export function ManualOscIngest() {
+interface ManualOscIngestProps {
+  onSuccess?: (oscId: string) => void;
+}
+
+export function ManualOscIngest({ onSuccess }: ManualOscIngestProps = {}) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [files, setFiles] = useState<File[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
@@ -214,7 +219,15 @@ export function ManualOscIngest() {
                   alert("Houve um erro ao iniciar a busca. Você pode tentar novamente na dashboard.");
                 } finally {
                   setIsSearching(false);
-                  navigate(`/admin/radar?oscId=${result.oscId}`);
+                  if (onSuccess && result.oscId) {
+                    onSuccess(result.oscId);
+                  } else {
+                    if (location.pathname.startsWith('/portal')) {
+                      navigate(`/portal/discover?oscId=${result.oscId}`);
+                    } else {
+                      navigate(`/admin/radar?oscId=${result.oscId}`);
+                    }
+                  }
                 }
               }}
             >
