@@ -2754,6 +2754,7 @@ exports.ingestSingleOscByCnpj = (0, https_1.onCall)({
         if (userRole === 'client') {
             await db.collection('users').doc(request.auth.uid).update({
                 oscId: cleanCnpj,
+                oscIds: firestore_1.FieldValue.arrayUnion(cleanCnpj),
                 updatedAt: firestore_1.FieldValue.serverTimestamp()
             });
             console.log(`[ingestSingleOscByCnpj] Mapped OSC ID ${cleanCnpj} to client user ${request.auth.uid}`);
@@ -2825,6 +2826,7 @@ exports.ingestManualOscFunction = (0, https_1.onCall)({
         if (userRole === 'client') {
             await db.collection('users').doc(request.auth.uid).update({
                 oscId: cleanCnpj,
+                oscIds: firestore_1.FieldValue.arrayUnion(cleanCnpj),
                 updatedAt: firestore_1.FieldValue.serverTimestamp()
             });
             console.log(`[ingestManualOscFunction] Mapped OSC ID ${cleanCnpj} to client user ${request.auth.uid}`);

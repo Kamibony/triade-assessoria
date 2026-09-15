@@ -3092,6 +3092,7 @@ export const ingestSingleOscByCnpj = onCall({
         if (userRole === 'client') {
             await db.collection('users').doc(request.auth.uid).update({
                 oscId: cleanCnpj,
+                oscIds: FieldValue.arrayUnion(cleanCnpj),
                 updatedAt: FieldValue.serverTimestamp()
             });
             console.log(`[ingestSingleOscByCnpj] Mapped OSC ID ${cleanCnpj} to client user ${request.auth.uid}`);
@@ -3174,6 +3175,7 @@ export const ingestManualOscFunction = onCall({
         if (userRole === 'client') {
             await db.collection('users').doc(request.auth.uid).update({
                 oscId: cleanCnpj,
+                oscIds: FieldValue.arrayUnion(cleanCnpj),
                 updatedAt: FieldValue.serverTimestamp()
             });
             console.log(`[ingestManualOscFunction] Mapped OSC ID ${cleanCnpj} to client user ${request.auth.uid}`);
