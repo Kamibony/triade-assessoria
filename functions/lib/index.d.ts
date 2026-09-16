@@ -701,4 +701,13 @@ export declare const scheduledGlobalIngestion: import("firebase-functions/v2/sch
 export declare const rssWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
 export declare const scheduledIngestionTimeoutSweeper: import("firebase-functions/v2/scheduler").ScheduleFunction;
 export declare const cronDeactivateExpiredEditais: import("firebase-functions/v2/scheduler").ScheduleFunction;
+export declare const refreshOscOpportunities: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+    message: string;
+    jobId: null;
+} | {
+    success: boolean;
+    jobId: string;
+    message: string;
+}>, unknown>;
 //# sourceMappingURL=index.d.ts.map
