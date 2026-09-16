@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cronDeactivateExpiredEditais = exports.scheduledIngestionTimeoutSweeper = exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.recalculateDashboardStats = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestSingleOscByCnpj = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.triggerBulkInternalMatch = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.runVectorMigration = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.triggerBatchVerification = exports.verifyMatchConstraintWorker = exports.verifyMatchConstraints = exports.verificationAgentFlow = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
+exports.refreshOscOpportunities = exports.cronDeactivateExpiredEditais = exports.scheduledIngestionTimeoutSweeper = exports.rssWorker = exports.scheduledGlobalIngestion = exports.triggerGlobalIngestion = exports.prosasBulkDiscoveryWorker = exports.renewProsasSessionCron = exports.onSearchCreated = exports.processScrapingTargetWorker = exports.prosasAuthenticatedWorker = exports.extractionWorker = exports.seedScrapingTargets = exports.triggerScrapingWorker = exports.autonomousSearchWorker = exports.triggerAgenticSearch = exports.onMatchGenerated = exports.recalculateDashboardStats = exports.scheduledMatchSweeper = exports.manualTriggerRssSyncFunction = exports.askCopilotFunction = exports.ingestManualEditalFunction = exports.ingestManualOscFunction = exports.ingestSingleOscByCnpj = exports.onOscUpdated = exports.triggerMatchOrchestrator = exports.triggerBulkInternalMatch = exports.ingestOscDataFunction = exports.processOscChunkWorker = exports.matchEvaluatorWorker = exports.agenticSearchWorker = exports.runVectorMigration = exports.extractEditalRulesFunction = exports.extractEditalRulesWorker = exports.extractEditalRules = exports.parsePdfProfileFunction = exports.parsePdfProfileWorker = exports.triggerBatchVerification = exports.verifyMatchConstraintWorker = exports.verifyMatchConstraints = exports.verificationAgentFlow = exports.thematicAgentFlow = exports.bureaucracyAgentFlow = void 0;
 exports.formatGenkitError = formatGenkitError;
 exports.fetchAndExtractText = fetchAndExtractText;
 exports.enqueueEditalExtraction = enqueueEditalExtraction;
@@ -4727,5 +4727,99 @@ exports.cronDeactivateExpiredEditais = (0, scheduler_1.onSchedule)({
     catch (error) {
         console.error(`[cronDeactivateExpiredEditais] Error during execution:`, error);
     }
+});
+exports.refreshOscOpportunities = (0, https_1.onCall)({
+    cors: true,
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    invoker: 'public',
+}, async (request) => {
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'User must be authenticated.');
+    }
+    const { targetId } = request.data;
+    if (!targetId) {
+        throw new https_1.HttpsError('invalid-argument', 'O parâmetro targetId (oscId) é obrigatório.');
+    }
+    const db = (0, firestore_1.getFirestore)();
+    const oscRef = db.collection('oscs').doc(targetId);
+    const oscDoc = await oscRef.get();
+    if (!oscDoc.exists) {
+        throw new https_1.HttpsError('not-found', 'OSC não encontrada.');
+    }
+    // Purge existing matches for this OSC
+    const existingMatchesSnap = await db.collection('matches').where('oscId', '==', targetId).get();
+    const batch = db.batch();
+    existingMatchesSnap.docs.forEach(doc => {
+        batch.delete(doc.ref);
+    });
+    await batch.commit();
+    const oscData = oscDoc.data();
+    let oscEmbedding = oscData.embedding;
+    if (!oscEmbedding) {
+        const oscText = `Missão/Descrição: ${oscData.mission || 'Não especificada'}. Foco: ${(Array.isArray(oscData.coreActivities) ? oscData.coreActivities.join(', ') : 'Não especificadas')}. Nome: ${oscData.name || ''}`;
+        const embedding = await generateTextEmbedding(oscText);
+        oscEmbedding = firestore_1.FieldValue.vector(embedding);
+        await oscRef.update({ embedding: oscEmbedding });
+    }
+    const vectorQuery = Array.isArray(oscEmbedding) ? firestore_1.FieldValue.vector(oscEmbedding) : oscEmbedding;
+    // Fetch top matching editais
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const internalEditaisSnapshot = await db.collection('editais')
+        .where('ativo', '==', true)
+        .findNearest('embedding', vectorQuery, { limit: 15, distanceMeasure: 'COSINE', distanceResultField: 'vectorDistance' })
+        .get();
+    const validInternalMatches = internalEditaisSnapshot.docs
+        .map((editalDoc) => {
+        let vectorDistance = (editalDoc.get('vectorDistance') ?? editalDoc.data()?.vectorDistance);
+        let similarity;
+        if (vectorDistance === undefined || vectorDistance === null) {
+            const editalEmbedding = editalDoc.data()?.embedding;
+            similarity = cosineSimilarity(oscEmbedding, editalEmbedding);
+            vectorDistance = 1 - similarity;
+        }
+        else {
+            similarity = 1 - vectorDistance;
+        }
+        return {
+            id: editalDoc.id,
+            distance: vectorDistance,
+            similarity: similarity
+        };
+    })
+        .filter((m) => m.similarity >= 0.25);
+    // Generate fresh matches
+    const newMatches = [];
+    for (const match of validInternalMatches) {
+        const matchResult = await processMatchEvaluation(targetId, match.id, true);
+        if (matchResult && matchResult.id && typeof matchResult.id === 'string' && !matchResult.id.startsWith('error_')) {
+            newMatches.push(matchResult);
+        }
+    }
+    const pendingMatchesSnap = await db.collection('matches').where('oscId', '==', targetId).get();
+    const pendingMatches = pendingMatchesSnap.docs.filter(doc => {
+        const data = doc.data();
+        return data.actionState !== 'Aprovado' && data.actionState !== 'Rejeitado' && data.eligibility !== false && !data.verificationResult;
+    });
+    if (pendingMatches.length === 0) {
+        return { success: true, message: 'Novos editais buscados, mas nenhum match pendente para verificação.', jobId: null };
+    }
+    const jobRef = db.collection('system_jobs').doc();
+    const jobId = jobRef.id;
+    await jobRef.set({
+        targetId,
+        targetType: 'osc',
+        type: 'batch_verification',
+        totalTasks: pendingMatches.length,
+        completedTasks: 0,
+        failedTasks: 0,
+        status: 'running',
+        createdAt: firestore_1.FieldValue.serverTimestamp(),
+        updatedAt: firestore_1.FieldValue.serverTimestamp()
+    });
+    const queue = (0, functions_1.getFunctions)().taskQueue('verifyMatchConstraintWorker');
+    const enqueuePromises = pendingMatches.map(matchDoc => queue.enqueue({ matchId: matchDoc.id, jobId }));
+    await Promise.all(enqueuePromises);
+    return { success: true, jobId, message: `${pendingMatches.length} novas oportunidades enfileiradas para verificação.` };
 });
 //# sourceMappingURL=index.js.map

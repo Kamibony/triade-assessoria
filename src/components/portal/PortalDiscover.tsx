@@ -5,11 +5,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db, functions } from '../../lib/firebase';
 import { httpsCallable } from 'firebase/functions';
-import { Search, ChevronRight, CheckCircle2, Clock, AlertCircle, RefreshCw } from 'lucide-react';
+import { Search, ChevronRight, CheckCircle2, Clock, AlertCircle, RefreshCw, X } from 'lucide-react';
 import { Button } from '../ui/Button';
 import type { MatchResult } from '../../lib/types';
 import toast from 'react-hot-toast';
 import { useActiveOsc } from '../../contexts/portal/ActiveOscContext';
+import { MatchDetailPanel } from '../matches/MatchDetailPanel';
 
 type PortalState = 'IDLE' | 'PROCESSING' | 'RESULTS';
 
@@ -22,6 +23,7 @@ export const PortalDiscover: React.FC = () => {
   const [currentState, setCurrentState] = useState<PortalState>('IDLE');
   const [matches, setMatches] = useState<MatchResult[]>([]);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [selectedMatch, setSelectedMatch] = useState<MatchResult | null>(null);
 
 
 
@@ -70,8 +72,8 @@ export const PortalDiscover: React.FC = () => {
     setProcessingStep(0);
 
     // Trigger the backend verification asynchronously so it doesn't block UI animations
-    const triggerBatchVerification = httpsCallable(functions, 'triggerBatchVerification');
-    triggerBatchVerification({ targetId: oscId, targetType: 'osc' }).catch(err => {
+    const refreshOscOpportunities = httpsCallable(functions, 'refreshOscOpportunities');
+    refreshOscOpportunities({ targetId: oscId }).catch(err => {
         console.error("Error triggering batch:", err);
         toast.error("Houve um erro ao iniciar a busca. Tentando continuar localmente.");
     });
@@ -270,9 +272,11 @@ export const PortalDiscover: React.FC = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {matches.map((match) => (
-                <OpportunityCard key={match.id} match={match} />
+                <OpportunityCard key={match.id} match={match} onClick={() => setSelectedMatch(match)} />
               ))}
             </div>
+
+            {selectedMatch && <OpportunityDetailsModal match={selectedMatch} onClose={() => setSelectedMatch(null)} />}
 
             {matches.length === 0 && (
                 <div className="text-center py-20 bg-muted/20 rounded-2xl border border-dashed">
@@ -291,7 +295,10 @@ export const PortalDiscover: React.FC = () => {
 
 
 // Opportunity Card Component (Inline for the blueprint)
-const OpportunityCard: React.FC<{ match: MatchResult }> = ({ match }) => {
+
+const OpportunityCard: React.FC<{ match: MatchResult; onClick?: () => void }> = ({ match, onClick }) => {
+    const isPendingInfo = match.verificationResult?.some(r => r.status === 'Pendente de Informação');
+
     return (
         <div className="bg-card border rounded-2xl overflow-hidden hover:shadow-lg transition-all duration-300 flex flex-col h-full group">
             <div className="p-6 flex-grow space-y-4">
@@ -302,7 +309,14 @@ const OpportunityCard: React.FC<{ match: MatchResult }> = ({ match }) => {
                                 {badge}
                             </span>
                         ))}
+                        {isPendingInfo && (
+                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-700 text-xs font-semibold rounded-md mr-2 mb-2">
+                                <AlertCircle className="w-3 h-3" />
+                                Pendente de Informação
+                            </span>
+                        )}
                     </div>
+
                     {/* Score Ring */}
                     <div className="flex flex-col items-center justify-center w-12 h-12 bg-green-50 rounded-full border border-green-100 shrink-0">
                         <span className="text-sm font-bold text-green-700">{match.matchScore}%</span>
@@ -329,11 +343,53 @@ const OpportunityCard: React.FC<{ match: MatchResult }> = ({ match }) => {
                 <Button
                     variant="default"
                     className="w-full group-hover:bg-primary transition-colors"
-                    onClick={() => toast.success("Abre o modal de detalhes (OpportunityDetailsModal) com a justificativa completa em Markdown.")}
+                    onClick={onClick}
                 >
                     Ver Detalhes e Justificativa
                 </Button>
             </div>
         </div>
+    );
+};
+
+
+const OpportunityDetailsModal: React.FC<{ match: MatchResult; onClose: () => void }> = ({ match, onClose }) => {
+    return (
+        <AnimatePresence>
+            <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm"
+                onClick={onClose}
+            >
+                <motion.div
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.95, opacity: 0 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="relative w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-card rounded-2xl border shadow-xl p-6"
+                >
+                    <button
+                        onClick={onClose}
+                        className="absolute top-4 right-4 p-2 rounded-full hover:bg-muted transition-colors"
+                    >
+                        <X className="w-5 h-5 text-muted-foreground" />
+                    </button>
+
+                    <h2 className="text-2xl font-bold mb-6 pr-8">
+                        Edital {match.editalId} - Detalhes
+                    </h2>
+
+                    <MatchDetailPanel
+                        match={match}
+                        onFeedback={(_matchId, action) => {
+                            toast.success(`Feedback salvo: ${action}`);
+                            // Em produção, isso faria a chamada para a API
+                        }}
+                    />
+                </motion.div>
+            </motion.div>
+        </AnimatePresence>
     );
 };
