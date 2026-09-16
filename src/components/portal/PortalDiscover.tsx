@@ -23,12 +23,7 @@ export const PortalDiscover: React.FC = () => {
   const [matches, setMatches] = useState<MatchResult[]>([]);
   const [isInitializing, setIsInitializing] = useState(true);
 
-  useEffect(() => {
-    // Security check: Ensure oscId is present and authorized
-    if (!isInitializing && (!oscId || !oscIds.includes(oscId))) {
-       navigate('/portal');
-    }
-  }, [oscId, oscIds, isInitializing, navigate]);
+
 
   // For the labor illusion
   const [processingStep, setProcessingStep] = useState(0);
@@ -131,12 +126,37 @@ export const PortalDiscover: React.FC = () => {
       startDiscovery();
   };
 
+
   if (isInitializing) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
         <div className="animate-pulse flex flex-col items-center gap-4">
           <div className="w-12 h-12 bg-primary/20 rounded-full"></div>
           <div className="h-4 w-32 bg-muted rounded"></div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!oscId || !oscIds.includes(oscId)) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center space-y-6">
+        <div className="w-20 h-20 bg-muted rounded-full flex items-center justify-center mb-2">
+          <AlertCircle className="w-10 h-10 text-muted-foreground" />
+        </div>
+        <div className="space-y-2 max-w-md">
+          <h2 className="text-2xl font-bold">Nenhuma OSC Selecionada</h2>
+          <p className="text-muted-foreground">
+            Para descobrir oportunidades, você precisa selecionar uma organização.
+          </p>
+        </div>
+        <div className="flex gap-4">
+          <Button onClick={() => navigate('/portal')} variant="outline">
+            Ir para o Dashboard Hub
+          </Button>
+          <Button onClick={() => navigate('/portal/onboarding')}>
+            Adicionar Nova OSC
+          </Button>
         </div>
       </div>
     );
