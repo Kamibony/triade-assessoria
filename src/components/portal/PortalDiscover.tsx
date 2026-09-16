@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, onSnapshot } from 'firebase/firestore';
 import { db, functions } from '../../lib/firebase';
 import { httpsCallable } from 'firebase/functions';
 import { Search, ChevronRight, CheckCircle2, Clock, AlertCircle, RefreshCw, X } from 'lucide-react';
@@ -24,11 +24,33 @@ export const PortalDiscover: React.FC = () => {
   const [matches, setMatches] = useState<MatchResult[]>([]);
   const [isInitializing, setIsInitializing] = useState(true);
   const [selectedMatch, setSelectedMatch] = useState<MatchResult | null>(null);
-
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
 
   // For the labor illusion
   const [processingStep, setProcessingStep] = useState(0);
+
+  useEffect(() => {
+    if (!activeJobId) return;
+
+    const jobRef = doc(db, 'system_jobs', activeJobId);
+    const unsubscribe = onSnapshot(jobRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data.status === 'completed' || data.status === 'failed') {
+          setActiveJobId(null);
+          if (data.status === 'completed') {
+             toast.success('Curadoria de oportunidades finalizada com sucesso!');
+          } else {
+             toast.error('Erro na curadoria de oportunidades.');
+          }
+          fetchResults();
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [activeJobId]);
 
   useEffect(() => {
     // Optimistic Initialization: Check for existing valid matches on mount
@@ -71,13 +93,6 @@ export const PortalDiscover: React.FC = () => {
     setCurrentState('PROCESSING');
     setProcessingStep(0);
 
-    // Trigger the backend verification asynchronously so it doesn't block UI animations
-    const refreshOscOpportunities = httpsCallable(functions, 'refreshOscOpportunities');
-    refreshOscOpportunities({ targetId: oscId }).catch(err => {
-        console.error("Error triggering batch:", err);
-        toast.error("Houve um erro ao iniciar a busca. Tentando continuar localmente.");
-    });
-
     // Labor Illusion Steps
     const steps = [
       { delay: 1500, label: "Lendo seu Perfil OSC e Histórico de Impacto..." },
@@ -94,11 +109,27 @@ export const PortalDiscover: React.FC = () => {
         }, currentDelay);
     });
 
-    // Listen to system_jobs for actual completion (Simulated here with a timeout fallback)
-    // In production, this would be an onSnapshot on system_jobs
-    setTimeout(() => {
-        fetchResults();
-    }, currentDelay + 1000);
+    try {
+        const refreshOscOpportunities = httpsCallable(functions, 'refreshOscOpportunities');
+        const res = await refreshOscOpportunities({ targetId: oscId }) as { data: { jobId?: string, success: boolean, message?: string } };
+
+        if (res.data.jobId) {
+            setActiveJobId(res.data.jobId);
+        } else {
+             // No pending matches to verify or job was not created, transition immediately
+            setTimeout(() => {
+                fetchResults();
+            }, currentDelay + 1000);
+        }
+
+    } catch(err) {
+        console.error("Error triggering batch:", err);
+        toast.error("Houve um erro ao iniciar a busca. Tentando continuar localmente.");
+
+        setTimeout(() => {
+            fetchResults();
+        }, currentDelay + 1000);
+    }
   };
 
   const fetchResults = async () => {
