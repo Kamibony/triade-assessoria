@@ -21,6 +21,7 @@ import { ManualIngest } from './components/ManualIngest';
 import { ScrapingTargetsManager } from './components/ScrapingTargetsManager';
 import { IngestionRadar } from './components/IngestionRadar';
 import { ManualOscIngest } from './components/ManualOscIngest';
+import { PortalOnboarding } from './components/portal/PortalOnboarding';
 import { Login } from './components/Login';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { PortalLayout } from './components/portal/PortalLayout';
@@ -86,7 +87,7 @@ function App() {
             <Route path="/portal" element={<PortalLayout />}>
               <Route index element={<PortalWelcome />} />
               <Route path="discover" element={<PortalDiscover />} />
-              <Route path="onboarding" element={<ManualOscIngest />} />
+              <Route path="onboarding" element={<PortalOnboarding />} />
             </Route>
 
             <Route path="/admin" element={<AdminLayout />}>

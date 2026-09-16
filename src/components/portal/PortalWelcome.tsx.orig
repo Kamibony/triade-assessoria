@@ -6,11 +6,9 @@ import { Button } from '../ui/Button';
 import { useAuth } from '../../contexts/AuthContext';
 import { db } from '../../lib/firebase';
 import { collection, query, where, documentId, getDocs } from 'firebase/firestore';
-import { useActiveOsc } from '../../contexts/portal/ActiveOscContext';
 
 export const PortalWelcome: React.FC = () => {
   const { oscIds } = useOutletContext<{ oscIds: string[] }>();
-  const { setActiveOscId } = useActiveOsc();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [oscs, setOscs] = useState<any[]>([]);
@@ -91,10 +89,7 @@ export const PortalWelcome: React.FC = () => {
                   </div>
                   <Button
                     className="w-full group relative overflow-hidden"
-                    onClick={() => {
-                       setActiveOscId(osc.id);
-                       navigate('/portal/discover');
-                    }}
+                    onClick={() => navigate(`/portal/discover?oscId=${osc.id}`)}
                   >
                     <div className="absolute inset-0 bg-primary/10 group-hover:bg-transparent transition-colors" />
                     Acessar Painel

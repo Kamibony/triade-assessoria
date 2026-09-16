@@ -148,16 +148,7 @@ const PortalLayoutInner: React.FC = () => {
 
           <div className="flex-1 px-4 max-w-[200px]">
              {oscOptions.length > 0 && (
-               <select
-                 value={activeOscId || ''}
-                 onChange={(e) => setActiveOscId(e.target.value || null)}
-                 className="w-full text-xs bg-muted/50 border border-border rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary truncate"
-               >
-                 <option value="">Selecione uma OSC</option>
-                 {oscOptions.map(osc => (
-                   <option key={osc.id} value={osc.id}>{osc.name}</option>
-                 ))}
-               </select>
+                <div className="w-full">{oscPicker}</div>
              )}
           </div>
 

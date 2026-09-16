@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useOutletContext, useSearchParams, useNavigate } from 'react-router-dom';
+import { useOutletContext, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db, functions } from '../../lib/firebase';
@@ -9,15 +9,16 @@ import { Search, ChevronRight, CheckCircle2, Clock, AlertCircle, RefreshCw } fro
 import { Button } from '../ui/Button';
 import type { MatchResult } from '../../lib/types';
 import toast from 'react-hot-toast';
+import { useActiveOsc } from '../../contexts/portal/ActiveOscContext';
 
 type PortalState = 'IDLE' | 'PROCESSING' | 'RESULTS';
 
 export const PortalDiscover: React.FC = () => {
   const { user } = useAuth();
   const { oscIds } = useOutletContext<{ oscIds: string[] }>();
-  const [searchParams] = useSearchParams();
+
   const navigate = useNavigate();
-  const oscId = searchParams.get('oscId');
+  const { activeOscId: oscId } = useActiveOsc();
 
   const [currentState, setCurrentState] = useState<PortalState>('IDLE');
   const [matches, setMatches] = useState<MatchResult[]>([]);
@@ -147,7 +148,7 @@ export const PortalDiscover: React.FC = () => {
         <div className="space-y-2 max-w-md">
           <h2 className="text-2xl font-bold">Nenhuma OSC Selecionada</h2>
           <p className="text-muted-foreground">
-            Para descobrir oportunidades, você precisa selecionar uma organização.
+            Para descobrir oportunidades, selecione uma organização no menu acima ou adicione uma nova.
           </p>
         </div>
         <div className="flex gap-4">
