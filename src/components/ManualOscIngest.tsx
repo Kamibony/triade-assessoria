@@ -17,7 +17,6 @@ export function ManualOscIngest({ onSuccess }: ManualOscIngestProps = {}) {
   const [cnpjInput, setCnpjInput] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isSearching, setIsSearching] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [result, setResult] = useState<{type: 'success' | 'error', message: string, profile?: any, oscId?: string} | null>(null);
 
@@ -106,11 +105,6 @@ export function ManualOscIngest({ onSuccess }: ManualOscIngestProps = {}) {
               profile: data.profile,
               oscId: data.oscId
             });
-            if (onSuccess && data.oscId) {
-                onSuccess(data.oscId);
-            } else if (location.pathname.startsWith('/portal')) {
-                navigate(`/portal/discover?oscId=${data.oscId}`);
-            }
           } else {
             setResult({
               type: 'error',
@@ -281,37 +275,19 @@ export function ManualOscIngest({ onSuccess }: ManualOscIngestProps = {}) {
 
             <Button
               className="w-full mt-6 text-lg py-6 bg-brand-orange hover:bg-brand-orange/90 text-white"
-              disabled={isSearching}
-              onClick={async () => {
-                setIsSearching(true);
-                try {
-                  const triggerAgenticSearch = httpsCallable(functions, 'triggerAgenticSearch');
-                  await triggerAgenticSearch({ oscId: result.oscId });
-                } catch (error) {
-                  console.error("Error triggering agentic search:", error);
-                  alert("Houve um erro ao iniciar a busca. Você pode tentar novamente na dashboard.");
-                } finally {
-                  setIsSearching(false);
-                  if (onSuccess && result.oscId) {
-                    onSuccess(result.oscId);
+              onClick={() => {
+                if (onSuccess && result.oscId) {
+                  onSuccess(result.oscId);
+                } else {
+                  if (location.pathname.startsWith('/portal')) {
+                    navigate(`/portal/discover?oscId=${result.oscId}`);
                   } else {
-                    if (location.pathname.startsWith('/portal')) {
-                      navigate(`/portal/discover?oscId=${result.oscId}`);
-                    } else {
-                      navigate(`/admin/radar?oscId=${result.oscId}`);
-                    }
+                    navigate(`/admin/radar?oscId=${result.oscId}`);
                   }
                 }
               }}
             >
-              {isSearching ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                  Analisando Editais...
-                </>
-              ) : (
-                'Encontrar Editais Compatíveis'
-              )}
+              Acessar Painel da OSC
             </Button>
           </div>
         )}
