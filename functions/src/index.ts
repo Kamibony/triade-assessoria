@@ -2227,7 +2227,7 @@ export const processOscChunkWorker = onTaskDispatched({
 });
 
 export const ingestOscDataFunction = onCall({
-    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
+    cors: true,
     timeoutSeconds: 540,
     memory: '1GiB',
     invoker: 'public',
@@ -3040,6 +3040,9 @@ export const ingestSingleOscByCnpj = onCall({
         let brasilApiResponse: Response;
         try {
             brasilApiResponse = await fetchWithRetry(`https://brasilapi.com.br/api/cnpj/v1/${cleanCnpj}`);
+            if (!brasilApiResponse.ok) {
+                throw new Error(`BrasilAPI returned status: ${brasilApiResponse.status}`);
+            }
         } catch (fetchError: any) {
             console.error("BrasilAPI fetch failed:", fetchError);
             throw new HttpsError('not-found', 'CNPJ não encontrado na base de dados (Receita Federal) ou serviço indisponível.');
@@ -3403,7 +3406,7 @@ export const askCopilotFunction = onCall({
 });
 
 export const manualTriggerRssSyncFunction = onCall({
-    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
+    cors: true,
     invoker: 'public',
     timeoutSeconds: 540,
     memory: '1GiB'
@@ -3638,7 +3641,7 @@ export const onMatchGenerated = onDocumentWritten('matches/{matchId}', async (ev
 });
 
 export const triggerAgenticSearch = onCall({
-    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
+    cors: true,
     timeoutSeconds: 300,
     invoker: 'public',
     memory: '1GiB',
@@ -4994,7 +4997,7 @@ export const prosasBulkDiscoveryWorker = onTaskDispatched({
 
 
 export const triggerGlobalIngestion = onCall({
-    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
+    cors: true,
     invoker: 'public',
     timeoutSeconds: 540,
     memory: '1GiB'

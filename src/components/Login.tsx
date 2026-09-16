@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { auth, db } from '../lib/firebase';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from './ui/Button';
 import { Loader2, AlertCircle } from 'lucide-react';
@@ -34,10 +34,19 @@ export const Login = () => {
           createdAt: serverTimestamp()
         });
 
-        navigate('/portal/onboarding', { replace: true });
+        navigate('/portal', { replace: true });
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
-        navigate(from, { replace: true });
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        const user = userCredential.user;
+
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        const userRole = userDoc.data()?.role;
+
+        if (userRole === 'client') {
+          navigate('/portal', { replace: true });
+        } else {
+          navigate(from, { replace: true });
+        }
       }
     } catch (err: unknown) {
       console.error(err);

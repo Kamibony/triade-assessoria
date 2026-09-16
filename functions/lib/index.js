@@ -1997,7 +1997,7 @@ exports.processOscChunkWorker = (0, tasks_1.onTaskDispatched)({
     logger.info(`Chunk processing complete. Processed: ${processed}, Imported: ${imported}`);
 });
 exports.ingestOscDataFunction = (0, https_1.onCall)({
-    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
+    cors: true,
     timeoutSeconds: 540,
     memory: '1GiB',
     invoker: 'public',
@@ -2707,6 +2707,9 @@ exports.ingestSingleOscByCnpj = (0, https_1.onCall)({
         let brasilApiResponse;
         try {
             brasilApiResponse = await fetchWithRetry(`https://brasilapi.com.br/api/cnpj/v1/${cleanCnpj}`);
+            if (!brasilApiResponse.ok) {
+                throw new Error(`BrasilAPI returned status: ${brasilApiResponse.status}`);
+            }
         }
         catch (fetchError) {
             console.error("BrasilAPI fetch failed:", fetchError);
@@ -3026,7 +3029,7 @@ exports.askCopilotFunction = (0, https_1.onCall)({
     }
 });
 exports.manualTriggerRssSyncFunction = (0, https_1.onCall)({
-    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
+    cors: true,
     invoker: 'public',
     timeoutSeconds: 540,
     memory: '1GiB'
@@ -3219,7 +3222,7 @@ exports.onMatchGenerated = (0, firestore_2.onDocumentWritten)('matches/{matchId}
     }
 });
 exports.triggerAgenticSearch = (0, https_1.onCall)({
-    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
+    cors: true,
     timeoutSeconds: 300,
     invoker: 'public',
     memory: '1GiB',
@@ -4463,7 +4466,7 @@ exports.prosasBulkDiscoveryWorker = (0, tasks_1.onTaskDispatched)({
     }
 });
 exports.triggerGlobalIngestion = (0, https_1.onCall)({
-    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
+    cors: true,
     invoker: 'public',
     timeoutSeconds: 540,
     memory: '1GiB'
