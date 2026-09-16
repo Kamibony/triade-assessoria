@@ -4,7 +4,7 @@ import { functions, storage } from '../lib/firebase';
 import { ref, uploadBytes } from 'firebase/storage';
 import { Button } from './ui/Button';
 import { Loader2, UploadCloud, CheckCircle2, AlertCircle, File, X, Building2 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 interface ManualOscIngestProps {
   onSuccess?: (oscId: string) => void;
@@ -12,7 +12,7 @@ interface ManualOscIngestProps {
 
 export function ManualOscIngest({ onSuccess }: ManualOscIngestProps = {}) {
   const navigate = useNavigate();
-
+  const location = useLocation();
   const [ingestMode, setIngestMode] = useState<'cnpj' | 'pdf'>('cnpj');
   const [cnpjInput, setCnpjInput] = useState('');
   const [files, setFiles] = useState<File[]>([]);
@@ -279,7 +279,11 @@ export function ManualOscIngest({ onSuccess }: ManualOscIngestProps = {}) {
                 if (onSuccess && result.oscId) {
                   onSuccess(result.oscId);
                 } else {
-                  navigate(`/admin/radar?oscId=${result.oscId}`);
+                  if (location.pathname.startsWith('/portal')) {
+                    navigate(`/portal/discover?oscId=${result.oscId}`);
+                  } else {
+                    navigate(`/admin/radar?oscId=${result.oscId}`);
+                  }
                 }
               }}
             >
