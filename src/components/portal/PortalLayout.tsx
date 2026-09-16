@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { LogOut, Home, Search, PlusCircle, Loader2 } from 'lucide-react';
 import { auth, db } from '../../lib/firebase';
 import { signOut } from 'firebase/auth';
-import { doc, getDoc, collection, query, where, documentId, getDocs } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, documentId, getDocs } from 'firebase/firestore';
 import { ActiveOscProvider, useActiveOsc } from '../../contexts/portal/ActiveOscContext';
 
 const PortalLayoutInner: React.FC = () => {
@@ -16,16 +16,17 @@ const PortalLayoutInner: React.FC = () => {
   const { activeOscId, setActiveOscId, oscOptions, setOscOptions } = useActiveOsc();
 
   useEffect(() => {
-    const checkUserOscIds = async () => {
-      if (!user) {
-        setIsChecking(false);
-        return;
-      }
+    if (!user) {
+      setIsChecking(false);
+      return;
+    }
 
-      try {
-        const userDocRef = doc(db, 'users', user.uid);
-        const userDocSnap = await getDoc(userDocRef);
+    let unsubscribeUser = () => {};
 
+    try {
+      const userDocRef = doc(db, 'users', user.uid);
+
+      unsubscribeUser = onSnapshot(userDocRef, async (userDocSnap) => {
         if (userDocSnap.exists()) {
           const userData = userDocSnap.data();
           let userOscIds: string[] = [];
@@ -55,14 +56,17 @@ const PortalLayoutInner: React.FC = () => {
              }
           }
         }
-      } catch (error) {
-        console.error("Error checking user oscIds:", error);
-      } finally {
         setIsChecking(false);
-      }
-    };
+      }, (error) => {
+        console.error("Error checking user oscIds:", error);
+        setIsChecking(false);
+      });
+    } catch (error) {
+      console.error("Error setting up user listener:", error);
+      setIsChecking(false);
+    }
 
-    checkUserOscIds();
+    return () => unsubscribeUser();
   }, [user]);
 
   const handleLogout = async () => {

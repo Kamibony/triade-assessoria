@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useOutletContext, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db, functions } from '../../lib/firebase';
@@ -15,7 +15,6 @@ type PortalState = 'IDLE' | 'PROCESSING' | 'RESULTS';
 
 export const PortalDiscover: React.FC = () => {
   const { user } = useAuth();
-  const { oscIds } = useOutletContext<{ oscIds: string[] }>();
 
   const navigate = useNavigate();
   const { activeOscId: oscId } = useActiveOsc();
@@ -139,7 +138,7 @@ export const PortalDiscover: React.FC = () => {
     );
   }
 
-  if (!oscId || !oscIds.includes(oscId)) {
+  if (!oscId) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center space-y-6">
         <div className="w-20 h-20 bg-muted rounded-full flex items-center justify-center mb-2">
