@@ -139,7 +139,7 @@ export const PortalDiscover: React.FC = () => {
     );
   }
 
-  if (!oscId || !oscIds.includes(oscId)) {
+  if (!oscId) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center space-y-6">
         <div className="w-20 h-20 bg-muted rounded-full flex items-center justify-center mb-2">
