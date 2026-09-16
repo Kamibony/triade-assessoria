@@ -3012,7 +3012,6 @@ async function processRssFeeds(runId?: string) {
 }
 
 export const ingestSingleOscByCnpj = onCall({
-    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
     invoker: 'public',
     timeoutSeconds: 60,
     memory: '512MiB',
@@ -3038,7 +3037,14 @@ export const ingestSingleOscByCnpj = onCall({
     }
 
     try {
-        const brasilApiResponse = await fetchWithRetry(`https://brasilapi.com.br/api/cnpj/v1/${cleanCnpj}`);
+        let brasilApiResponse: Response;
+        try {
+            brasilApiResponse = await fetchWithRetry(`https://brasilapi.com.br/api/cnpj/v1/${cleanCnpj}`);
+        } catch (fetchError: any) {
+            console.error("BrasilAPI fetch failed:", fetchError);
+            throw new HttpsError('not-found', 'CNPJ não encontrado na base de dados (Receita Federal) ou serviço indisponível.');
+        }
+
         const brasilApiData = await brasilApiResponse.json();
 
         const name = brasilApiData.razao_social || brasilApiData.nome_fantasia || 'ONG Desconhecida';
@@ -3117,7 +3123,6 @@ export const ingestSingleOscByCnpj = onCall({
 });
 
 export const ingestManualOscFunction = onCall({
-    cors: [/triade-assessoria\.web\.app$/, /triade-assessoria\.firebaseapp\.com$/, /localhost:/],
     invoker: 'public',
     timeoutSeconds: 540,
     memory: '1GiB',
