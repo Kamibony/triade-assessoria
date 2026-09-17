@@ -328,16 +328,16 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
     actionPlan: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     actionState: z.ZodDefault<z.ZodOptional<z.ZodEnum<["Pendente", "Aprovado", "Rejeitado", "Revisao"]>>>;
     verificationResult: z.ZodOptional<z.ZodArray<z.ZodObject<{
-        criterion: z.ZodString;
-        status: z.ZodEnum<["Aprovado", "Reprovado", "Pendente de Informação", "Não Encontrado"]>;
+        criterion: z.ZodEnum<["Localização", "Prazo", "Fundação", "Documentação"]>;
+        status: z.ZodEnum<["Aprovado", "Reprovado", "Pendente de Informação"]>;
         citation: z.ZodString;
     }, "strip", z.ZodTypeAny, {
-        status: "Aprovado" | "Reprovado" | "Pendente de Informação" | "Não Encontrado";
-        criterion: string;
+        status: "Aprovado" | "Reprovado" | "Pendente de Informação";
+        criterion: "Localização" | "Prazo" | "Fundação" | "Documentação";
         citation: string;
     }, {
-        status: "Aprovado" | "Reprovado" | "Pendente de Informação" | "Não Encontrado";
-        criterion: string;
+        status: "Aprovado" | "Reprovado" | "Pendente de Informação";
+        criterion: "Localização" | "Prazo" | "Fundação" | "Documentação";
         citation: string;
     }>, "many">>;
 }, "strip", z.ZodTypeAny, {
@@ -352,8 +352,8 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
     badges?: string[] | undefined;
     actionPlan?: string[] | undefined;
     verificationResult?: {
-        status: "Aprovado" | "Reprovado" | "Pendente de Informação" | "Não Encontrado";
-        criterion: string;
+        status: "Aprovado" | "Reprovado" | "Pendente de Informação";
+        criterion: "Localização" | "Prazo" | "Fundação" | "Documentação";
         citation: string;
     }[] | undefined;
 }, {
@@ -368,8 +368,8 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
     actionPlan?: string[] | undefined;
     actionState?: "Pendente" | "Aprovado" | "Rejeitado" | "Revisao" | undefined;
     verificationResult?: {
-        status: "Aprovado" | "Reprovado" | "Pendente de Informação" | "Não Encontrado";
-        criterion: string;
+        status: "Aprovado" | "Reprovado" | "Pendente de Informação";
+        criterion: "Localização" | "Prazo" | "Fundação" | "Documentação";
         citation: string;
     }[] | undefined;
 }>, z.ZodTypeAny, any, z.ZodTypeAny>;
@@ -438,16 +438,16 @@ export declare const verificationAgentFlow: import("genkit").Action<z.ZodObject<
     };
     editalText: string;
 }>, z.ZodArray<z.ZodObject<{
-    criterion: z.ZodString;
-    status: z.ZodEnum<["Aprovado", "Reprovado", "Pendente de Informação", "Não Encontrado"]>;
+    criterion: z.ZodEnum<["Localização", "Prazo", "Fundação", "Documentação"]>;
+    status: z.ZodEnum<["Aprovado", "Reprovado", "Pendente de Informação"]>;
     citation: z.ZodString;
 }, "strip", z.ZodTypeAny, {
-    status: "Aprovado" | "Reprovado" | "Pendente de Informação" | "Não Encontrado";
-    criterion: string;
+    status: "Aprovado" | "Reprovado" | "Pendente de Informação";
+    criterion: "Localização" | "Prazo" | "Fundação" | "Documentação";
     citation: string;
 }, {
-    status: "Aprovado" | "Reprovado" | "Pendente de Informação" | "Não Encontrado";
-    criterion: string;
+    status: "Aprovado" | "Reprovado" | "Pendente de Informação";
+    criterion: "Localização" | "Prazo" | "Fundação" | "Documentação";
     citation: string;
 }>, "many">, z.ZodTypeAny, any, z.ZodTypeAny>;
 /**
@@ -457,8 +457,8 @@ export declare const verificationAgentFlow: import("genkit").Action<z.ZodObject<
 export declare const verifyMatchConstraints: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
     verificationResult: {
-        status: "Aprovado" | "Reprovado" | "Pendente de Informação" | "Não Encontrado";
-        criterion: string;
+        status: "Aprovado" | "Reprovado" | "Pendente de Informação";
+        criterion: "Localização" | "Prazo" | "Fundação" | "Documentação";
         citation: string;
     }[];
 }>, unknown>;
