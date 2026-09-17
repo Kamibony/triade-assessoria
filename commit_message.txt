@@ -1,0 +1,6 @@
+Fix filtering logic to embrace High Recall Strategy
+
+* Updated the `verifyMatchConstraints` schema definition in `types.ts` to allow returning a string for `status`.
+* Ensured the `OpportunityCard` component checks `match.status?.includes('Pendente')` alongside other constraints.
+* Tweaked `verificationAgentFlow` and `bureaucracyAgentFlow` in backend to default to `Pendente de Informação` when there are uncertainties, avoiding silent rejections.
+* Adjusted vector threshold filters in background match evaluation processes to increase the amount of possible opportunities passed through the pipeline.

@@ -219,8 +219,9 @@ Regras de Ouro:
 2. Localização: Se o edital exige localizações específicas (${input.edital.eligibilityCriteria.requiredLocations.join(', ')}) e a ONG (${input.osc.location}) não está nelas (ou se a abrangência não for nacional/ampla o suficiente para incluí-la), a ONG é INELEGÍVEL.
 3. Idade da ONG: Calcule os anos desde a data de fundação (${input.osc.foundationDate}) até hoje. Se for menor que o mínimo exigido pelo edital (${input.edital.eligibilityCriteria.minYearsActive}), a ONG é INELEGÍVEL.
 
-Retorne { passesBureaucracy: false, rejectionReason: '...' } se falhar em ALGUMA dessas regras.
-Retorne { passesBureaucracy: true, rejectionReason: null } se passar por TODAS as regras.
+Se faltarem informações no perfil da ONG (ex: fundação ou localização desconhecidas) ou houver incerteza, NÃO REJEITE. Presuma que é elegível para posterior verificação.
+Retorne { passesBureaucracy: false, rejectionReason: '...' } APENAS se houver violação EXPLÍCITA e DEFINITIVA de prazo, local ou idade.
+Retorne { passesBureaucracy: true, rejectionReason: null } se passar por TODAS as regras ou se houver incerteza/dados pendentes.
 Responda APENAS com o JSON. NÃO explique o seu pensamento.`;
     const response = await ai.generate({
         model: 'vertexai/gemini-2.5-flash',
@@ -306,7 +307,7 @@ Regras estritas (GUARDRAILS):
 1. Se uma restrição (ex: "Apenas para ONGs do estado de SP") NÃO estiver explicitamente escrita no texto do edital, você DEVE gerar o status "Não Encontrado" para esse critério e "Não Encontrado" para a citação.
 2. NUNCA invente ou infira citações. A citação DEVE ser uma cópia exata ou um resumo muito fiel de um trecho REAL do texto fornecido.
 3. Se a ONG não cumprir um critério explícito, o status é "Reprovado". Se cumprir, é "Aprovado".
-4. Se o edital exigir um critério (ex: comprovar atuação numa área), mas o perfil da ONG não fornecer informações suficientes para você ter certeza absoluta (ex: a Atividade Principal ou Missão estão vazias, ou data de fundação é 'Data Desconhecida'), VOCÊ NÃO PODE REPROVAR. O status para este critério DEVE SER OBRIGATORIAMENTE 'Pendente de Informação'. Só gere 'Reprovado' se a informação da ONG for explicitamente contrária ao edital.
+4. Se o edital exigir um critério (ex: comprovar atuação numa área), mas o perfil da ONG não fornecer informações suficientes para você ter certeza absoluta (ex: a Atividade Principal ou Missão estão vazias, ou data de fundação é 'Data Desconhecida'), VOCÊ NÃO PODE REPROVAR. O status para este critério DEVE SER OBRIGATORIAMENTE 'Pendente de Informação'. Só gere 'Reprovado' se a informação da ONG for explicitamente e inquestionavelmente contrária a um critério rígido do edital. Em caso de incerteza ou margem para interpretação, incline-se para 'Pendente de Informação'.
 
 Avalie os seguintes critérios mínimos (você pode adicionar outros se achar relevante no texto):
 - Geografia (A ONG está na região permitida?)
@@ -1050,10 +1051,10 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
             sourceUrl: rawEditalData?.sourceUrl || null,
             createdAt: firestore_1.FieldValue.serverTimestamp(),
             matchScore: 0,
-            eligibility: false,
-            status: 'Inelegível (Dados Incompletos)',
-            badges: ['Perfil Incompleto'],
-            aiSummary: 'A avaliação não pôde ser concluída porque os dados da OSC estão incompletos ou inválidos.',
+            eligibility: true,
+            status: 'Pendente (Dados Incompletos)',
+            badges: ['Pendente de Informação', 'Perfil Incompleto'],
+            aiSummary: 'A avaliação está pendente porque os dados da OSC estão incompletos.',
             reasoning: null,
             actionPlan: ['Atualize os dados do perfil da OSC para permitir a avaliação de match.']
         };
@@ -1127,7 +1128,7 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
     let matchResult;
     // Dynamically adjust pre-filter threshold based on profile density to avoid false negatives for sparse data
     const isSparseProfile = (!oscData.mission || oscData.mission.length < 20) && (oscData.coreActivities.length <= 2);
-    const dynamicThreshold = isSparseProfile ? 0.25 : 0.25;
+    const dynamicThreshold = isSparseProfile ? 0.10 : 0.15;
     if (similarityScore < dynamicThreshold) {
         console.log(`Silently rejecting match for OSC ${oscId} and Edital ${editalId} due to low similarity score (${similarityScore} < ${dynamicThreshold})`);
         matchResult = {
@@ -1175,7 +1176,7 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
                     osc: oscData,
                     edital: editalData
                 });
-                if (!bureaucracyResult.passesBureaucracy) {
+                if (!bureaucracyResult.passesBureaucracy && !bureaucracyResult.rejectionReason?.toLowerCase().includes('pendente')) {
                     console.log(`Bureaucracy Agent rejected match: ${bureaucracyResult.rejectionReason}`);
                     matchResult = {
                         matchScore: 0,
@@ -1339,7 +1340,7 @@ exports.agenticSearchWorker = (0, tasks_1.onTaskDispatched)({
                 similarity: similarity
             };
         })
-            .filter((m) => m.similarity >= 0.25)
+            .filter((m) => m.similarity >= 0.15)
             .sort((a, b) => a.distance - b.distance)
             .slice(0, 15);
         console.log('Filtered internal vector matches (threshold 0.25, max 15):', validInternalMatches.map((m) => ({ id: m.doc.id, distance: m.distance, similarity: m.similarity })));
@@ -2241,7 +2242,7 @@ exports.triggerBulkInternalMatch = (0, https_1.onCall)({
                     similarity: similarity
                 };
             })
-                .filter((m) => m.similarity >= 0.25);
+                .filter((m) => m.similarity >= 0.15);
             for (const match of validInternalMatches) {
                 await matchEvaluatorQueue.enqueue({
                     oscId: osc.id,
@@ -4787,7 +4788,7 @@ exports.refreshOscOpportunities = (0, https_1.onCall)({
             similarity: similarity
         };
     })
-        .filter((m) => m.similarity >= 0.25);
+        .filter((m) => m.similarity >= 0.15);
     // Generate fresh matches
     const newMatches = [];
     for (const match of validInternalMatches) {
