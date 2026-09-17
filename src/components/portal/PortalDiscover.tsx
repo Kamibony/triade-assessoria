@@ -328,7 +328,7 @@ export const PortalDiscover: React.FC = () => {
 // Opportunity Card Component (Inline for the blueprint)
 
 const OpportunityCard: React.FC<{ match: MatchResult; onClick?: () => void }> = ({ match, onClick }) => {
-    const isPendingInfo = match.verificationResult?.some(r => r.status === 'Pendente de Informação');
+    const isPendingInfo = match.verificationResult?.some(r => r.status === 'Pendente de Informação') || match.status?.includes('Pendente') || match.badges?.includes('Pendente de Informação');
 
     return (
         <div className="bg-card border rounded-2xl overflow-hidden hover:shadow-lg transition-all duration-300 flex flex-col h-full group">
