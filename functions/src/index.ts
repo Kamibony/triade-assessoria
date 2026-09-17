@@ -305,11 +305,15 @@ Regras estritas (GUARDRAILS):
 3. Se a ONG não cumprir um critério explícito, o status é "Reprovado". Se cumprir, é "Aprovado".
 4. Se o edital exigir um critério (ex: comprovar atuação numa área), mas o perfil da ONG não fornecer informações suficientes para você ter certeza absoluta (ex: a Atividade Principal ou Missão estão vazias, ou data de fundação é 'Data Desconhecida'), VOCÊ NÃO PODE REPROVAR. O status para este critério DEVE SER OBRIGATORIAMENTE 'Pendente de Informação'. Só gere 'Reprovado' se a informação da ONG for explicitamente e inquestionavelmente contrária a um critério rígido do edital. Em caso de incerteza ou margem para interpretação, incline-se para 'Pendente de Informação'.
 
-Avalie os seguintes critérios mínimos (você pode adicionar outros se achar relevante no texto):
+Avalie os seguintes critérios mínimos OBRIGATORIAMENTE, dividindo as regras do edital em pelo menos 4 a 5 itens distintos (e avaliando CADA UM individualmente):
 - Geografia (A ONG está na região permitida?)
 - Prazo (O edital ainda está aberto considerando a data atual?)
 - Tempo de Fundação (A ONG tem a idade mínima exigida?)
 - Documentação/Certificações (A ONG possui o que é exigido?)
+- Requisitos Temáticos (A ONG atua nas áreas exigidas pelo edital?)
+
+ATENÇÃO: Extraia e avalie cada critério acima separadamente. NUNCA agrupe tudo em um único item como "Elegibilidade Burocrática".
+Se o perfil da ONG não tiver dados sobre um critério distinto específico (ex: não diz se tem os certificados, ou a data de fundação é desconhecida), você DEVE marcar ESSE critério específico como 'Pendente de Informação'. NUNCA use 'Reprovado' por falta de informação.
 
 Responda APENAS com o JSON no formato definido. Não adicione explicações extras.`;
 
