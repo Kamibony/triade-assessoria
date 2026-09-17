@@ -410,11 +410,15 @@ export const verifyMatchConstraints = onCall({
         const hasRejections = verificationResult.some(r => r.status === 'Reprovado');
 
         // Update the match document with the result
-        await matchRef.update({
+        const updatePayload: any = {
              verificationResult: verificationResult,
              eligibility: !hasRejections,
              updatedAt: FieldValue.serverTimestamp()
-        });
+        };
+        if (hasRejections) {
+            updatePayload.status = 'Inelegível';
+        }
+        await matchRef.update(updatePayload);
 
         return { success: true, verificationResult };
 
@@ -500,11 +504,15 @@ export const verifyMatchConstraintWorker = onTaskDispatched({
 
             const hasRejections = verificationResult.some(r => r.status === 'Reprovado');
 
-            await matchRef.update({
+            const updatePayload: any = {
                  verificationResult: verificationResult,
                  eligibility: !hasRejections,
                  updatedAt: FieldValue.serverTimestamp()
-            });
+            };
+            if (hasRejections) {
+                updatePayload.status = 'Inelegível';
+            }
+            await matchRef.update(updatePayload);
 
             await jobRef.update({ completedTasks: FieldValue.increment(1) });
         } catch (error: any) {

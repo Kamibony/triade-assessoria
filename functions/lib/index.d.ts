@@ -16,25 +16,25 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
         embedding: z.ZodOptional<z.ZodAny>;
     }, "strip", z.ZodTypeAny, {
         name: string;
+        foundationDate: string;
+        location: string;
+        documentationStatus: "Em dia" | "Pendente" | "Irregular";
+        previousProjectsApproved: boolean;
+        coreActivities: string[];
         cnpj?: string | undefined;
         mission?: string | undefined;
         boardValidity?: string | undefined;
-        foundationDate: string;
-        location: string;
-        documentationStatus: "Em dia" | "Irregular" | "Pendente";
-        previousProjectsApproved: boolean;
-        coreActivities: string[];
         embedding?: any;
     }, {
         name: string;
+        foundationDate: string;
+        location: string;
+        documentationStatus: "Em dia" | "Pendente" | "Irregular";
+        previousProjectsApproved: boolean;
+        coreActivities: string[];
         cnpj?: string | undefined;
         mission?: string | undefined;
         boardValidity?: string | undefined;
-        foundationDate: string;
-        location: string;
-        documentationStatus: "Em dia" | "Irregular" | "Pendente";
-        previousProjectsApproved: boolean;
-        coreActivities: string[];
         embedding?: any;
     }>;
     edital: z.ZodObject<{
@@ -66,7 +66,6 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
         title: string;
         issuer: string;
         publicationDate: string;
-        deadline?: string | null | undefined;
         isContinuous: boolean;
         ativo: boolean;
         totalBudget: number;
@@ -77,13 +76,11 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
             allowedActivities: string[];
         };
         embedding?: any;
+        deadline?: string | null | undefined;
     }, {
         title: string;
         issuer: string;
         publicationDate: string;
-        deadline?: string | null | undefined;
-        isContinuous?: boolean | undefined;
-        ativo?: boolean | undefined;
         totalBudget: number;
         eligibilityCriteria: {
             minYearsActive: number;
@@ -92,25 +89,27 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
             allowedActivities: string[];
         };
         embedding?: any;
+        deadline?: string | null | undefined;
+        isContinuous?: boolean | undefined;
+        ativo?: boolean | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     osc: {
         name: string;
+        foundationDate: string;
+        location: string;
+        documentationStatus: "Em dia" | "Pendente" | "Irregular";
+        previousProjectsApproved: boolean;
+        coreActivities: string[];
         cnpj?: string | undefined;
         mission?: string | undefined;
         boardValidity?: string | undefined;
-        foundationDate: string;
-        location: string;
-        documentationStatus: "Em dia" | "Irregular" | "Pendente";
-        previousProjectsApproved: boolean;
-        coreActivities: string[];
         embedding?: any;
     };
     edital: {
         title: string;
         issuer: string;
         publicationDate: string;
-        deadline?: string | null | undefined;
         isContinuous: boolean;
         ativo: boolean;
         totalBudget: number;
@@ -121,27 +120,25 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
             allowedActivities: string[];
         };
         embedding?: any;
+        deadline?: string | null | undefined;
     };
 }, {
     osc: {
         name: string;
+        foundationDate: string;
+        location: string;
+        documentationStatus: "Em dia" | "Pendente" | "Irregular";
+        previousProjectsApproved: boolean;
+        coreActivities: string[];
         cnpj?: string | undefined;
         mission?: string | undefined;
         boardValidity?: string | undefined;
-        foundationDate: string;
-        location: string;
-        documentationStatus: "Em dia" | "Irregular" | "Pendente";
-        previousProjectsApproved: boolean;
-        coreActivities: string[];
         embedding?: any;
     };
     edital: {
         title: string;
         issuer: string;
         publicationDate: string;
-        deadline?: string | null | undefined;
-        isContinuous?: boolean | undefined;
-        ativo?: boolean | undefined;
         totalBudget: number;
         eligibilityCriteria: {
             minYearsActive: number;
@@ -150,6 +147,9 @@ export declare const bureaucracyAgentFlow: import("genkit").Action<z.ZodObject<{
             allowedActivities: string[];
         };
         embedding?: any;
+        deadline?: string | null | undefined;
+        isContinuous?: boolean | undefined;
+        ativo?: boolean | undefined;
     };
 }>, z.ZodObject<{
     passesBureaucracy: z.ZodBoolean;
@@ -175,25 +175,25 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
         embedding: z.ZodOptional<z.ZodAny>;
     }, "strip", z.ZodTypeAny, {
         name: string;
+        foundationDate: string;
+        location: string;
+        documentationStatus: "Em dia" | "Pendente" | "Irregular";
+        previousProjectsApproved: boolean;
+        coreActivities: string[];
         cnpj?: string | undefined;
         mission?: string | undefined;
         boardValidity?: string | undefined;
-        foundationDate: string;
-        location: string;
-        documentationStatus: "Em dia" | "Irregular" | "Pendente";
-        previousProjectsApproved: boolean;
-        coreActivities: string[];
         embedding?: any;
     }, {
         name: string;
+        foundationDate: string;
+        location: string;
+        documentationStatus: "Em dia" | "Pendente" | "Irregular";
+        previousProjectsApproved: boolean;
+        coreActivities: string[];
         cnpj?: string | undefined;
         mission?: string | undefined;
         boardValidity?: string | undefined;
-        foundationDate: string;
-        location: string;
-        documentationStatus: "Em dia" | "Irregular" | "Pendente";
-        previousProjectsApproved: boolean;
-        coreActivities: string[];
         embedding?: any;
     }>;
     edital: z.ZodObject<{
@@ -225,7 +225,6 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
         title: string;
         issuer: string;
         publicationDate: string;
-        deadline?: string | null | undefined;
         isContinuous: boolean;
         ativo: boolean;
         totalBudget: number;
@@ -236,13 +235,11 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
             allowedActivities: string[];
         };
         embedding?: any;
+        deadline?: string | null | undefined;
     }, {
         title: string;
         issuer: string;
         publicationDate: string;
-        deadline?: string | null | undefined;
-        isContinuous?: boolean | undefined;
-        ativo?: boolean | undefined;
         totalBudget: number;
         eligibilityCriteria: {
             minYearsActive: number;
@@ -251,27 +248,31 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
             allowedActivities: string[];
         };
         embedding?: any;
+        deadline?: string | null | undefined;
+        isContinuous?: boolean | undefined;
+        ativo?: boolean | undefined;
     }>;
     oscId: z.ZodString;
     editalId: z.ZodString;
 }, "strip", z.ZodTypeAny, {
+    editalId: string;
+    oscId: string;
     osc: {
         name: string;
+        foundationDate: string;
+        location: string;
+        documentationStatus: "Em dia" | "Pendente" | "Irregular";
+        previousProjectsApproved: boolean;
+        coreActivities: string[];
         cnpj?: string | undefined;
         mission?: string | undefined;
         boardValidity?: string | undefined;
-        foundationDate: string;
-        location: string;
-        documentationStatus: "Em dia" | "Irregular" | "Pendente";
-        previousProjectsApproved: boolean;
-        coreActivities: string[];
         embedding?: any;
     };
     edital: {
         title: string;
         issuer: string;
         publicationDate: string;
-        deadline?: string | null | undefined;
         isContinuous: boolean;
         ativo: boolean;
         totalBudget: number;
@@ -282,29 +283,27 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
             allowedActivities: string[];
         };
         embedding?: any;
+        deadline?: string | null | undefined;
     };
-    oscId: string;
-    editalId: string;
 }, {
+    editalId: string;
+    oscId: string;
     osc: {
         name: string;
+        foundationDate: string;
+        location: string;
+        documentationStatus: "Em dia" | "Pendente" | "Irregular";
+        previousProjectsApproved: boolean;
+        coreActivities: string[];
         cnpj?: string | undefined;
         mission?: string | undefined;
         boardValidity?: string | undefined;
-        foundationDate: string;
-        location: string;
-        documentationStatus: "Em dia" | "Irregular" | "Pendente";
-        previousProjectsApproved: boolean;
-        coreActivities: string[];
         embedding?: any;
     };
     edital: {
         title: string;
         issuer: string;
         publicationDate: string;
-        deadline?: string | null | undefined;
-        isContinuous?: boolean | undefined;
-        ativo?: boolean | undefined;
         totalBudget: number;
         eligibilityCriteria: {
             minYearsActive: number;
@@ -313,9 +312,10 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
             allowedActivities: string[];
         };
         embedding?: any;
+        deadline?: string | null | undefined;
+        isContinuous?: boolean | undefined;
+        ativo?: boolean | undefined;
     };
-    oscId: string;
-    editalId: string;
 }>, z.ZodObject<{
     editalId: z.ZodString;
     oscId: z.ZodString;
@@ -332,44 +332,44 @@ export declare const thematicAgentFlow: import("genkit").Action<z.ZodObject<{
         status: z.ZodEnum<["Aprovado", "Reprovado", "Pendente de Informação", "Não Encontrado"]>;
         citation: z.ZodString;
     }, "strip", z.ZodTypeAny, {
+        status: "Aprovado" | "Reprovado" | "Pendente de Informação" | "Não Encontrado";
         criterion: string;
-        status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
         citation: string;
     }, {
+        status: "Aprovado" | "Reprovado" | "Pendente de Informação" | "Não Encontrado";
         criterion: string;
-        status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
         citation: string;
     }>, "many">>;
 }, "strip", z.ZodTypeAny, {
     editalId: string;
     oscId: string;
-    oscName?: string | undefined;
     matchScore: number;
     eligibility: boolean;
+    actionState: "Pendente" | "Aprovado" | "Rejeitado" | "Revisao";
+    oscName?: string | undefined;
     reasoning?: string | null | undefined;
     aiSummary?: string | undefined;
     badges?: string[] | undefined;
     actionPlan?: string[] | undefined;
-    actionState: "Aprovado" | "Pendente" | "Rejeitado" | "Revisao";
     verificationResult?: {
+        status: "Aprovado" | "Reprovado" | "Pendente de Informação" | "Não Encontrado";
         criterion: string;
-        status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
         citation: string;
     }[] | undefined;
 }, {
     editalId: string;
     oscId: string;
-    oscName?: string | undefined;
     matchScore: number;
     eligibility: boolean;
+    oscName?: string | undefined;
     reasoning?: string | null | undefined;
     aiSummary?: string | undefined;
     badges?: string[] | undefined;
     actionPlan?: string[] | undefined;
-    actionState?: "Aprovado" | "Pendente" | "Rejeitado" | "Revisao" | undefined;
+    actionState?: "Pendente" | "Aprovado" | "Rejeitado" | "Revisao" | undefined;
     verificationResult?: {
+        status: "Aprovado" | "Reprovado" | "Pendente de Informação" | "Não Encontrado";
         criterion: string;
-        status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
         citation: string;
     }[] | undefined;
 }>, z.ZodTypeAny, any, z.ZodTypeAny>;
@@ -387,53 +387,53 @@ export declare const verificationAgentFlow: import("genkit").Action<z.ZodObject<
         embedding: z.ZodOptional<z.ZodAny>;
     }, "strip", z.ZodTypeAny, {
         name: string;
+        foundationDate: string;
+        location: string;
+        documentationStatus: "Em dia" | "Pendente" | "Irregular";
+        previousProjectsApproved: boolean;
+        coreActivities: string[];
         cnpj?: string | undefined;
         mission?: string | undefined;
         boardValidity?: string | undefined;
-        foundationDate: string;
-        location: string;
-        documentationStatus: "Em dia" | "Irregular" | "Pendente";
-        previousProjectsApproved: boolean;
-        coreActivities: string[];
         embedding?: any;
     }, {
         name: string;
+        foundationDate: string;
+        location: string;
+        documentationStatus: "Em dia" | "Pendente" | "Irregular";
+        previousProjectsApproved: boolean;
+        coreActivities: string[];
         cnpj?: string | undefined;
         mission?: string | undefined;
         boardValidity?: string | undefined;
-        foundationDate: string;
-        location: string;
-        documentationStatus: "Em dia" | "Irregular" | "Pendente";
-        previousProjectsApproved: boolean;
-        coreActivities: string[];
         embedding?: any;
     }>;
     editalText: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     osc: {
         name: string;
+        foundationDate: string;
+        location: string;
+        documentationStatus: "Em dia" | "Pendente" | "Irregular";
+        previousProjectsApproved: boolean;
+        coreActivities: string[];
         cnpj?: string | undefined;
         mission?: string | undefined;
         boardValidity?: string | undefined;
-        foundationDate: string;
-        location: string;
-        documentationStatus: "Em dia" | "Irregular" | "Pendente";
-        previousProjectsApproved: boolean;
-        coreActivities: string[];
         embedding?: any;
     };
     editalText: string;
 }, {
     osc: {
         name: string;
+        foundationDate: string;
+        location: string;
+        documentationStatus: "Em dia" | "Pendente" | "Irregular";
+        previousProjectsApproved: boolean;
+        coreActivities: string[];
         cnpj?: string | undefined;
         mission?: string | undefined;
         boardValidity?: string | undefined;
-        foundationDate: string;
-        location: string;
-        documentationStatus: "Em dia" | "Irregular" | "Pendente";
-        previousProjectsApproved: boolean;
-        coreActivities: string[];
         embedding?: any;
     };
     editalText: string;
@@ -442,12 +442,12 @@ export declare const verificationAgentFlow: import("genkit").Action<z.ZodObject<
     status: z.ZodEnum<["Aprovado", "Reprovado", "Pendente de Informação", "Não Encontrado"]>;
     citation: z.ZodString;
 }, "strip", z.ZodTypeAny, {
+    status: "Aprovado" | "Reprovado" | "Pendente de Informação" | "Não Encontrado";
     criterion: string;
-    status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
     citation: string;
 }, {
+    status: "Aprovado" | "Reprovado" | "Pendente de Informação" | "Não Encontrado";
     criterion: string;
-    status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
     citation: string;
 }>, "many">, z.ZodTypeAny, any, z.ZodTypeAny>;
 /**
@@ -457,8 +457,8 @@ export declare const verificationAgentFlow: import("genkit").Action<z.ZodObject<
 export declare const verifyMatchConstraints: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
     verificationResult: {
+        status: "Aprovado" | "Reprovado" | "Pendente de Informação" | "Não Encontrado";
         criterion: string;
-        status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
         citation: string;
     }[];
 }>, unknown>;
@@ -515,7 +515,6 @@ export declare const extractEditalRules: import("genkit").Action<z.ZodObject<{
     title: string;
     issuer: string;
     publicationDate: string;
-    deadline?: string | null | undefined;
     isContinuous: boolean;
     ativo: boolean;
     totalBudget: number;
@@ -526,13 +525,11 @@ export declare const extractEditalRules: import("genkit").Action<z.ZodObject<{
         allowedActivities: string[];
     };
     embedding?: any;
+    deadline?: string | null | undefined;
 }, {
     title: string;
     issuer: string;
     publicationDate: string;
-    deadline?: string | null | undefined;
-    isContinuous?: boolean | undefined;
-    ativo?: boolean | undefined;
     totalBudget: number;
     eligibilityCriteria: {
         minYearsActive: number;
@@ -541,6 +538,9 @@ export declare const extractEditalRules: import("genkit").Action<z.ZodObject<{
         allowedActivities: string[];
     };
     embedding?: any;
+    deadline?: string | null | undefined;
+    isContinuous?: boolean | undefined;
+    ativo?: boolean | undefined;
 }>, z.ZodTypeAny, any, z.ZodTypeAny>;
 export declare function fetchAndExtractText(url: string): Promise<string>;
 export declare const extractEditalRulesWorker: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
@@ -621,17 +621,17 @@ export declare const ingestManualOscFunction: import("firebase-functions/v2/http
     success: boolean;
     oscId: string;
     profile: {
+        id: string;
         name: string;
+        foundationDate: string;
+        location: string;
+        documentationStatus: "Em dia" | "Pendente" | "Irregular";
+        previousProjectsApproved: boolean;
+        coreActivities: string[];
         cnpj?: string | undefined;
         mission?: string | undefined;
         boardValidity?: string | undefined;
-        foundationDate: string;
-        location: string;
-        documentationStatus: "Em dia" | "Irregular" | "Pendente";
-        previousProjectsApproved: boolean;
-        coreActivities: string[];
         embedding?: any;
-        id: string;
     };
 }>, unknown>;
 export declare const ingestManualEditalFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
@@ -645,10 +645,10 @@ export declare const ingestManualEditalFunction: import("firebase-functions/v2/h
 }>, unknown>;
 export declare const askCopilotFunction: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     matchedOscs: {
-        oscId: string;
         name: string;
         location: string;
         coreActivities: string[];
+        oscId: string;
         reasoning: string;
     }[];
     outreachMessage: string;

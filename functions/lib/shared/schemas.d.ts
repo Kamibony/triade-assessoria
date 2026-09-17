@@ -12,25 +12,25 @@ export declare const ngoProfileSchema: z.ZodObject<{
     embedding: z.ZodOptional<z.ZodAny>;
 }, "strip", z.ZodTypeAny, {
     name: string;
+    foundationDate: string;
+    location: string;
+    documentationStatus: "Em dia" | "Pendente" | "Irregular";
+    previousProjectsApproved: boolean;
+    coreActivities: string[];
     cnpj?: string | undefined;
     mission?: string | undefined;
     boardValidity?: string | undefined;
-    foundationDate: string;
-    location: string;
-    documentationStatus: "Em dia" | "Irregular" | "Pendente";
-    previousProjectsApproved: boolean;
-    coreActivities: string[];
     embedding?: any;
 }, {
     name: string;
+    foundationDate: string;
+    location: string;
+    documentationStatus: "Em dia" | "Pendente" | "Irregular";
+    previousProjectsApproved: boolean;
+    coreActivities: string[];
     cnpj?: string | undefined;
     mission?: string | undefined;
     boardValidity?: string | undefined;
-    foundationDate: string;
-    location: string;
-    documentationStatus: "Em dia" | "Irregular" | "Pendente";
-    previousProjectsApproved: boolean;
-    coreActivities: string[];
     embedding?: any;
 }>;
 export declare const editalSchema: z.ZodObject<{
@@ -62,7 +62,6 @@ export declare const editalSchema: z.ZodObject<{
     title: string;
     issuer: string;
     publicationDate: string;
-    deadline?: string | null | undefined;
     isContinuous: boolean;
     ativo: boolean;
     totalBudget: number;
@@ -73,13 +72,11 @@ export declare const editalSchema: z.ZodObject<{
         allowedActivities: string[];
     };
     embedding?: any;
+    deadline?: string | null | undefined;
 }, {
     title: string;
     issuer: string;
     publicationDate: string;
-    deadline?: string | null | undefined;
-    isContinuous?: boolean | undefined;
-    ativo?: boolean | undefined;
     totalBudget: number;
     eligibilityCriteria: {
         minYearsActive: number;
@@ -88,6 +85,9 @@ export declare const editalSchema: z.ZodObject<{
         allowedActivities: string[];
     };
     embedding?: any;
+    deadline?: string | null | undefined;
+    isContinuous?: boolean | undefined;
+    ativo?: boolean | undefined;
 }>;
 export declare const bureaucracySchema: z.ZodObject<{
     passesBureaucracy: z.ZodBoolean;
@@ -104,12 +104,12 @@ export declare const verificationResultSchema: z.ZodArray<z.ZodObject<{
     status: z.ZodEnum<["Aprovado", "Reprovado", "Pendente de Informação", "Não Encontrado"]>;
     citation: z.ZodString;
 }, "strip", z.ZodTypeAny, {
+    status: "Aprovado" | "Reprovado" | "Pendente de Informação" | "Não Encontrado";
     criterion: string;
-    status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
     citation: string;
 }, {
+    status: "Aprovado" | "Reprovado" | "Pendente de Informação" | "Não Encontrado";
     criterion: string;
-    status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
     citation: string;
 }>, "many">;
 export declare const matchSchema: z.ZodObject<{
@@ -128,44 +128,44 @@ export declare const matchSchema: z.ZodObject<{
         status: z.ZodEnum<["Aprovado", "Reprovado", "Pendente de Informação", "Não Encontrado"]>;
         citation: z.ZodString;
     }, "strip", z.ZodTypeAny, {
+        status: "Aprovado" | "Reprovado" | "Pendente de Informação" | "Não Encontrado";
         criterion: string;
-        status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
         citation: string;
     }, {
+        status: "Aprovado" | "Reprovado" | "Pendente de Informação" | "Não Encontrado";
         criterion: string;
-        status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
         citation: string;
     }>, "many">>;
 }, "strip", z.ZodTypeAny, {
     editalId: string;
     oscId: string;
-    oscName?: string | undefined;
     matchScore: number;
     eligibility: boolean;
+    actionState: "Pendente" | "Aprovado" | "Rejeitado" | "Revisao";
+    oscName?: string | undefined;
     reasoning?: string | null | undefined;
     aiSummary?: string | undefined;
     badges?: string[] | undefined;
     actionPlan?: string[] | undefined;
-    actionState: "Aprovado" | "Pendente" | "Rejeitado" | "Revisao";
     verificationResult?: {
+        status: "Aprovado" | "Reprovado" | "Pendente de Informação" | "Não Encontrado";
         criterion: string;
-        status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
         citation: string;
     }[] | undefined;
 }, {
     editalId: string;
     oscId: string;
-    oscName?: string | undefined;
     matchScore: number;
     eligibility: boolean;
+    oscName?: string | undefined;
     reasoning?: string | null | undefined;
     aiSummary?: string | undefined;
     badges?: string[] | undefined;
     actionPlan?: string[] | undefined;
-    actionState?: "Aprovado" | "Pendente" | "Rejeitado" | "Revisao" | undefined;
+    actionState?: "Pendente" | "Aprovado" | "Rejeitado" | "Revisao" | undefined;
     verificationResult?: {
+        status: "Aprovado" | "Reprovado" | "Pendente de Informação" | "Não Encontrado";
         criterion: string;
-        status: "Aprovado" | "Não Encontrado" | "Pendente de Informação" | "Reprovado";
         citation: string;
     }[] | undefined;
 }>;
@@ -184,36 +184,36 @@ export declare const copilotResponseSchema: z.ZodObject<{
         coreActivities: z.ZodArray<z.ZodString, "many">;
         reasoning: z.ZodString;
     }, "strip", z.ZodTypeAny, {
-        oscId: string;
         name: string;
         location: string;
         coreActivities: string[];
+        oscId: string;
         reasoning: string;
     }, {
-        oscId: string;
         name: string;
         location: string;
         coreActivities: string[];
+        oscId: string;
         reasoning: string;
     }>, "many">;
     outreachMessage: z.ZodString;
     explanation: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     matchedOscs: {
-        oscId: string;
         name: string;
         location: string;
         coreActivities: string[];
+        oscId: string;
         reasoning: string;
     }[];
     outreachMessage: string;
     explanation: string;
 }, {
     matchedOscs: {
-        oscId: string;
         name: string;
         location: string;
         coreActivities: string[];
+        oscId: string;
         reasoning: string;
     }[];
     outreachMessage: string;
@@ -227,12 +227,12 @@ export declare const scrapingTargetSchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     name: string;
     url: string;
-    strategy: "API" | "HTML" | "RSS";
+    strategy: "RSS" | "API" | "HTML";
     cssSelector?: string | undefined;
 }, {
     name: string;
     url: string;
-    strategy: "API" | "HTML" | "RSS";
+    strategy: "RSS" | "API" | "HTML";
     cssSelector?: string | undefined;
 }>;
 //# sourceMappingURL=schemas.d.ts.map

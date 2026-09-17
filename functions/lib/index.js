@@ -393,11 +393,15 @@ exports.verifyMatchConstraints = (0, https_1.onCall)({
         // Check if there are any explicit rejections
         const hasRejections = verificationResult.some(r => r.status === 'Reprovado');
         // Update the match document with the result
-        await matchRef.update({
+        const updatePayload = {
             verificationResult: verificationResult,
             eligibility: !hasRejections,
             updatedAt: firestore_1.FieldValue.serverTimestamp()
-        });
+        };
+        if (hasRejections) {
+            updatePayload.status = 'Inelegível';
+        }
+        await matchRef.update(updatePayload);
         return { success: true, verificationResult };
     }
     catch (error) {
@@ -468,11 +472,15 @@ exports.verifyMatchConstraintWorker = (0, tasks_1.onTaskDispatched)({
                 editalText: rawText
             });
             const hasRejections = verificationResult.some(r => r.status === 'Reprovado');
-            await matchRef.update({
+            const updatePayload = {
                 verificationResult: verificationResult,
                 eligibility: !hasRejections,
                 updatedAt: firestore_1.FieldValue.serverTimestamp()
-            });
+            };
+            if (hasRejections) {
+                updatePayload.status = 'Inelegível';
+            }
+            await matchRef.update(updatePayload);
             await jobRef.update({ completedTasks: firestore_1.FieldValue.increment(1) });
         }
         catch (error) {
