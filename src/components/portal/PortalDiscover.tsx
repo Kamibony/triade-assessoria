@@ -355,7 +355,7 @@ const OpportunityCard: React.FC<{ match: MatchResult; onClick?: () => void }> = 
                 </div>
 
                 <div>
-                    <h3 className="text-lg font-bold leading-tight line-clamp-2">Edital {match.editalId} (Mock Title)</h3>
+                    <h3 className="text-lg font-bold leading-tight line-clamp-2">{match.editalTitle || `Edital ${match.editalId}`}</h3>
                     <div className="flex items-center gap-1 mt-2 text-sm text-muted-foreground font-medium">
                         <Clock className="w-4 h-4" />
                         <span>Encerra em breve</span>
@@ -409,7 +409,7 @@ const OpportunityDetailsModal: React.FC<{ match: MatchResult; onClose: () => voi
                     </button>
 
                     <h2 className="text-2xl font-bold mb-6 pr-8">
-                        Edital {match.editalId} - Detalhes
+                        {match.editalTitle || `Edital ${match.editalId}`} - Detalhes
                     </h2>
 
                     <MatchDetailPanel
