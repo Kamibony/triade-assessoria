@@ -35,10 +35,10 @@ exports.bureaucracySchema = zod_1.z.object({
     rejectionReason: zod_1.z.string().nullable().optional().describe("Se rejeitada, o motivo claro. Se aprovada, null.")
 });
 exports.verificationResultSchema = zod_1.z.array(zod_1.z.object({
-    criterion: zod_1.z.string().describe("O critério avaliado (ex: Geografia, Prazo, Idade da ONG, Documentação)"),
-    status: zod_1.z.enum(['Aprovado', 'Reprovado', 'Pendente de Informação', 'Não Encontrado']).describe("Status da avaliação do critério"),
-    citation: zod_1.z.string().describe("Citação exata do edital que justifica o status ou 'Não Encontrado'")
-})).describe("Resultado da verificação do advogado do diabo");
+    criterion: zod_1.z.enum(['Localização', 'Prazo', 'Fundação', 'Documentação']).describe("O critério avaliado"),
+    status: zod_1.z.enum(['Aprovado', 'Reprovado', 'Pendente de Informação']).describe("Status da avaliação do critério (NUNCA use Não Encontrado)"),
+    citation: zod_1.z.string().describe("Citação exata do edital que justifica o status, ou explique porque está pendente")
+})).length(4).describe("Resultado da verificação do advogado do diabo. Exatamente 4 itens obrigatórios.");
 exports.matchSchema = zod_1.z.object({
     editalId: zod_1.z.string().describe("ID do edital analisado"),
     oscId: zod_1.z.string().describe("ID da ONG analisada"),

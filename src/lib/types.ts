@@ -12,8 +12,8 @@ export type MatchResult = z.infer<typeof matchSchema> & {
     createdAt?: { toMillis?: () => number; seconds?: number; nanoseconds?: number; };
     status?: string;
     verificationResult?: {
-        criterion: string;
-        status: 'Aprovado' | 'Reprovado' | 'Pendente de Informação' | 'Não Encontrado';
+        criterion: 'Localização' | 'Prazo' | 'Fundação' | 'Documentação';
+        status: 'Aprovado' | 'Reprovado' | 'Pendente de Informação';
         citation: string;
     }[];
 };

@@ -36,10 +36,10 @@ export const bureaucracySchema = z.object({
 });
 
 export const verificationResultSchema = z.array(z.object({
-    criterion: z.string().describe("O critério avaliado (ex: Geografia, Prazo, Idade da ONG, Documentação)"),
-    status: z.enum(['Aprovado', 'Reprovado', 'Pendente de Informação', 'Não Encontrado']).describe("Status da avaliação do critério"),
-    citation: z.string().describe("Citação exata do edital que justifica o status ou 'Não Encontrado'")
-})).describe("Resultado da verificação do advogado do diabo");
+    criterion: z.enum(['Localização', 'Prazo', 'Fundação', 'Documentação']).describe("O critério avaliado"),
+    status: z.enum(['Aprovado', 'Reprovado', 'Pendente de Informação']).describe("Status da avaliação do critério (NUNCA use Não Encontrado)"),
+    citation: z.string().describe("Citação exata do edital que justifica o status, ou explique porque está pendente")
+})).length(4).describe("Resultado da verificação do advogado do diabo. Exatamente 4 itens obrigatórios.");
 
 export const matchSchema = z.object({
     editalId: z.string().describe("ID do edital analisado"),
