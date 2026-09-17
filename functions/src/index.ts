@@ -412,7 +412,7 @@ export const verifyMatchConstraints = onCall({
         // Update the match document with the result
         await matchRef.update({
              verificationResult: verificationResult,
-             ...(hasRejections ? { eligibility: false } : {}),
+             eligibility: !hasRejections,
              updatedAt: FieldValue.serverTimestamp()
         });
 
@@ -502,7 +502,7 @@ export const verifyMatchConstraintWorker = onTaskDispatched({
 
             await matchRef.update({
                  verificationResult: verificationResult,
-                 ...(hasRejections ? { eligibility: false } : {}),
+                 eligibility: !hasRejections,
                  updatedAt: FieldValue.serverTimestamp()
             });
 
@@ -1975,9 +1975,10 @@ export const matchEvaluatorWorker = onTaskDispatched({
 
             const jobDoc = await jobRef.get();
             const data = jobDoc.data();
-            // Check if status is completed (meaning dispatching is fully done) before marking evaluations complete
-            if (data && data.status === 'completed' && data.matchesEvaluated >= data.matchesTriggered) {
+            // Update job to completed if all evaluated
+            if (data && data.matchesEvaluated >= data.matchesTriggered) {
                 await jobRef.update({
+                    status: 'completed',
                     evaluationsCompleted: true,
                     updatedAt: FieldValue.serverTimestamp()
                 });
@@ -5359,46 +5360,45 @@ export const refreshOscOpportunities = onCall({
         })
         .filter((m: any) => m.similarity >= 0.15);
 
-    // Generate fresh matches
-    const newMatches = [];
-    for (const match of validInternalMatches) {
-        const matchResult = await processMatchEvaluation(targetId, match.id, true);
-        if (matchResult && matchResult.id && typeof matchResult.id === 'string' && !matchResult.id.startsWith('error_')) {
-             newMatches.push(matchResult);
-        }
-    }
-
-    const pendingMatchesSnap = await db.collection('matches').where('oscId', '==', targetId).get();
-    const pendingMatches = pendingMatchesSnap.docs.filter(doc => {
-        const data = doc.data();
-        return data.actionState !== 'Aprovado' && data.actionState !== 'Rejeitado' && data.eligibility !== false && !data.verificationResult;
-    });
-
-    if (pendingMatches.length === 0) {
-        return { success: true, message: 'Novos editais buscados, mas nenhum match pendente para verificação.', jobId: null };
-    }
-
     const jobRef = db.collection('system_jobs').doc();
     const jobId = jobRef.id;
+
+    if (validInternalMatches.length === 0) {
+        return { success: true, message: 'Nenhuma oportunidade encontrada.', jobId: null };
+    }
 
     await jobRef.set({
         targetId,
         targetType: 'osc',
         type: 'batch_verification',
-        totalTasks: pendingMatches.length,
+        totalTasks: validInternalMatches.length,
         completedTasks: 0,
         failedTasks: 0,
-        status: 'running',
+        status: 'running', // Changed from running so we can update it to completed after dispatch
+        matchesTriggered: validInternalMatches.length,
+        matchesEvaluated: 0,
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp()
     });
 
-    const queue = getFunctions().taskQueue('verifyMatchConstraintWorker');
-    const enqueuePromises = pendingMatches.map(matchDoc =>
-        queue.enqueue({ matchId: matchDoc.id, jobId })
+    // Generate fresh matches decoupled using matchEvaluatorWorker
+    const queue = getFunctions().taskQueue('matchEvaluatorWorker');
+    const enqueuePromises = validInternalMatches.map((match: any) =>
+        queue.enqueue({ oscId: targetId, editalId: match.id, jobId })
     );
 
     await Promise.all(enqueuePromises);
 
-    return { success: true, jobId, message: `${pendingMatches.length} novas oportunidades enfileiradas para verificação.` };
+    // Resolve race condition where evaluations finish before job dispatch is complete
+    const finalJobDoc = await jobRef.get();
+    const finalJobData = finalJobDoc.data();
+    if (finalJobData && finalJobData.matchesEvaluated >= validInternalMatches.length) {
+        await jobRef.update({
+            status: 'completed',
+            evaluationsCompleted: true,
+            updatedAt: FieldValue.serverTimestamp()
+        });
+    }
+
+    return { success: true, jobId, message: `${validInternalMatches.length} novas oportunidades enfileiradas para avaliação.` };
 });
