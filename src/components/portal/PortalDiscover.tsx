@@ -70,7 +70,7 @@ export const PortalDiscover: React.FC = () => {
         const existingMatches = snapshot.docs
           .map(doc => ({ id: doc.id, ...doc.data() } as MatchResult))
           // Strictly filter out noise locally as per memory
-          .filter(m => m.eligibility !== false && m.actionState !== 'Rejeitado');
+          .filter(m => m.eligibility !== false && m.actionState !== 'Rejeitado' && (!m.verificationResult || !m.verificationResult.some(r => r.status === 'Reprovado')));
 
         if (existingMatches.length > 0) {
           setMatches(existingMatches);
@@ -143,7 +143,7 @@ export const PortalDiscover: React.FC = () => {
         const snapshot = await getDocs(q);
         const fetchedMatches = snapshot.docs
           .map(doc => ({ id: doc.id, ...doc.data() } as MatchResult))
-          .filter(m => m.eligibility !== false && m.actionState !== 'Rejeitado');
+          .filter(m => m.eligibility !== false && m.actionState !== 'Rejeitado' && (!m.verificationResult || !m.verificationResult.some(r => r.status === 'Reprovado')));
 
         setMatches(fetchedMatches);
         setCurrentState('RESULTS');
