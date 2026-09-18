@@ -2,7 +2,7 @@
   "name": "functions",
   "version": "1.0.0",
   "description": "",
-  "main": "lib/index.js",
+  "main": "lib/functions/src/index.js",
   "scripts": {
     "build": "tsc",
     "gcp-build": "test -d node_modules/playwright-core/.local-browsers || (PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium --with-deps)",
