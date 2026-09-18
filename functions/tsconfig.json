@@ -2,7 +2,7 @@
   "compilerOptions": {
     "rootDir": "..",
     "outDir": "./lib",
-    "module": "nodenext",
+    "module": "commonjs", "esModuleInterop": true,
     "target": "esnext",
     "sourceMap": true,
     "declaration": true,
