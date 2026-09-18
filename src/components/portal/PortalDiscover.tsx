@@ -30,27 +30,6 @@ export const PortalDiscover: React.FC = () => {
   // For the labor illusion
   const [processingStep, setProcessingStep] = useState(0);
 
-  useEffect(() => {
-    if (!activeJobId) return;
-
-    const jobRef = doc(db, 'system_jobs', activeJobId);
-    const unsubscribe = onSnapshot(jobRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        if (data.status === 'completed' || data.status === 'failed') {
-          setActiveJobId(null);
-          if (data.status === 'completed') {
-             toast.success('Curadoria de oportunidades finalizada com sucesso!');
-          } else {
-             toast.error('Erro na curadoria de oportunidades.');
-          }
-          fetchResults();
-        }
-      }
-    });
-
-    return () => unsubscribe();
-  }, [activeJobId]);
 
   useEffect(() => {
     // Optimistic Initialization: Check for existing valid matches on mount
@@ -143,7 +122,12 @@ export const PortalDiscover: React.FC = () => {
         const snapshot = await getDocs(q);
         const fetchedMatches = snapshot.docs
           .map(doc => ({ id: doc.id, ...doc.data() } as MatchResult))
-          .filter(m => m.eligibility !== false && m.actionState !== 'Rejeitado' && (!m.verificationResult || !m.verificationResult.some(r => r.status === 'Reprovado')));
+          .filter(m =>
+            m.eligibility !== false &&
+            m.actionState !== 'Rejeitado' &&
+            (!m.verificationResult || !m.verificationResult.some(r => r.status === 'Reprovado')) &&
+            m.matchScore > 0 // Failsafe: Never render 0% matches
+          );
 
         setMatches(fetchedMatches);
         setCurrentState('RESULTS');
@@ -153,6 +137,28 @@ export const PortalDiscover: React.FC = () => {
         setCurrentState('IDLE');
       }
   };
+
+  useEffect(() => {
+    if (!activeJobId) return;
+
+    const jobRef = doc(db, 'system_jobs', activeJobId);
+    const unsubscribe = onSnapshot(jobRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data.status === 'completed' || data.status === 'failed') {
+          setActiveJobId(null);
+          if (data.status === 'completed') {
+             toast.success('Curadoria de oportunidades finalizada com sucesso!');
+          } else {
+             toast.error('Erro na curadoria de oportunidades.');
+          }
+          fetchResults();
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [activeJobId]);
 
   const handleRetrigger = () => {
       setMatches([]);

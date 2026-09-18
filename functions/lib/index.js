@@ -261,7 +261,6 @@ Atividades Permitidas/Foco: ${input.edital.eligibilityCriteria.allowedActivities
 
 Instruções:
 - Gere um 'matchScore' de 0 a 100 indicando o grau de compatibilidade (Alinhamento Temático).
-- Determine 'eligibility' como true.
 - Forneça um 'reasoning' detalhado justificando o score com base no alinhamento da missão e atividades da ONG com o foco do edital.
 - Forneça um 'aiSummary' (um resumo de 1-2 frases destacando os pontos fortes).
 - Forneça 'badges' (2 a 3 tags curtas, ex: 'Alinhamento Perfeito', 'Missão Similar').
@@ -279,8 +278,7 @@ Responda estritamente em português do Brasil (pt-BR).`;
     return {
         ...response.output,
         editalId: input.editalId,
-        oscId: input.oscId,
-        eligibility: true // It passed bureaucracy, so it is inherently eligible, the score just reflects fit
+        oscId: input.oscId
     };
 });
 exports.verificationAgentFlow = ai.defineFlow({
@@ -1211,8 +1209,30 @@ async function processMatchEvaluation(oscId, editalId, forceRecalculate = false)
                         oscId: oscId,
                         editalId: editalId
                     });
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    matchResult.status = 'Elegível';
+                    const typedMatchResult = matchResult;
+                    // State Preservation for "Pendente" from Bureaucracy
+                    if (!bureaucracyResult.passesBureaucracy || bureaucracyResult.rejectionReason?.toLowerCase().includes('pendente')) {
+                        typedMatchResult.status = 'Pendente de Informação';
+                        if (!typedMatchResult.badges)
+                            typedMatchResult.badges = [];
+                        if (!typedMatchResult.badges.includes('Pendente de Informação')) {
+                            typedMatchResult.badges.push('Pendente de Informação');
+                        }
+                        if (bureaucracyResult.rejectionReason) {
+                            typedMatchResult.reasoning = typedMatchResult.reasoning
+                                ? `${bureaucracyResult.rejectionReason}\n\nAlém disso: ${typedMatchResult.reasoning}`
+                                : bureaucracyResult.rejectionReason;
+                        }
+                    }
+                    // Strict Score Thresholding
+                    if (typedMatchResult.matchScore < 20) {
+                        typedMatchResult.eligibility = false;
+                        typedMatchResult.status = 'Incompatibilidade Temática';
+                        typedMatchResult.badges = ['Fora do Escopo'];
+                    }
+                    else if (typedMatchResult.status !== 'Pendente de Informação') {
+                        typedMatchResult.status = 'Elegível';
+                    }
                 }
             }
             catch (error) {
