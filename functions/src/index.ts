@@ -37,7 +37,7 @@ import { vertexAI } from '@genkit-ai/google-genai';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import * as logger from 'firebase-functions/logger';
-import { ngoProfileSchema, editalSchema, matchSchema, bureaucracySchema, triageSchema, copilotResponseSchema, verificationResultSchema } from './shared/schemas.js';
+import { ngoProfileSchema, editalSchema, matchSchema, bureaucracySchema, triageSchema, copilotResponseSchema, verificationResultSchema } from '../../shared/schemas/index.js';
 import * as cheerio from 'cheerio';
 const Parser = require('rss-parser');
 

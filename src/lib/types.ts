@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ngoProfileSchema, editalSchema, matchSchema } from '../../functions/src/shared/schemas';
+import { ngoProfileSchema, editalSchema, matchSchema } from '../../shared/schemas';
 
 export type NgoProfile = z.infer<typeof ngoProfileSchema> & { id: string };
 
