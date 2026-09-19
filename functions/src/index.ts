@@ -5446,3 +5446,5 @@ export const refreshOscOpportunities = onCall({
 
     return { success: true, jobId, message: `${validInternalMatches.length} novas oportunidades enfileiradas para avaliação.` };
 });
+
+export { triggerReverseMatch } from './services/reverseMatchmaker.js';
