@@ -91,3 +91,7 @@ export const scrapingTargetSchema = z.object({
     strategy: z.enum(['RSS', 'API', 'HTML']).describe("Estratégia de extração"),
     cssSelector: z.string().optional().describe("Seletor CSS para extrair os links (apenas para a estratégia HTML)")
 });
+
+export const reverseMatchTriggerSchema = z.object({
+    editalId: z.string().describe("ID do edital que foi recém ingerido")
+});
