@@ -10,7 +10,10 @@ export const ngoProfileSchema = z.object({
     documentationStatus: z.enum(['Em dia', 'Pendente', 'Irregular']).describe("Status das certidões negativas e documentação básica"),
     previousProjectsApproved: z.boolean().describe("Se a ONG já teve projetos culturais aprovados anteriormente"),
     coreActivities: z.array(z.string()).describe("Lista de atividades principais da ONG"),
-    embedding: z.any().optional().describe("Vetor de embedding para busca semântica")
+    embedding: z.any().optional().describe("Vetor de embedding para busca semântica"),
+    createdAt: z.any().optional(),
+    updatedAt: z.any().optional(),
+    rawText: z.string().optional(),
 });
 
 export const editalSchema = z.object({
@@ -27,7 +30,14 @@ export const editalSchema = z.object({
         requiredDocumentation: z.array(z.string()).describe("Lista de documentações exigidas"),
         allowedActivities: z.array(z.string()).describe("Lista de atividades permitidas ou focos de atuação"),
     }).describe("Critérios de elegibilidade do edital"),
-    embedding: z.any().optional().describe("Vetor de embedding para busca semântica")
+    embedding: z.any().optional().describe("Vetor de embedding para busca semântica"),
+    createdAt: z.any().optional(),
+    updatedAt: z.any().optional(),
+    rawText: z.string().optional(),
+    sourceUrl: z.string().optional(),
+    importantDates: z.string().optional(),
+    url: z.string().optional(),
+    summary: z.string().optional(),
 });
 
 export const bureaucracySchema = z.object({
@@ -52,7 +62,11 @@ export const matchSchema = z.object({
     badges: z.array(z.string()).optional().describe("Lista de tags ou selos (ex: 'Alto Alinhamento', 'Prazo Curto', 'Regional')"),
     actionPlan: z.array(z.string()).optional().describe("Plano de Ação sugerido caso a ONG não seja elegível ou tenha score baixo (opcional/pular para poupar tokens se inelegível claro)"),
     actionState: z.enum(['Pendente', 'Aprovado', 'Rejeitado', 'Revisao']).optional().default('Pendente').describe("Estado de feedback humano sobre o match"),
-    verificationResult: verificationResultSchema.optional()
+    verificationResult: verificationResultSchema.optional(),
+    createdAt: z.any().optional(),
+    updatedAt: z.any().optional(),
+    verificationStatus: z.string().optional(),
+    errorReason: z.string().optional(),
 });
 
 export const triageSchema = z.object({
