@@ -1,4 +1,6 @@
 process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
+import { createConverter } from './converters/index.js';
+
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -38,6 +40,10 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import * as logger from 'firebase-functions/logger';
 import { ngoProfileSchema, editalSchema, matchSchema, bureaucracySchema, triageSchema, copilotResponseSchema, verificationResultSchema } from '../../shared/schemas/index.js';
+
+const oscConverter = createConverter(ngoProfileSchema);
+const editalConverter = createConverter(editalSchema);
+const matchConverter = createConverter(matchSchema);
 import * as cheerio from 'cheerio';
 const Parser = require('rss-parser');
 
@@ -423,7 +429,7 @@ export const verifyMatchConstraints = onCall({
         if (hasRejections) {
             updatePayload.status = 'Inelegível';
         }
-        await matchRef.update(updatePayload);
+        await matchRef.withConverter(matchConverter).update(updatePayload);
 
         return { success: true, verificationResult };
 
@@ -479,7 +485,7 @@ export const verifyMatchConstraintWorker = onTaskDispatched({
 
             if (!rawText) {
                 console.log(`Texto bruto do edital ausente para match ${matchId}.`);
-                await matchRef.update({ verificationStatus: 'Error', errorReason: 'O texto bruto (rawText) do edital não está disponível para verificação.' });
+                await matchRef.withConverter(matchConverter).update({ verificationStatus: 'Error', errorReason: 'O texto bruto (rawText) do edital não está disponível para verificação.' });
                 await jobRef.update({ failedTasks: FieldValue.increment(1) });
                 return;
             }
@@ -497,7 +503,7 @@ export const verifyMatchConstraintWorker = onTaskDispatched({
             const oscParseResult = ngoProfileSchema.safeParse(enrichedOscData);
             if (!oscParseResult.success) {
                 console.log(`Dados da OSC inválidos para match ${matchId}.`);
-                await matchRef.update({ verificationStatus: 'Error', errorReason: 'Dados da OSC inválidos para verificação.' });
+                await matchRef.withConverter(matchConverter).update({ verificationStatus: 'Error', errorReason: 'Dados da OSC inválidos para verificação.' });
                 await jobRef.update({ failedTasks: FieldValue.increment(1) });
                 return;
             }
@@ -517,12 +523,12 @@ export const verifyMatchConstraintWorker = onTaskDispatched({
             if (hasRejections) {
                 updatePayload.status = 'Inelegível';
             }
-            await matchRef.update(updatePayload);
+            await matchRef.withConverter(matchConverter).update(updatePayload);
 
             await jobRef.update({ completedTasks: FieldValue.increment(1) });
         } catch (error: any) {
             console.error(`Erro em verifyMatchConstraintWorker para o match ${matchId}:`, error);
-            await matchRef.update({ verificationStatus: 'Error', errorReason: error?.message || 'AI Execution Failed' });
+            await matchRef.withConverter(matchConverter).update({ verificationStatus: 'Error', errorReason: error?.message || 'AI Execution Failed' });
             await jobRef.update({ failedTasks: FieldValue.increment(1) });
         }
     } finally {
@@ -1188,7 +1194,7 @@ async function processMatchEvaluation(oscId: string, editalId: string, forceReca
             reasoning: null,
             actionPlan: ['Atualize os dados do perfil da OSC para permitir a avaliação de match.']
         };
-        await matchRef.set(incompleteMatchDoc, { merge: true });
+        await matchRef.withConverter(matchConverter).set(incompleteMatchDoc, { merge: true });
         return incompleteMatchDoc;
     }
     if (!editalParseResult.success) {
@@ -1251,7 +1257,7 @@ async function processMatchEvaluation(oscId: string, editalId: string, forceReca
         console.log(`Generating missing embedding for OSC ${oscId}`);
         const oscText = `Missão: ${oscData.mission || ''}. Foco: ${(oscData.coreActivities || []).join(', ')}. Nome: ${oscData.name || ''}`;
         oscEmbedding = await generateTextEmbedding(oscText);
-        await db.collection('oscs').doc(oscId).update({ embedding: oscEmbedding });
+        await db.collection('oscs').doc(oscId).withConverter(oscConverter).update({ embedding: oscEmbedding });
         oscData.embedding = oscEmbedding;
     }
 
@@ -1259,7 +1265,7 @@ async function processMatchEvaluation(oscId: string, editalId: string, forceReca
         console.log(`Generating missing embedding for Edital ${editalId}`);
         const editalText = `Objetivo e Título: ${editalData.title || ''}. Elegibilidade: Atividades permitidas: ${(editalData.eligibilityCriteria?.allowedActivities || []).join(', ')}.`;
         editalEmbedding = await generateTextEmbedding(editalText);
-        await db.collection('editais').doc(editalId).update({ embedding: editalEmbedding });
+        await db.collection('editais').doc(editalId).withConverter(editalConverter).update({ embedding: editalEmbedding });
         editalData.embedding = editalEmbedding;
     }
 
@@ -1391,7 +1397,7 @@ async function processMatchEvaluation(oscId: string, editalId: string, forceReca
         createdAt: FieldValue.serverTimestamp()
     };
 
-    await matchRef.set(matchDocData, { merge: true });
+    await matchRef.withConverter(matchConverter).set(matchDocData, { merge: true });
     return matchDocData;
 }
 
@@ -1480,7 +1486,7 @@ export const agenticSearchWorker = onTaskDispatched({
 
             const oscText = `Missão/Descrição: ${missionText}. Foco: ${activitiesText}. Nome: ${oscData.name || ''}`;
             oscEmbedding = await generateTextEmbedding(oscText);
-            await db.collection('oscs').doc(oscId).update({ embedding: FieldValue.vector(oscEmbedding) });
+            await db.collection('oscs').doc(oscId).withConverter(oscConverter).update({ embedding: FieldValue.vector(oscEmbedding) });
         }
 
         // Tier 1: Internal Database First
@@ -2226,7 +2232,7 @@ export const processOscChunkWorker = onTaskDispatched({
             // Clean undefined values from object before Firestore save to avoid errors
             const finalUpsertData = Object.fromEntries(Object.entries(upsertData).filter(([_, v]) => v !== undefined));
 
-            await oscRef.set(finalUpsertData, { merge: true });
+            await oscRef.withConverter(oscConverter).set(finalUpsertData, { merge: true });
             imported++;
         } catch (error: unknown) {
             console.error(`Error transforming and upserting OSC ${osc.cleanCnpj}:`, error);
@@ -2534,7 +2540,7 @@ export const triggerBulkInternalMatch = onCall({
                 const oscText = `Missão/Descrição: ${missionText}. Foco: ${activitiesText}. Nome: ${name || ''}`;
                 const embedding = await generateTextEmbedding(oscText);
                 oscEmbedding = FieldValue.vector(embedding);
-                await db.collection('oscs').doc(osc.id).update({ embedding: oscEmbedding });
+                await db.collection('oscs').doc(osc.id).withConverter(oscConverter).update({ embedding: oscEmbedding });
             }
 
             const vectorQuery = Array.isArray(oscEmbedding) ? FieldValue.vector(oscEmbedding) : oscEmbedding;
@@ -3134,7 +3140,7 @@ export const ingestSingleOscByCnpj = onCall({
             source: 'manual_cnpj_ingest'
         };
 
-        await db.collection('oscs').doc(cleanCnpj).set(dataToSave);
+        await db.collection('oscs').doc(cleanCnpj).withConverter(oscConverter).set(dataToSave);
 
         if (userRole === 'client') {
             await db.collection('users').doc(request.auth.uid).update({
@@ -3216,7 +3222,7 @@ export const ingestManualOscFunction = onCall({
         const finalDataToSave = Object.fromEntries(Object.entries(dataToSave).filter(([_, v]) => v !== undefined));
 
         // Save to Firestore
-        await getFirestore().collection('oscs').doc(cleanCnpj).set(finalDataToSave);
+        await getFirestore().collection('oscs').doc(cleanCnpj).withConverter(oscConverter).set(finalDataToSave as z.infer<typeof ngoProfileSchema>);
 
         if (userRole === 'client') {
             await db.collection('users').doc(request.auth.uid).update({
@@ -3971,7 +3977,7 @@ export const extractionWorker = onTaskDispatched({
                 createdAt: FieldValue.serverTimestamp(),
             };
 
-            docRef = await db.collection('editais').add(editalDocData);
+            docRef = await db.collection('editais').withConverter(editalConverter).add(editalDocData);
 
             if (searchRef) {
                 const safeReason = reason ? reason.substring(0, 200) : '';
@@ -3985,14 +3991,16 @@ export const extractionWorker = onTaskDispatched({
             const fallbackDocData = {
                 title: "Edital Parcial/Mapeamento Incompleto",
                 issuer: "Desconhecido",
-                publicationDate: new Date().toISOString().split('T')[0],
+                publicationDate: new Date().toISOString().split('T')[0] as string,
                 deadline: "1970-01-01", // Distant past to force immediate expiration
+                isContinuous: false,
+                ativo: true,
                 totalBudget: 0,
                 eligibilityCriteria: {
                     minYearsActive: 0,
-                    requiredLocations: [],
-                    requiredDocumentation: [],
-                    allowedActivities: []
+                    requiredLocations: [] as string[],
+                    requiredDocumentation: [] as string[],
+                    allowedActivities: [] as string[]
                 },
                 rawText: text.substring(0, 5000),
                 sourceUrl: link,
@@ -4002,7 +4010,7 @@ export const extractionWorker = onTaskDispatched({
                 originalExtractionData: editalResult // Save the raw object to trace what LLM gave us
             };
 
-            docRef = await db.collection('editais').add(fallbackDocData);
+            docRef = await db.collection('editais').withConverter(editalConverter).add(fallbackDocData as z.infer<typeof editalSchema>);
 
             if (searchRef) {
                 await searchRef.set({
@@ -5363,7 +5371,7 @@ export const refreshOscOpportunities = onCall({
         const oscText = `Missão/Descrição: ${oscData.mission || 'Não especificada'}. Foco: ${(Array.isArray(oscData.coreActivities) ? oscData.coreActivities.join(', ') : 'Não especificadas')}. Nome: ${oscData.name || ''}`;
         const embedding = await generateTextEmbedding(oscText);
         oscEmbedding = FieldValue.vector(embedding);
-        await oscRef.update({ embedding: oscEmbedding });
+        await oscRef.withConverter(oscConverter).update({ embedding: oscEmbedding });
     }
 
     const vectorQuery = Array.isArray(oscEmbedding) ? FieldValue.vector(oscEmbedding) : oscEmbedding;
