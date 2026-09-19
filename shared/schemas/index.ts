@@ -17,6 +17,7 @@ export const ngoProfileSchema = z.object({
 });
 
 export const editalSchema = z.object({
+    externalProviderId: z.string().describe("External deterministic ID from the provider/source"),
     title: z.string().describe("Título do edital"),
     issuer: z.string().describe("Órgão emissor ou financiador do edital"),
     publicationDate: z.string().describe("Data de publicação do edital (YYYY-MM-DD)"),

@@ -3954,6 +3954,10 @@ export const extractionWorker = onTaskDispatched({
         }
 
         const editalResult = await extractEditalRules({ text });
+
+        if (!editalResult.externalProviderId) {
+            editalResult.externalProviderId = require('crypto').createHash('sha256').update(editalResult.rawText || editalResult.title || link || '').digest('hex');
+        }
         const parseResult = editalSchema.safeParse(editalResult);
 
         let docRef: FirebaseFirestore.DocumentReference | null = null;
@@ -3977,7 +3981,11 @@ export const extractionWorker = onTaskDispatched({
                 createdAt: FieldValue.serverTimestamp(),
             };
 
-            docRef = await db.collection('editais').withConverter(editalConverter).add(editalDocData);
+
+            const externalProviderId = editalDocData.externalProviderId;
+            editalDocData.externalProviderId = externalProviderId;
+            docRef = db.collection('editais').doc(externalProviderId);
+            await docRef.withConverter(editalConverter).set(editalDocData as Partial<z.infer<typeof editalSchema>>, { merge: true });
 
             if (searchRef) {
                 const safeReason = reason ? reason.substring(0, 200) : '';
@@ -3987,37 +3995,25 @@ export const extractionWorker = onTaskDispatched({
                 }, { merge: true });
             }
         } else {
-            console.warn(`[Extraction Trace] Validation failed for ${link}. Saving fallback document.`, parseResult.error);
-            const fallbackDocData = {
-                title: "Edital Parcial/Mapeamento Incompleto",
-                issuer: "Desconhecido",
-                publicationDate: new Date().toISOString().split('T')[0] as string,
-                deadline: "1970-01-01", // Distant past to force immediate expiration
-                isContinuous: false,
-                ativo: true,
-                totalBudget: 0,
-                eligibilityCriteria: {
-                    minYearsActive: 0,
-                    requiredLocations: [] as string[],
-                    requiredDocumentation: [] as string[],
-                    allowedActivities: [] as string[]
-                },
-                rawText: text.substring(0, 5000),
+            console.error(`[Extraction Trace] Validation failed for ${link}. Route to failed_ingestions.`, parseResult.error);
+
+            // Route to failed_ingestions
+            await db.collection('failed_ingestions').add({
                 sourceUrl: link,
+                rawText: text.substring(0, 5000),
                 discoverySource: discoverySource || contentDoc.data()?.discoverySource || null,
                 createdAt: FieldValue.serverTimestamp(),
-                parseError: true,
-                originalExtractionData: editalResult // Save the raw object to trace what LLM gave us
-            };
-
-            docRef = await db.collection('editais').withConverter(editalConverter).add(fallbackDocData as z.infer<typeof editalSchema>);
+                parseError: parseResult.error,
+                originalExtractionData: editalResult
+            });
 
             if (searchRef) {
                 await searchRef.set({
-                    logs: FieldValue.arrayUnion({ link, status: 'Aviso', reason: 'Salvo com erro de validação (Fallback).' }),
+                    logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: 'Salvo com erro de validação (Falha na Extração).' }),
                     savedCount: FieldValue.increment(1)
                 }, { merge: true });
             }
+            // Error thrown removed to prevent infinite task retries
         }
 
         // Handoff: Trigger Match Evaluator for agentic search if searchId contains an oscId pattern
