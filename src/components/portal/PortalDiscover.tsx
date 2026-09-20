@@ -370,7 +370,7 @@ const OpportunityCard: React.FC<{ match: MatchResult; onClick?: () => void }> = 
 
                 <div className="pt-4 border-t border-muted">
                     <p className="text-sm text-muted-foreground line-clamp-3">
-                        {match.aiSummary || match.reasoning || "Match encontrado com sucesso base nas suas qualificações."}
+                        {match.aiRationale || match.reasoning || "Match encontrado com sucesso base nas suas qualificações."}
                     </p>
                 </div>
             </div>

@@ -65,9 +65,9 @@ export function MatchDetailPanel({ match: initialMatch, edital, onFeedback, hand
                         Justificativa da IA (Explainability)
                     </h4>
                     <div className="text-sm text-foreground/80 leading-relaxed bg-background p-4 rounded-lg border prose prose-sm dark:prose-invert max-w-none">
-                        {localMatch.reasoning ? (
+                        {(localMatch.aiRationale || localMatch.reasoning) ? (
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                {localMatch.reasoning}
+                                {localMatch.aiRationale || localMatch.reasoning || ""}
                             </ReactMarkdown>
                         ) : (
                             <p>Nenhuma justificativa fornecida (geralmente ocorre quando falha no Gate 1).</p>
