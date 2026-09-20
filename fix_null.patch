@@ -1,0 +1,13 @@
+--- functions/src/index.ts
++++ functions/src/index.ts
+@@ -2014,7 +2014,9 @@
+         });
+         const matchResult = result.output;
+
+-        await db.collection('matches').doc(`${oscId}_${editalId}`).set(matchResult, { merge: true });
++        if (matchResult) {
++            await db.collection('matches').doc(`${oscId}_${editalId}`).set(matchResult, { merge: true });
++        }
+
+         if (jobId) {
+             const db = getFirestore();

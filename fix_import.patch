@@ -1,0 +1,20 @@
+--- functions/src/index.ts
++++ functions/src/index.ts
+@@ -43,7 +43,7 @@
+ import { onCall, HttpsError } from 'firebase-functions/v2/https';
+ import { onTaskDispatched } from 'firebase-functions/v2/tasks';
+ import * as logger from 'firebase-functions/logger';
+-import { ngoProfileSchema, editalSchema, matchSchema, bureaucracySchema, triageSchema, copilotResponseSchema, verificationResultSchema } from '../../shared/schemas/index.js';
++import { ngoProfileSchema, editalSchema, matchSchema, bureaucracySchema, triageSchema, copilotResponseSchema, verificationResultSchema, reverseMatchResultSchema } from '../../shared/schemas/index.js';
+
+ const oscConverter = createConverter(ngoProfileSchema);
+ const editalConverter = createConverter(editalSchema);
+@@ -1998,7 +1998,7 @@
+
+         const result = await ai.generate({
+             prompt,
+-            output: { schema: z.object({ matchScore: z.number(), aiRationale: z.string() }) },
++            output: { schema: reverseMatchResultSchema },
+             model: 'vertexai/gemini-1.5-flash'
+         });
+         const matchResult = result.output();
