@@ -17,7 +17,7 @@ interface MatchRowProps {
 export function MatchRow({ match, edital, osc, isExpanded, onToggleExpand, onFeedback, handleGlobalInvalidate, hideColumn }: MatchRowProps) {
     // Gate 1 (Bureaucracy) Status
     const gate1Passed = match.eligibility;
-    const isMissingData = !gate1Passed && match.matchScore === 0 && match.reasoning?.includes('Falta de informações'); // Heuristic based on memory/requirements
+    const isMissingData = !gate1Passed && match.matchScore === 0 && (match.aiRationale || match.reasoning)?.includes('Falta de informações'); // Heuristic based on memory/requirements
 
     let gate1Icon = <CheckCircle className="w-4 h-4" />;
     let gate1Class = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400';
@@ -63,7 +63,7 @@ export function MatchRow({ match, edital, osc, isExpanded, onToggleExpand, onFee
                     </td>
                 )}
                 <td className="px-6 py-4 text-center">
-                    <div className={`inline-flex items-center gap-1.5 font-medium px-2.5 py-1 rounded-full text-xs cursor-help ${gate1Class}`} title={!gate1Passed && match.reasoning ? match.reasoning : "Gate 1: Restrições burocráticas avaliadas."}>
+                    <div className={`inline-flex items-center gap-1.5 font-medium px-2.5 py-1 rounded-full text-xs cursor-help ${gate1Class}`} title={!gate1Passed && (match.aiRationale || match.reasoning) ? (match.aiRationale || match.reasoning) : "Gate 1: Restrições burocráticas avaliadas."}>
                         {gate1Icon}
                         {gate1Text}
                     </div>

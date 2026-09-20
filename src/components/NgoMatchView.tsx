@@ -158,7 +158,7 @@ export function NgoMatchView() {
 
                          <div className="mb-8">
                              <h4 className="text-lg font-bold mb-2">Justificativa Detalhada da IA</h4>
-                             <p className="text-muted-foreground leading-relaxed bg-muted/30 p-4 rounded-lg">{match.reasoning}</p>
+                             <p className="text-muted-foreground leading-relaxed bg-muted/30 p-4 rounded-lg">{match.aiRationale || match.reasoning}</p>
                          </div>
 
                          {!match.eligibility && match.actionPlan && match.actionPlan.length > 0 && (
