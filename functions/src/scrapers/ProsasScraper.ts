@@ -3,7 +3,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import * as crypto from 'crypto';
 
 export class ProsasScraper implements IScraperStrategy {
-    private readonly stateDocId = 'prosas';
+    public readonly stateDocId = 'prosas';
 
     async getWatermark(): Promise<string | null> {
         const db = getFirestore();

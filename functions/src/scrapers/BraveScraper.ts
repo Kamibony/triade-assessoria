@@ -7,7 +7,7 @@ const braveApiKeyString = defineString('BRAVE_SEARCH_API_KEY');
 
 export class BraveScraper implements IScraperStrategy {
     private readonly query: string;
-    private readonly stateDocId: string;
+    public readonly stateDocId: string;
 
     constructor(query: string) {
         this.query = query;

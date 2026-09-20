@@ -14,6 +14,10 @@ import stealth from 'puppeteer-extra-plugin-stealth';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { getFunctions } from 'firebase-admin/functions';
+import { ProsasScraper } from './scrapers/ProsasScraper.js';
+import { VertexAIScraper } from './scrapers/VertexAIScraper.js';
+import { BraveScraper } from './scrapers/BraveScraper.js';
+import { IScraperStrategy } from './scrapers/interfaces.js';
 import * as admin from 'firebase-admin';
 import { defineString } from 'firebase-functions/params';
 import { GoogleAuth } from 'google-auth-library';
@@ -2692,196 +2696,6 @@ export const onOscUpdated = onDocumentUpdated('oscs/{oscId}', async (event) => {
 
 
 
-async function processPredefinedQueries(runId?: string) {
-    const db = getFirestore();
-    const PREDEFINED_QUERIES = [
-        "edital ONG 2024",
-        "fomento cultura terceiro setor",
-        "financiamento projetos sociais brasil",
-        "chamada publica para osc",
-        "edital projetos ambientais ong"
-    ];
-
-    let processedCount = 0;
-    let savedCount = 0;
-
-    // Telemetry Counters
-    let heuristicRejects = 0;
-    let aiRejects = 0;
-    let cacheHits = 0;
-    let aiApprovals = 0;
-    let prosasLinks = 0;
-    let errorCount = 0;
-
-    let vertexProjectId = process.env.VERTEX_AI_SEARCH_PROJECT_ID;
-    if (!vertexProjectId) {
-        try { vertexProjectId = vertexAiSearchProjectIdString.value(); } catch (e) { /* ignore */ }
-    }
-    vertexProjectId = vertexProjectId || "566889139686";
-
-    let vertexLocation = process.env.VERTEX_AI_SEARCH_LOCATION;
-    if (!vertexLocation) {
-        try { vertexLocation = vertexAiSearchLocationString.value(); } catch (e) { /* ignore */ }
-    }
-    vertexLocation = vertexLocation || "global";
-
-    let vertexEngineId = process.env.VERTEX_AI_SEARCH_ENGINE_ID;
-    if (!vertexEngineId) {
-        try { vertexEngineId = vertexAiSearchEngineIdString.value(); } catch (e) { /* ignore */ }
-    }
-    vertexEngineId = vertexEngineId || "triade-sniper-search_1787960465651";
-
-    if (!vertexEngineId || !vertexLocation || !vertexProjectId) {
-        console.warn("Vertex AI Search config missing for processPredefinedQueries.");
-        return { processedCount: 0, savedCount: 0 };
-    }
-
-    let auth, client, accessToken;
-    try {
-        auth = new GoogleAuth({ scopes: 'https://www.googleapis.com/auth/cloud-platform' });
-        client = await auth.getClient();
-        accessToken = await client.getAccessToken();
-    } catch(e: any) {
-        console.error("Failed to authenticate with GoogleAuth:", e);
-        if (runId) {
-            await db.collection('ingestion_runs').doc(runId).update({
-                'phases.rssAndQueries.errors': FieldValue.arrayUnion(`GoogleAuth authentication failed: ${e.message}`)
-            });
-        }
-        return { processedCount: 0, savedCount: 0 };
-    }
-
-    const vertexUrl = `https://discoveryengine.googleapis.com/v1/projects/${vertexProjectId}/locations/${vertexLocation}/collections/default_collection/engines/${vertexEngineId}/servingConfigs/default_search:search`;
-
-    for (const query of PREDEFINED_QUERIES) {
-        try {
-            console.log(`[Predefined Queries] Executing Vertex AI Search for query: "${query}"`);
-
-            let vertexResponse;
-            let attempt = 0;
-            const maxAttempts = 3;
-
-            while (attempt < maxAttempts) {
-                try {
-                    vertexResponse = await fetch(vertexUrl, {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${accessToken.token}`,
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({ query: query, pageSize: 40 })
-                    });
-
-                    if (vertexResponse.ok) break;
-
-                    if (vertexResponse.status === 429 || vertexResponse.status >= 500) {
-                        attempt++;
-                        console.warn(`Vertex AI API failed with status ${vertexResponse.status}. Retrying ${attempt}/${maxAttempts}...`);
-                        await new Promise(res => setTimeout(res, 1000 * Math.pow(2, attempt)));
-                    } else {
-                        break;
-                    }
-                } catch (networkError: any) {
-                    attempt++;
-                    console.warn(`Vertex AI API network error: ${networkError.message}. Retrying ${attempt}/${maxAttempts}...`);
-                    if (attempt >= maxAttempts) {
-                        vertexResponse = undefined; // Force failure block below
-                        break;
-                    }
-                    await new Promise(res => setTimeout(res, 1000 * Math.pow(2, attempt)));
-                }
-            }
-
-            if (!vertexResponse || !vertexResponse.ok) {
-                 const status = vertexResponse ? vertexResponse.status : 'network_error_or_unknown';
-                 console.error(`Vertex AI API failed permanently for query "${query}" with status: ${status}`);
-                 if (runId) {
-                     await db.collection('ingestion_runs').doc(runId).update({
-                         'phases.rssAndQueries.errors': FieldValue.arrayUnion(`Vertex AI API falhou permanentemente para "${query}": ${status}`)
-                     });
-                 }
-                 continue;
-            }
-
-            if (runId) {
-                await db.collection('ingestion_runs').doc(runId).update({
-                    'phases.rssAndQueries.feedsProcessed': FieldValue.increment(1) // Treating query as a 'feed' for UI purposes
-                });
-            }
-
-            const vertexData = await vertexResponse.json() as any;
-            const results = vertexData.results || [];
-
-            for (const result of results) {
-                 const derivedStructData = result.document?.derivedStructData;
-                 if (!derivedStructData || !derivedStructData.link) continue;
-
-                 const link = derivedStructData.link;
-
-                 const existingEdital = await db.collection('editais').where('sourceUrl', '==', link).limit(1).get();
-                 if (!existingEdital.empty) continue;
-
-                 const existingQueue = await db.collection('scraping_contents').where('url', '==', link).limit(1).get();
-                 if (!existingQueue.empty) continue;
-
-                 const rejectionRef = await db.collection('scraping_cache').where('url', '==', link).limit(1).get();
-                 if (!rejectionRef.empty) {
-                     cacheHits++;
-                     continue;
-                 }
-
-                 processedCount++;
-
-                 const routeResult = await routeEditalUrl(link, "VERTEX_SEARCH", undefined, { searchQuery: query }, "VERTEX_SEARCH");
-
-                 if (routeResult.outcome === 'HEURISTIC_REJECT') heuristicRejects++;
-                 else if (routeResult.outcome === 'AI_REJECT') aiRejects++;
-                 else if (routeResult.outcome === 'AI_APPROVE') aiApprovals++;
-                 else if (routeResult.outcome === 'PROSAS') prosasLinks++;
-                 else if (routeResult.outcome === 'ERROR') errorCount++;
-
-                 if (routeResult.success) {
-                     savedCount++;
-                 } else {
-                    const safeReason = routeResult.message ? routeResult.message.substring(0, 200) : '';
-                    const expireAt = new Date();
-                    expireAt.setDate(expireAt.getDate() + 30);
-                    await db.collection('scraping_cache').add({
-                        url: link,
-                        reason: safeReason,
-                        createdAt: FieldValue.serverTimestamp(),
-                        expireAt: expireAt
-                    });
-                 }
-
-
-            }
-        } catch (error: any) {
-            console.error(`Error processing predefined query ${query}:`, error);
-            if (runId) {
-                await db.collection('ingestion_runs').doc(runId).update({
-                    'phases.rssAndQueries.errors': FieldValue.arrayUnion(`Error on query ${query}: ${error.message}`)
-                });
-            }
-        }
-    }
-
-    return {
-        processedCount,
-        savedCount,
-        metrics: {
-            heuristicRejects,
-            aiRejects,
-            cacheHits,
-            aiApprovals,
-            prosasLinks,
-            errorCount
-        }
-    };
-}
-
-
-
 export async function checkAndUpdateGlobalRunStatus(runId: string) {
     if (!runId) return;
     const db = getFirestore();
@@ -2897,17 +2711,19 @@ export async function checkAndUpdateGlobalRunStatus(runId: string) {
             if (!data || data.status !== 'RUNNING') return; // Already finished or something
 
             const phases = data.phases || {};
+            const unifiedStatus = phases.unified?.status || 'COMPLETED';
             const prosasStatus = phases.prosas?.status || 'COMPLETED'; // Treat missing as completed for safety
             const internalStatus = phases.internalFontes?.status || 'COMPLETED';
             const rssStatus = phases.rssAndQueries?.status || 'COMPLETED';
 
             const isTerminal = (status: string) => ['COMPLETED', 'FAILED', 'TIMEOUT'].includes(status);
 
-            if (isTerminal(prosasStatus) && isTerminal(internalStatus) && isTerminal(rssStatus)) {
+            if (isTerminal(unifiedStatus) && isTerminal(prosasStatus) && isTerminal(internalStatus) && isTerminal(rssStatus)) {
                 // All child phases are in a terminal state
 
                 // Aggregate errors to determine final state
                 const anyFailures =
+                    unifiedStatus === 'FAILED' ||
                     prosasStatus === 'FAILED' ||
                     internalStatus === 'FAILED' ||
                     rssStatus === 'FAILED';
@@ -3848,6 +3664,17 @@ export const seedScrapingTargets = onCall({
     const batch = db.batch();
 
     const targets = [
+        { name: "Prosas Oportunidades (API)", strategy: "PROSAS" },
+        { name: "Query: edital ONG 2024", query: "edital ONG 2024", strategy: "VERTEX" },
+        { name: "Query: fomento cultura terceiro setor", query: "fomento cultura terceiro setor", strategy: "VERTEX" },
+        { name: "Query: financiamento projetos sociais brasil", query: "financiamento projetos sociais brasil", strategy: "VERTEX" },
+        { name: "Query: chamada publica para osc", query: "chamada publica para osc", strategy: "VERTEX" },
+        { name: "Query: edital projetos ambientais ong", query: "edital projetos ambientais ong", strategy: "VERTEX" },
+        { name: "Query: edital ONG 2024 (Brave)", query: "edital ONG 2024", strategy: "BRAVE" },
+        { name: "Query: fomento cultura terceiro setor (Brave)", query: "fomento cultura terceiro setor", strategy: "BRAVE" },
+        { name: "Query: financiamento projetos sociais brasil (Brave)", query: "financiamento projetos sociais brasil", strategy: "BRAVE" },
+        { name: "Query: chamada publica para osc (Brave)", query: "chamada publica para osc", strategy: "BRAVE" },
+        { name: "Query: edital projetos ambientais ong (Brave)", query: "edital projetos ambientais ong", strategy: "BRAVE" },
         { name: "Prosas (RSS Editais)", url: "https://blog.prosas.com.br/categoria/editais/feed/", strategy: "RSS" },
         { name: "Diário Oficial da União (Gov)", url: "https://www.in.gov.br", strategy: "AUTO" },
         { name: "Ministério da Cultura (Editais)", url: "https://www.gov.br/cultura/pt-br/assuntos/editais", strategy: "AUTO" },
@@ -4878,155 +4705,10 @@ export const renewProsasSessionCron = onSchedule({
 });
 
 
-export const prosasBulkDiscoveryWorker = onTaskDispatched({
-    retryConfig: { maxAttempts: 1, minBackoffSeconds: 30 },
-    rateLimits: { maxConcurrentDispatches: 1 },
-    timeoutSeconds: 1800,
-    memory: '2GiB'
-}, async (request) => {
-    let { page = 1, consecutiveZeroNewCount = 0, runId, maxPages = 5 } = request.data as { page?: number, consecutiveZeroNewCount?: number, runId?: string, maxPages?: number };
-    const db = getFirestore();
-    const queue = getFunctions().taskQueue('prosasAuthenticatedWorker');
-
-    logger.info(`[Prosas Bulk Discovery] Starting processing for page ${page}`);
-
-    let browser: any = null;
-    try {
-        // Fetch Session State from GCS to bypass Cloudflare/auth wall
-        const storage = getStorage();
-        const sessionBucketName = 'triade-prosas-session-state';
-        const sessionFileName = 'prosas_session.json';
-
-        logger.info(`[Prosas Bulk Discovery] Downloading session state from gs://${sessionBucketName}/${sessionFileName} directly into memory`);
-        let [fileContent] = await storage.bucket(sessionBucketName).file(sessionFileName).download();
-
-        let sessionData = JSON.parse(fileContent.toString('utf-8'));
-
-        if (!sessionData.cookies || sessionData.cookies.length === 0) {
-            logger.warn('[Prosas Bulk Discovery] Downloaded session appears invalid (no cookies). Triggering inline renewal...');
-            await renewProsasSessionInternal();
-            const [newFileContent] = await storage.bucket(sessionBucketName).file(sessionFileName).download();
-            fileContent = newFileContent;
-            sessionData = JSON.parse(fileContent.toString('utf-8'));
-        }
-
-        chromium.use(stealth());
-        browser = await chromium.launch({
-            args: chromiumSparticuz.args,
-            executablePath: await chromiumSparticuz.executablePath(),
-            headless: true,
-        });
-
-        const context = await browser.newContext({ storageState: sessionData });
-        const playwrightPage = await context.newPage();
-
-        // Navigate directly to the search UI page
-        const searchUrl = `https://prosas.com.br/editais?page=${page}`;
-        logger.info(`[Prosas Bulk Discovery] Navigating to search URL to extract DOM: ${searchUrl}`);
-        await playwrightPage.goto(searchUrl, { waitUntil: 'networkidle', timeout: 60000 });
-
-        // Simulate human behavior and wait for content to load
-        logger.info(`[Prosas Bulk Discovery] Simulating human behavior and waiting for DOM rendering...`);
-        await playwrightPage.waitForTimeout(Math.floor(Math.random() * 3000) + 2000);
-        await playwrightPage.evaluate(() => window.scrollBy(0, Math.floor(Math.random() * 500) + 200));
-        await playwrightPage.waitForTimeout(Math.floor(Math.random() * 2000) + 1000);
-
-        // Extract edital links directly from the rendered HTML DOM
-        logger.info(`[Prosas Bulk Discovery] Extracting edital links from DOM...`);
-        const links = await playwrightPage.evaluate(() => {
-            return Array.from(document.querySelectorAll('a[href*="/editais/"]')).map((a: any) => a.href);
-        });
-
-        // Deduplicate the extracted links
-        let candidateLinks: string[] = [...new Set<string>(links)];
-
-        // Filter out URLs that are exactly the list page itself or don't follow the ID pattern
-        candidateLinks = candidateLinks.filter(url => {
-             const match = url.match(/\/editais\/(\d+)$/);
-             return match !== null;
-        });
-
-        if (candidateLinks.length === 0) {
-            logger.info(`[Prosas Bulk Discovery] No unique edital links found for Prosas on page ${page}. Stopping pagination.`);
-            if (runId) {
-                await db.collection('ingestion_runs').doc(runId).update({
-                    'phases.prosas.status': 'COMPLETED',
-                });
-                await checkAndUpdateGlobalRunStatus(runId);
-            }
-            return;
-        }
-
-        logger.info(`[Prosas Bulk Discovery] Discovered ${candidateLinks.length} unique edital links on Page ${page}`);
-
-        let newCount = 0;
-        for (const link of candidateLinks) {
-            const querySnapshot = await db.collection('editais').where('sourceUrl', '==', link).limit(1).get();
-            if (querySnapshot.empty) {
-                // Enqueue with a random delay between 20s and 60s
-                const randomDelaySec = Math.floor(Math.random() * (60 - 20 + 1)) + 20;
-                const scheduleTime = new Date(Date.now() + randomDelaySec * 1000);
-
-                await queue.enqueue({
-                    url: link,
-                    searchId: 'BULK_DISCOVERY'
-                }, {
-                    scheduleTime: scheduleTime
-                });
-                newCount++;
-            }
-        }
-
-        logger.info(`[Prosas Bulk Discovery] Enqueued ${newCount} new editais for authenticated scraping.`);
-
-        if (runId) {
-            await db.collection('ingestion_runs').doc(runId).update({
-                'phases.prosas.pagesScanned': FieldValue.increment(1),
-                'phases.prosas.urlsDiscovered': FieldValue.increment(candidateLinks.length),
-                'phases.prosas.newEditaisEnqueued': FieldValue.increment(newCount),
-                'totalUrlsScanned': FieldValue.increment(candidateLinks.length),
-            });
-        }
-
-        if (newCount === 0) {
-            consecutiveZeroNewCount++;
-        } else {
-            consecutiveZeroNewCount = 0;
-        }
-
-        if (consecutiveZeroNewCount >= 3 || page >= maxPages) {
-            logger.info(`[Prosas Bulk Discovery] Encountered 3 consecutive pages with 0 new editais, or reached maxPages (${maxPages}). Early exit triggered.`);
-            if (runId) {
-                await db.collection('ingestion_runs').doc(runId).update({
-                    'phases.prosas.status': 'COMPLETED',
-                });
-                await checkAndUpdateGlobalRunStatus(runId);
-            }
-            return;
-        }
-
-        // Enqueue next page
-        const discoveryQueue = getFunctions().taskQueue('prosasBulkDiscoveryWorker');
-        await discoveryQueue.enqueue({ page: page + 1, consecutiveZeroNewCount, runId, maxPages });
-        logger.info(`[Prosas Bulk Discovery] Enqueued page ${page + 1} for discovery.`);
-
-    } catch (e: any) {
-        logger.error(`[Prosas Bulk Discovery] Prosas API fetch failed: ${e.message}`);
-        if (runId) {
-            await db.collection('ingestion_runs').doc(runId).update({
-                'phases.prosas.status': 'FAILED',
-                'phases.prosas.errors': FieldValue.arrayUnion(e.message)
-            });
-            await checkAndUpdateGlobalRunStatus(runId);
-        }
-        throw e;
-    } finally {
-        if (browser) {
-            await browser.close();
-        }
-    }
+export const unifiedIngestionWorker = onSchedule('0 2 * * *', async () => {
+    const runId = `RUN-CRON-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    await executeUnifiedIngestion(runId);
 });
-
 
 export const triggerGlobalIngestion = onCall({
     cors: true,
@@ -5045,10 +4727,22 @@ export const triggerGlobalIngestion = onCall({
 
     const runId = `RUN-${new Date().toISOString().replace(/[:.]/g, '-')}`;
 
+    // We await this synchronously, as dispatching Cloud Tasks is generally fast enough
+    // and we must ensure the background execution context remains active in GCF.
+    await executeUnifiedIngestion(runId);
+
+    return { success: true, runId, message: "Ingestion loop completed" };
+});
+
+async function executeUnifiedIngestion(runId: string) {
+    const db = getFirestore();
+    const extractionQueue = getFunctions().taskQueue('extractionWorker');
+    const processScrapingTargetQueue = getFunctions().taskQueue('processScrapingTargetWorker');
+    const rssQueue = getFunctions().taskQueue('rssWorker');
+
     await db.collection('ingestion_runs').doc(runId).set({
         id: runId,
-        triggerSource: 'MANUAL_ADMIN',
-        triggeredBy: request.auth.uid,
+        triggerSource: runId.includes('CRON') ? 'CRON' : 'MANUAL',
         startTime: FieldValue.serverTimestamp(),
         endTime: null,
         status: 'RUNNING',
@@ -5056,124 +4750,104 @@ export const triggerGlobalIngestion = onCall({
         totalValidEditaisFound: 0,
         totalErrors: 0,
         phases: {
+            unified: { status: 'RUNNING', targetsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
             prosas: { status: 'RUNNING', pagesScanned: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
             internalFontes: { status: 'RUNNING', targetsProcessed: 0, totalTargets: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
             rssAndQueries: { status: 'RUNNING', feedsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] }
         }
     });
 
-    // Phase 1: Prosas Bulk Discovery
-    try {
-        const discoveryQueue = getFunctions().taskQueue('prosasBulkDiscoveryWorker');
-        await discoveryQueue.enqueue({ page: 1, consecutiveZeroNewCount: 0, runId, maxPages: 50 });
-    } catch (e: any) {
-        await db.collection('ingestion_runs').doc(runId).update({
-            'phases.prosas.status': 'FAILED',
-            'phases.prosas.errors': FieldValue.arrayUnion(`Failed to enqueue: ${e.message}`)
-        });
-    }
+    const targetsSnap = await db.collection('scraping_targets').get();
 
-    // Phase 2: Internal Fontes
-    try {
-        const targetsSnapshot = await db.collection('scraping_targets').get();
-        await db.collection('ingestion_runs').doc(runId).update({
-            'phases.internalFontes.totalTargets': targetsSnapshot.docs.length
-        });
-        const queue = getFunctions().taskQueue('processScrapingTargetWorker');
-        for (const doc of targetsSnapshot.docs) {
-            const targetData = { id: doc.id, ...doc.data() };
-            // Optional: Create a search tracking doc per target as we do manually, or just use runId. We will just enqueue for runId tracking here.
-            await queue.enqueue({
-                searchId: 'GLOBAL_RUN',
-                target: targetData,
-                query: '',
-                runId
-            });
-        }
-    } catch (e: any) {
-         await db.collection('ingestion_runs').doc(runId).update({
-            'phases.internalFontes.status': 'FAILED',
-            'phases.internalFontes.errors': FieldValue.arrayUnion(`Failed to enqueue: ${e.message}`)
-        });
-    }
+    let enqueuedTotal = 0;
+    let urlsDiscovered = 0;
 
-    // Phase 3: RSS
-    try {
-        const rssQueue = getFunctions().taskQueue('rssWorker');
-        await rssQueue.enqueue({ runId });
-    } catch (e: any) {
-        await db.collection('ingestion_runs').doc(runId).update({
-            'phases.rssAndQueries.status': 'FAILED',
-            'phases.rssAndQueries.errors': FieldValue.arrayUnion(`Failed to enqueue RSS worker: ${e.message}`)
-        });
-    }
+    for (const doc of targetsSnap.docs) {
+        const target = { id: doc.id, ...doc.data() } as any;
 
-    return { success: true, runId };
-});
+        let strategy: IScraperStrategy | null = null;
 
-export const scheduledGlobalIngestion = onSchedule('0 2 * * *', async () => {
-     const db = getFirestore();
-     const runId = `RUN-CRON-${new Date().toISOString().replace(/[:.]/g, '-')}`;
-
-     await db.collection('ingestion_runs').doc(runId).set({
-         id: runId,
-         triggerSource: 'CRON',
-         triggeredBy: 'system',
-         startTime: FieldValue.serverTimestamp(),
-         endTime: null,
-         status: 'RUNNING',
-         totalUrlsScanned: 0,
-         totalValidEditaisFound: 0,
-         totalErrors: 0,
-         phases: {
-             prosas: { status: 'RUNNING', pagesScanned: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
-             internalFontes: { status: 'RUNNING', targetsProcessed: 0, totalTargets: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
-             rssAndQueries: { status: 'RUNNING', feedsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] }
-         }
-     });
-
-     try {
-         const discoveryQueue = getFunctions().taskQueue('prosasBulkDiscoveryWorker');
-         await discoveryQueue.enqueue({ page: 1, consecutiveZeroNewCount: 0, runId, maxPages: 50 });
-     } catch (e: any) {
-         await db.collection('ingestion_runs').doc(runId).update({
-             'phases.prosas.status': 'FAILED',
-             'phases.prosas.errors': FieldValue.arrayUnion(`Failed to enqueue: ${e.message}`)
-         });
-     }
-
-     try {
-         const targetsSnapshot = await db.collection('scraping_targets').get();
-         await db.collection('ingestion_runs').doc(runId).update({
-             'phases.internalFontes.totalTargets': targetsSnapshot.docs.length
-         });
-         const queue = getFunctions().taskQueue('processScrapingTargetWorker');
-         for (const doc of targetsSnapshot.docs) {
-             const targetData = { id: doc.id, ...doc.data() };
-             await queue.enqueue({
+        if (target.strategy === 'PROSAS') {
+            strategy = new ProsasScraper();
+        } else if (target.strategy === 'VERTEX' && target.query) {
+            strategy = new VertexAIScraper(target.query);
+        } else if (target.strategy === 'BRAVE' && target.query) {
+            strategy = new BraveScraper(target.query);
+        } else if (target.strategy === 'AUTO') {
+             await processScrapingTargetQueue.enqueue({
                  searchId: 'GLOBAL_RUN',
-                 target: targetData,
+                 target: target,
                  query: '',
                  runId
              });
-         }
-     } catch (e: any) {
-          await db.collection('ingestion_runs').doc(runId).update({
-             'phases.internalFontes.status': 'FAILED',
-             'phases.internalFontes.errors': FieldValue.arrayUnion(`Failed to enqueue: ${e.message}`)
-         });
-     }
+             continue;
+        } else if (target.strategy === 'RSS') {
+             await rssQueue.enqueue({ runId });
+             continue;
+        }
 
-     try {
-         const rssQueue = getFunctions().taskQueue('rssWorker');
-         await rssQueue.enqueue({ runId });
-     } catch (e: any) {
-         await db.collection('ingestion_runs').doc(runId).update({
-             'phases.rssAndQueries.status': 'FAILED',
-             'phases.rssAndQueries.errors': FieldValue.arrayUnion(`Failed to enqueue RSS worker: ${e.message}`)
-         });
-     }
-});
+        if (!strategy) continue;
+
+        try {
+            logger.info(`[Orchestrator] Processing target ${target.name} with strategy ${target.strategy}`);
+            const rawItems = await strategy.fetchDelta();
+            urlsDiscovered += rawItems.length;
+            let enqueuedCount = 0;
+
+            for (const item of rawItems) {
+                const extracted = await strategy.extractRaw(item);
+
+                // Save raw payload to a temp collection to avoid task payload limits
+                const tempContentRef = db.collection('scraping_contents').doc();
+                const expireAt = new Date();
+                expireAt.setHours(expireAt.getHours() + 24);
+
+                await tempContentRef.set({
+                    url: extracted.url,
+                    text: extracted.snippet || '',
+                    rawPayload: extracted.rawPayload,
+                    externalProviderId: extracted.externalProviderId,
+                    title: extracted.title,
+                    discoverySource: target.strategy,
+                    createdAt: FieldValue.serverTimestamp(),
+                    expireAt: expireAt
+                });
+
+                await extractionQueue.enqueue({
+                    searchId: runId,
+                    link: extracted.url,
+                    contentId: tempContentRef.id,
+                    reason: `Found by ${target.strategy}`,
+                    discoverySource: target.strategy
+                });
+                enqueuedCount++;
+                enqueuedTotal++;
+            }
+
+            if (enqueuedCount > 0) {
+                // Update watermark ONLY when tasks are successfully dispatched
+                await db.collection('scraper_state').doc((strategy as any).stateDocId).set({
+                    lastSuccessfulScrapeTimestamp: new Date().toISOString()
+                }, { merge: true });
+            }
+        } catch (error: any) {
+            logger.error(`Error processing target ${doc.id}:`, error);
+            await db.collection('ingestion_runs').doc(runId).update({
+                'phases.unified.errors': FieldValue.arrayUnion(`Target ${target.name} failed: ${error.message}`)
+            });
+        }
+    }
+
+    await db.collection('ingestion_runs').doc(runId).update({
+        'phases.unified.status': 'COMPLETED',
+        'phases.unified.urlsDiscovered': urlsDiscovered,
+        'phases.unified.newEditaisEnqueued': enqueuedTotal,
+    });
+    // We don't mark the whole run as COMPLETED synchronously here because processScrapingTargetQueue and rssQueue are async.
+    // The legacy `checkAndUpdateGlobalRunStatus` function expects all phases to be evaluated.
+    // However, the unified phase is now complete. We will trigger the checker to see if everything else is done too.
+    await checkAndUpdateGlobalRunStatus(runId);
+}
 
 export const rssWorker = onTaskDispatched({
     retryConfig: {
@@ -5190,35 +4864,33 @@ export const rssWorker = onTaskDispatched({
     const db = getFirestore();
 
     try {
-        console.log(`[RSS & Queries Worker] Starting Phase 3 for run ${runId}`);
+        console.log(`[RSS Worker] Starting Phase for run ${runId}`);
 
         const rssResult = await processRssFeeds(runId);
-        const queryResult = await processPredefinedQueries(runId);
 
         if (runId) {
-            const totalDiscovered = (rssResult?.processedCount || 0) + (queryResult?.processedCount || 0);
-            const totalEnqueued = (rssResult?.savedCount || 0) + (queryResult?.savedCount || 0);
+            const totalDiscovered = (rssResult?.processedCount || 0);
+            const totalEnqueued = (rssResult?.savedCount || 0);
 
             const rssMetrics = rssResult?.metrics || { heuristicRejects: 0, aiRejects: 0, cacheHits: 0, aiApprovals: 0, prosasLinks: 0, errorCount: 0 };
-            const queryMetrics = queryResult?.metrics || { heuristicRejects: 0, aiRejects: 0, cacheHits: 0, aiApprovals: 0, prosasLinks: 0, errorCount: 0 };
 
             await db.collection('ingestion_runs').doc(runId).update({
                 'phases.rssAndQueries.status': 'COMPLETED',
                 'phases.rssAndQueries.urlsDiscovered': FieldValue.increment(totalDiscovered),
                 'phases.rssAndQueries.newEditaisEnqueued': FieldValue.increment(totalEnqueued),
-                'phases.rssAndQueries.metrics.heuristicRejects': FieldValue.increment(rssMetrics.heuristicRejects + queryMetrics.heuristicRejects),
-                'phases.rssAndQueries.metrics.aiRejects': FieldValue.increment(rssMetrics.aiRejects + queryMetrics.aiRejects),
-                'phases.rssAndQueries.metrics.cacheHits': FieldValue.increment(rssMetrics.cacheHits + queryMetrics.cacheHits),
-                'phases.rssAndQueries.metrics.aiApprovals': FieldValue.increment(rssMetrics.aiApprovals + queryMetrics.aiApprovals),
-                'phases.rssAndQueries.metrics.prosasLinks': FieldValue.increment(rssMetrics.prosasLinks + queryMetrics.prosasLinks),
-                'phases.rssAndQueries.metrics.errors': FieldValue.increment(rssMetrics.errorCount + queryMetrics.errorCount),
+                'phases.rssAndQueries.metrics.heuristicRejects': FieldValue.increment(rssMetrics.heuristicRejects),
+                'phases.rssAndQueries.metrics.aiRejects': FieldValue.increment(rssMetrics.aiRejects),
+                'phases.rssAndQueries.metrics.cacheHits': FieldValue.increment(rssMetrics.cacheHits),
+                'phases.rssAndQueries.metrics.aiApprovals': FieldValue.increment(rssMetrics.aiApprovals),
+                'phases.rssAndQueries.metrics.prosasLinks': FieldValue.increment(rssMetrics.prosasLinks),
+                'phases.rssAndQueries.metrics.errors': FieldValue.increment(rssMetrics.errorCount),
                 'totalUrlsScanned': FieldValue.increment(totalDiscovered),
                 'totalValidEditaisFound': FieldValue.increment(totalEnqueued)
             });
             await checkAndUpdateGlobalRunStatus(runId);
         }
     } catch (e: any) {
-        console.error(`[RSS & Queries Worker] Failed for run ${runId}:`, e);
+        console.error(`[RSS Worker] Failed for run ${runId}:`, e);
         if (runId) {
              await db.collection('ingestion_runs').doc(runId).update({
                  'phases.rssAndQueries.status': 'FAILED',
