@@ -1160,24 +1160,15 @@ async function processMatchEvaluation(oscId: string, editalId: string, forceReca
         return null;
     };
 
-    // Check for existing match
-    const matchesQuery = await db.collection('matches')
-        .where('oscId', '==', oscId)
-        .where('editalId', '==', editalId)
-        .limit(1)
-        .get();
+    // Upsert strategy: fixed ID to prevent duplicates
+    const matchId = `${oscId}_${editalId}`;
+    const matchRef = db.collection('matches').doc(matchId);
 
-    let existingMatchRef: FirebaseFirestore.DocumentReference | null = null;
-    let existingMatchData: Record<string, unknown> | null = null;
-
-    if (!matchesQuery.empty) {
-        existingMatchRef = matchesQuery.docs[0]?.ref || null;
-        existingMatchData = matchesQuery.docs[0]?.data() || null;
-    }
+    const existingMatchDoc = await matchRef.get();
+    let existingMatchData: Record<string, unknown> | null = existingMatchDoc.exists ? existingMatchDoc.data() || null : null;
 
     if (!oscParseResult.success) {
         console.warn(`Invalid OSC data for ${oscId} (Writing Incomplete Profile match safely):`, oscParseResult.error);
-        const matchRef = existingMatchRef || db.collection('matches').doc();
         const incompleteMatchDoc = {
             id: matchRef.id,
             oscId: oscId,
@@ -1385,7 +1376,6 @@ async function processMatchEvaluation(oscId: string, editalId: string, forceReca
         }
     }
 
-    const matchRef = existingMatchRef || db.collection('matches').doc();
     const matchDocData = {
         ...(matchResult as object),
         id: matchRef.id,
