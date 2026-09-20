@@ -1,8 +1,18 @@
-import { Link, Outlet, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Database, ArrowLeft, FileText, CheckSquare } from 'lucide-react';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { LayoutDashboard, Database, ArrowLeft, FileText, CheckSquare, LogOut } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { auth } from '../lib/firebase';
+import { signOut } from 'firebase/auth';
 
 export function AdminLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
+  const handleLogout = async () => {
+    await signOut(auth);
+    navigate('/login');
+  };
 
   const navGroups = [
     {
@@ -70,7 +80,7 @@ export function AdminLayout() {
           ))}
         </nav>
 
-        <div className="p-4 border-t border-border">
+        <div className="p-4 border-t border-border flex flex-col gap-4">
           <Link
             to="/"
             className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
@@ -78,6 +88,19 @@ export function AdminLayout() {
             <ArrowLeft className="w-5 h-5" />
             Voltar para o site
           </Link>
+
+          <div className="flex flex-col gap-2 px-3 pt-2 border-t border-border/50">
+            <span className="text-sm font-medium text-muted-foreground truncate" title={user?.email || ''}>
+              {user?.email}
+            </span>
+            <button
+              onClick={handleLogout}
+              className="text-sm flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+              Sair
+            </button>
+          </div>
         </div>
       </aside>
 
