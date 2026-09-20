@@ -9,6 +9,7 @@ export function AdminLayout() {
       title: 'VISÃO GERAL & MONITORAMENTO',
       items: [
         { name: 'Dashboard', path: '/admin', icon: LayoutDashboard },
+        { name: 'Caçador de OSCs', path: '/admin/cacador', icon: FileText },
         { name: 'Matriz de Matches Global', path: '/admin/matches', icon: CheckSquare },
         { name: 'Diretório de Editais', path: '/admin/editais', icon: FileText },
       ],
