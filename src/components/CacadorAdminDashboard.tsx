@@ -3,7 +3,6 @@ import { collection, query, where, getDocs, Timestamp, orderBy } from 'firebase/
 import { db } from '../lib/firebase';
 import { editalSchema, matchSchema } from '../../shared/schemas';
 import { format, startOfDay, endOfDay } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
 import { ChevronDown, ChevronUp, Calendar as CalendarIcon, Briefcase, FileText } from 'lucide-react';
 import { z } from 'zod';
 
