@@ -1,0 +1,13 @@
+--- functions/src/index.ts
++++ functions/src/index.ts
+@@ -2012,8 +2012,8 @@
+             output: { schema: reverseMatchResultSchema },
+             model: 'vertexai/gemini-1.5-flash'
+         });
+-        const matchResult = result.output();
+
+-        await db.collection('matches').doc(`${oscId}_${editalId}`).set(matchResult, { merge: true });
++        await db.collection('matches').doc(`${oscId}_${editalId}`).set(result.output, { merge: true });
+
+         if (jobId) {
+             const db = getFirestore();

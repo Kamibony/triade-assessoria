@@ -1,0 +1,37 @@
+--- functions/src/index.ts
++++ functions/src/index.ts
+@@ -1989,12 +1989,28 @@
+     }
+
+     try {
+-        const result = await processMatchEvaluation(oscId, editalId);
+-        if (result === null) {
+-             console.log(`Task skipped safely due to invalid data for OSC ${oscId} and Edital ${editalId}`);
+-        } else {
+-             console.log(`Successfully processed task for OSC ${oscId} and Edital ${editalId}`);
+-        }
++        const db = getFirestore();
++        const oscDoc = await db.collection('oscs').doc(oscId).get();
++        const editalDoc = await db.collection('editais').doc(editalId).get();
++        if (!oscDoc.exists || !editalDoc.exists) {
++            throw new Error(`OSC (${oscId}) or Edital (${editalId}) not found`);
++        }
++
++        const oscData = oscDoc.data();
++        const editalData = editalDoc.data();
++
++        const prompt = `Act as a strict grant-matching analyst. Evaluate the OSC's profile against the Edital's strict requirements (location, years of existence, thematic alignment).
++        OSC Profile: ${JSON.stringify(oscData)}
++        Edital: ${JSON.stringify(editalData)}`;
++
++        const result = await ai.generate({
++            prompt,
++            output: { schema: z.object({ matchScore: z.number(), aiRationale: z.string() }) },
++            model: 'vertexai/gemini-1.5-flash'
++        });
++        const matchResult = result.output();
++
++        await db.collection('matches').doc(`${oscId}_${editalId}`).set(matchResult, { merge: true });
+
+         if (jobId) {
+             const db = getFirestore();

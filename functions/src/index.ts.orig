@@ -2015,9 +2015,7 @@ export const matchEvaluatorWorker = onTaskDispatched({
         });
         const matchResult = result.output;
 
-        if (matchResult) {
-            await db.collection('matches').doc(`${oscId}_${editalId}`).set(matchResult, { merge: true });
-        }
+        await db.collection('matches').doc(`${oscId}_${editalId}`).set(matchResult, { merge: true });
 
         if (jobId) {
             const db = getFirestore();

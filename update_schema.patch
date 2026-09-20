@@ -1,0 +1,11 @@
+--- shared/schemas/index.ts
++++ shared/schemas/index.ts
+@@ -102,4 +102,9 @@
+     editalId: z.string().describe("ID do edital que foi recém ingerido")
+ });
+
++export const reverseMatchResultSchema = z.object({
++    matchScore: z.number().min(0).max(100).describe("Score de 0 a 100 indicando a compatibilidade"),
++    aiRationale: z.string().describe("Justificativa detalhada explicando o score")
++});
++
