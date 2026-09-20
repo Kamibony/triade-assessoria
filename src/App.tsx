@@ -18,6 +18,7 @@ import { OscDirectoryView } from './components/OscDirectoryView';
 import { OscImporter } from './components/OscImporter';
 import { OscProfileView } from './components/OscProfileView';
 import { ManualIngest } from './components/ManualIngest';
+import { CacadorAdminDashboard } from './components/CacadorAdminDashboard';
 import { ScrapingTargetsManager } from './components/ScrapingTargetsManager';
 import { IngestionRadar } from './components/IngestionRadar';
 import { ManualOscIngest } from './components/ManualOscIngest';
@@ -27,6 +28,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { PortalLayout } from './components/portal/PortalLayout';
 import { PortalWelcome } from './components/portal/PortalWelcome';
 import { PortalDiscover } from './components/portal/PortalDiscover';
+import { CacadorClientView } from './components/portal/CacadorClientView';
 import { AuthProvider } from './contexts/AuthContext';
 import { Toaster } from 'react-hot-toast';
 
@@ -88,10 +90,12 @@ function App() {
               <Route index element={<PortalWelcome />} />
               <Route path="discover" element={<PortalDiscover />} />
               <Route path="onboarding" element={<PortalOnboarding />} />
+              <Route path="cacador" element={<CacadorClientView />} />
             </Route>
 
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<AdminDashboard />} />
+              <Route path="cacador" element={<CacadorAdminDashboard />} />
               <Route path="directory" element={<OscDirectoryView />} />
               <Route path="import-oscs" element={<OscImporter />} />
               <Route path="import-osc-manual" element={<ManualOscIngest />} />

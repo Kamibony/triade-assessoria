@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Outlet, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { LogOut, Home, Search, PlusCircle, Loader2 } from 'lucide-react';
+import { LogOut, Home, Search, PlusCircle, Loader2, Crosshair } from 'lucide-react';
 import { auth, db } from '../../lib/firebase';
 import { signOut } from 'firebase/auth';
 import { doc, onSnapshot, collection, query, where, documentId, getDocs } from 'firebase/firestore';
@@ -113,6 +113,10 @@ const PortalLayoutInner: React.FC = () => {
           <Link to="/portal" className="flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors">
             <Home className="w-4 h-4" />
             Dashboard Hub
+          </Link>
+          <Link to="/portal/cacador" className="flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors">
+            <Crosshair className="w-4 h-4" />
+            Descobertas de Hoje
           </Link>
           <Link to="/portal/discover" className="flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors">
             <Search className="w-4 h-4" />
