@@ -10,7 +10,7 @@ const vertexAiSearchEngineIdString = defineString('VERTEX_AI_SEARCH_ENGINE_ID');
 
 export class VertexAIScraper implements IScraperStrategy {
     private readonly query: string;
-    private readonly stateDocId: string;
+    public readonly stateDocId: string;
 
     constructor(query: string) {
         this.query = query;
