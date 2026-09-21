@@ -14,7 +14,14 @@ export class ProsasScraper implements IScraperStrategy {
 
     async fetchDelta(): Promise<any[]> {
         const watermark = await this.getWatermark();
-        const watermarkDate = watermark ? new Date(watermark) : new Date(0);
+        let watermarkDate = watermark ? new Date(watermark) : new Date(0);
+
+        // 48-hour Lookback Window
+        const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
+        if (watermarkDate > fortyEightHoursAgo) {
+             watermarkDate = fortyEightHoursAgo;
+        }
+
         let page = 1;
         const allItems: any[] = [];
         let shouldContinue = true;

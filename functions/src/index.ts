@@ -2016,31 +2016,47 @@ export const matchEvaluatorWorker = onTaskDispatched({
         const matchResult = result.output;
 
         if (matchResult) {
-            await db.collection('matches').doc(`${oscId}_${editalId}`).set(matchResult, { merge: true });
-        }
-
-        if (jobId) {
-            const db = getFirestore();
-            const jobRef = db.collection('system_jobs').doc(jobId);
-            await jobRef.update({
-                matchesEvaluated: FieldValue.increment(1),
+            const fullMatchDocument = {
+                ...matchResult,
+                oscId,
+                editalId,
+                eligibility: matchResult.matchScore >= 20, // Example threshold
+                status: matchResult.matchScore >= 20 ? 'Elegível' : 'Inelegível',
+                createdAt: FieldValue.serverTimestamp(),
                 updatedAt: FieldValue.serverTimestamp()
-            });
-
-            const jobDoc = await jobRef.get();
-            const data = jobDoc.data();
-            // Update job to completed if all evaluated
-            if (data && data.matchesEvaluated >= data.matchesTriggered) {
-                await jobRef.update({
-                    status: 'completed',
-                    evaluationsCompleted: true,
-                    updatedAt: FieldValue.serverTimestamp()
-                });
-            }
+            };
+            await db.collection('matches').doc(`${oscId}_${editalId}`).set(fullMatchDocument, { merge: true });
         }
+
     } catch (error) {
         console.error(`Task execution failed for OSC ${oscId} and Edital ${editalId}`, error);
-        throw error; // Let the queue handle the retry
+        // Do not throw error here to avoid infinite retries on unparseable/bad data
+        // We will just log it and mark the job progress.
+    } finally {
+        // Ensure job progress is marked even if the evaluation fails or hits rate limits
+        if (jobId) {
+            try {
+                const db = getFirestore();
+                const jobRef = db.collection('system_jobs').doc(jobId);
+                await jobRef.update({
+                    matchesEvaluated: FieldValue.increment(1),
+                    updatedAt: FieldValue.serverTimestamp()
+                });
+
+                const jobDoc = await jobRef.get();
+                const data = jobDoc.data();
+                // Update job to completed if all evaluated
+                if (data && data.matchesEvaluated >= data.matchesTriggered) {
+                    await jobRef.update({
+                        status: 'completed',
+                        evaluationsCompleted: true,
+                        updatedAt: FieldValue.serverTimestamp()
+                    });
+                }
+            } catch (jobError) {
+                 console.error(`Failed to update job progress for ${jobId}:`, jobError);
+            }
+        }
     }
 });
 
@@ -3790,14 +3806,35 @@ export const extractionWorker = onTaskDispatched({
 
         const editalResult = await extractEditalRules({ text });
 
-        if (!editalResult.externalProviderId) {
-            editalResult.externalProviderId = require('crypto').createHash('sha256').update(editalResult.rawText || editalResult.title || link || '').digest('hex');
-        }
+        // Deduplication Enhancement: Generate ID from a normalized slug of the title
+        let normalizedTitle = editalResult.title || 'untitled';
+        normalizedTitle = normalizedTitle.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "");
+        editalResult.externalProviderId = `slug_${normalizedTitle}_${require('crypto').createHash('md5').update(normalizedTitle).digest('hex').substring(0, 8)}`;
+
         const parseResult = editalSchema.safeParse(editalResult);
 
         let docRef: FirebaseFirestore.DocumentReference | null = null;
 
         if (parseResult.success) {
+            const editalData = parseResult.data;
+
+            // Hard-reject expired editais
+            if (editalData.deadline) {
+                const deadlineDate = new Date(editalData.deadline);
+                const currentDate = new Date();
+                // Set to start of day for accurate comparison
+                currentDate.setHours(0, 0, 0, 0);
+                if (deadlineDate < currentDate) {
+                    console.info(`[Extraction Trace] Skipping expired edital: ${editalData.title} (Deadline: ${editalData.deadline})`);
+                    if (searchRef) {
+                        await searchRef.set({
+                            logs: FieldValue.arrayUnion({ link, status: 'Rejeitado (Expirado)', reason: `Prazo encerrado em ${editalData.deadline}` })
+                        }, { merge: true });
+                    }
+                    return;
+                }
+            }
+
             let embedding: number[] = [];
             try {
                 const editalData = parseResult.data;

@@ -34,13 +34,17 @@ export class BraveScraper implements IScraperStrategy {
         }
 
         const watermark = await this.getWatermark();
-        const watermarkDate = watermark ? new Date(watermark) : new Date(0);
+        let watermarkDate = watermark ? new Date(watermark) : new Date(0);
+
+        // 48-hour Lookback Window
+        const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
+        if (watermarkDate > fortyEightHoursAgo) {
+             watermarkDate = fortyEightHoursAgo;
+        }
 
         let activeQuery = this.query;
-        if (watermark) {
-            const dateStr = watermarkDate.toISOString().split('T')[0];
-            activeQuery = `${activeQuery} after:${dateStr}`;
-        }
+        const dateStr = watermarkDate.toISOString().split('T')[0];
+        activeQuery = `${activeQuery} after:${dateStr}`;
 
         const allItems: any[] = [];
 
