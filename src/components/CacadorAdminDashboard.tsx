@@ -7,6 +7,10 @@ import { ptBR } from 'date-fns/locale';
 import DatePicker from 'react-datepicker';
 import { ChevronDown, ChevronUp, Calendar as CalendarIcon, Briefcase, FileText } from 'lucide-react';
 import { z } from 'zod';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../lib/firebase';
+import { Loader2, RefreshCw } from 'lucide-react';
+
 
 type Edital = z.infer<typeof editalSchema> & { id: string };
 type Match = z.infer<typeof matchSchema> & { id: string, oscName?: string };
@@ -17,6 +21,9 @@ export function CacadorAdminDashboard() {
   const [matchesByEdital, setMatchesByEdital] = useState<Record<string, Match[]>>({});
   const [expandedEditalIds, setExpandedEditalIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateResult, setGenerateResult] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+
 
   useEffect(() => {
     fetchData();
@@ -77,6 +84,32 @@ export function CacadorAdminDashboard() {
     }
   };
 
+
+  const handleGenerateMatches = async () => {
+    if (editais.length === 0) return;
+
+    setIsGenerating(true);
+    setGenerateResult(null);
+
+    try {
+      const editalIds = editais.map(e => e.id);
+      const triggerMatches = httpsCallable(functions, 'triggerManualEditalMatches');
+      const response = await triggerMatches({ editalIds });
+
+      const data = response.data as any;
+      if (data.success) {
+        setGenerateResult({ type: 'success', message: data.message });
+      } else {
+        setGenerateResult({ type: 'error', message: data.message || 'Erro desconhecido.' });
+      }
+    } catch (error: any) {
+      console.error("Error generating matches:", error);
+      setGenerateResult({ type: 'error', message: error.message || 'Falha ao comunicar com o servidor.' });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const toggleExpand = (editalId: string) => {
     setExpandedEditalIds(prev => {
       const newSet = new Set(prev);
@@ -107,6 +140,28 @@ export function CacadorAdminDashboard() {
           />
         </div>
       </div>
+
+
+      <div className="flex justify-between items-center bg-muted/30 p-4 rounded-xl border">
+        <div>
+           <h3 className="font-semibold text-lg">Geração Manual de Matches</h3>
+           <p className="text-sm text-muted-foreground">Dispare manualmente o motor de IA para cruzar os editais deste dia com o banco ativo de OSCs.</p>
+        </div>
+        <button
+           onClick={handleGenerateMatches}
+           disabled={isGenerating || editais.length === 0}
+           className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg font-medium shadow hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+          {isGenerating ? 'Processando...' : 'Gerar Matches para Editais do Dia'}
+        </button>
+      </div>
+
+      {generateResult && (
+        <div className={`p-4 rounded-xl border ${generateResult.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+          {generateResult.message}
+        </div>
+      )}
 
       {loading ? (
         <div className="flex justify-center py-12">
