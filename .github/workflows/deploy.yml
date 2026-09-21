@@ -59,8 +59,8 @@ jobs:
           echo "VERTEX_AI_SEARCH_LOCATION=${{ secrets.VERTEX_AI_SEARCH_LOCATION }}" >> functions/.env
           echo "VERTEX_AI_SEARCH_ENGINE_ID=${{ secrets.VERTEX_AI_SEARCH_ENGINE_ID }}" >> functions/.env
 
-      - name: Deploy to Firebase (Hosting and Storage Rules)
-        run: npx firebase-tools deploy --only hosting,storage --project triade-assessoria --force
+      - name: Deploy to Firebase (Hosting, Storage Rules, and Firestore Indexes)
+        run: npx firebase-tools deploy --only hosting,storage,firestore:indexes --project triade-assessoria --force
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
 
