@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, orderBy, getDoc, doc } from 'firebase/firestore';
+import { collection, query, where, getDocs, getDoc, doc, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { matchSchema, editalSchema } from '../../../shared/schemas';
-import { format } from 'date-fns';
+import { format, startOfDay, endOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import DatePicker from 'react-datepicker';
 import { Calendar as CalendarIcon, Briefcase, FileText, ChevronRight } from 'lucide-react';
 import { z } from 'zod';
 import { useActiveOsc } from '../../contexts/portal/ActiveOscContext';
@@ -18,64 +19,70 @@ type EnrichedMatch = Match & {
 
 export function CacadorClientView() {
   const { activeOscId } = useActiveOsc();
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [groupedMatches, setGroupedMatches] = useState<Record<string, EnrichedMatch[]>>({});
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const start = startOfDay(selectedDate);
+        const end = endOfDay(selectedDate);
+
+        const matchesRef = collection(db, 'matches');
+        // Query without inequality to avoid composite index requirements
+        const matchQ = query(
+          matchesRef,
+          where('oscId', '==', activeOscId),
+          where('createdAt', '>=', Timestamp.fromDate(start)),
+          where('createdAt', '<=', Timestamp.fromDate(end)),
+          orderBy('createdAt', 'desc')
+        );
+
+        const querySnapshot = await getDocs(matchQ);
+
+        // Filter out hard rejections and zero scores locally
+        const allMatches = querySnapshot.docs
+          .map(d => ({ id: d.id, ...d.data() } as Match))
+          .filter(m => m.matchScore > 0 && m.actionState !== 'Rejeitado');
+
+        allMatches.sort((a, b) => {
+            const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date();
+            const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date();
+            return dateB.getTime() - dateA.getTime();
+        });
+
+        const enriched = await Promise.all(allMatches.map(async (match) => {
+          if (!match.editalId) return match as EnrichedMatch;
+          const editalSnap = await getDoc(doc(db, 'editais', match.editalId));
+          if (editalSnap.exists()) {
+             return { ...match, edital: { id: editalSnap.id, ...editalSnap.data() } as Edital } as EnrichedMatch;
+          }
+          return match as EnrichedMatch;
+        }));
+
+        // Group by date (yyyy-MM-dd)
+        const grouped: Record<string, EnrichedMatch[]> = {};
+        enriched.forEach(match => {
+          const date = match.createdAt?.toDate ? match.createdAt.toDate() : new Date();
+          const dateStr = format(date, 'yyyy-MM-dd');
+          if (!grouped[dateStr]) grouped[dateStr] = [];
+          grouped[dateStr].push(match);
+        });
+
+        setGroupedMatches(grouped);
+      } catch (error) {
+        console.error("Error fetching Cacador Client data:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
     if (activeOscId) {
       fetchData();
     }
-  }, [activeOscId]);
-
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const matchesRef = collection(db, 'matches');
-      // Query without inequality to avoid composite index requirements
-      const matchQ = query(
-        matchesRef,
-        where('oscId', '==', activeOscId),
-        orderBy('createdAt', 'desc')
-      );
-
-      const querySnapshot = await getDocs(matchQ);
-
-      // Filter out hard rejections and zero scores locally
-      const allMatches = querySnapshot.docs
-        .map(d => ({ id: d.id, ...d.data() } as Match))
-        .filter(m => m.matchScore > 0 && m.actionState !== 'Rejeitado');
-
-      allMatches.sort((a, b) => {
-          const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date();
-          const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date();
-          return dateB.getTime() - dateA.getTime();
-      });
-
-      const enriched = await Promise.all(allMatches.map(async (match) => {
-        if (!match.editalId) return match as EnrichedMatch;
-        const editalSnap = await getDoc(doc(db, 'editais', match.editalId));
-        if (editalSnap.exists()) {
-           return { ...match, edital: { id: editalSnap.id, ...editalSnap.data() } as Edital } as EnrichedMatch;
-        }
-        return match as EnrichedMatch;
-      }));
-
-      // Group by date (yyyy-MM-dd)
-      const grouped: Record<string, EnrichedMatch[]> = {};
-      enriched.forEach(match => {
-        const date = match.createdAt?.toDate ? match.createdAt.toDate() : new Date();
-        const dateStr = format(date, 'yyyy-MM-dd');
-        if (!grouped[dateStr]) grouped[dateStr] = [];
-        grouped[dateStr].push(match);
-      });
-
-      setGroupedMatches(grouped);
-    } catch (error) {
-      console.error("Error fetching Cacador Client data:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [activeOscId, selectedDate]);
 
   const dates = Object.keys(groupedMatches).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
 
@@ -89,11 +96,23 @@ export function CacadorClientView() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in duration-500">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Descobertas de Hoje</h1>
-        <p className="text-muted-foreground mt-2 text-lg">
-          Nosso radar varre milhares de editais diariamente e separa as melhores oportunidades para sua OSC.
-        </p>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Descobertas de Hoje</h1>
+          <p className="text-muted-foreground mt-2 text-lg">
+            Nosso radar varre milhares de editais diariamente e separa as melhores oportunidades para sua OSC.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 bg-background border p-2 rounded-lg shrink-0">
+          <CalendarIcon className="w-5 h-5 text-muted-foreground" />
+          <DatePicker
+            selected={selectedDate}
+            onChange={(date: Date | null) => { if (date) setSelectedDate(date); }}
+            dateFormat="dd/MM/yyyy"
+            locale={ptBR}
+            className="bg-transparent border-none outline-none text-sm font-medium w-24 cursor-pointer"
+          />
+        </div>
       </div>
 
       {loading ? (
