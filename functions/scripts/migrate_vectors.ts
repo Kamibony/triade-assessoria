@@ -7,13 +7,11 @@ const db = getFirestore();
 async function migrateCollection(collectionName: string) {
     console.log(`Starting migration for ${collectionName}...`);
     let count = 0;
-
-    // We'll process in batches to avoid memory issues
-    let lastDoc: FirebaseFirestore.DocumentSnapshot | null = null;
+    let lastDoc: any = null;
     let keepGoing = true;
 
     while (keepGoing) {
-        let query: FirebaseFirestore.Query = db.collection(collectionName).orderBy('__name__').limit(500);
+        let query: any = db.collection(collectionName).orderBy('__name__').limit(500);
         if (lastDoc) {
             query = query.startAfter(lastDoc);
         }
@@ -28,10 +26,9 @@ async function migrateCollection(collectionName: string) {
         let batchCount = 0;
 
         for (const doc of snapshot.docs) {
-            const data = doc.data();
+            const data = doc.data() as any;
 
             if (data.embedding && Array.isArray(data.embedding) && data.embedding.length > 0) {
-                // It's a standard array, let's update it to VectorValue
                 batch.update(doc.ref, {
                     embedding: FieldValue.vector(data.embedding)
                 });
@@ -45,7 +42,7 @@ async function migrateCollection(collectionName: string) {
             console.log(`Migrated ${batchCount} documents in ${collectionName}. Total: ${count}`);
         }
 
-        lastDoc = snapshot.docs[snapshot.docs.length - 1];
+        lastDoc = snapshot.docs[snapshot.docs.length - 1] || null;
     }
 
     console.log(`Finished migrating ${collectionName}. Total updated: ${count}`);
