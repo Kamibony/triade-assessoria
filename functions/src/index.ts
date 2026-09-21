@@ -3931,7 +3931,47 @@ export const extractionWorker = onTaskDispatched({
         normalizedTitle = normalizedTitle.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "");
         editalResult.externalProviderId = `slug_${normalizedTitle}_${require('crypto').createHash('md5').update(normalizedTitle).digest('hex').substring(0, 8)}`;
 
-        const parseResult = editalSchema.safeParse(editalResult);
+        // Trusted Source Normalization Layer
+        const isTrustedSource = Boolean(
+            (discoverySource && (
+                discoverySource === 'Prosas Newsletter' ||
+                discoverySource === 'PROSAS_NEWSLETTER' ||
+                discoverySource.toLowerCase().includes('prosas')
+            )) ||
+            (link && link.includes('prosas.com.br'))
+        );
+
+        let parseResult = editalSchema.safeParse(editalResult);
+
+        if (!parseResult.success && isTrustedSource) {
+            console.warn(`[Extraction Trace] Strict validation failed for trusted source ${discoverySource}. Applying graceful recovery defaults.`);
+            // Apply safe defaults for missing required fields to prevent hard-rejection of valid leads
+            const recoveredData = {
+                ...editalResult,
+                title: editalResult.title || 'Oportunidade Prosas',
+                issuer: editalResult.issuer || 'Financiador Não Especificado',
+                publicationDate: editalResult.publicationDate || new Date().toISOString().split('T')[0],
+                totalBudget: typeof editalResult.totalBudget === 'number' ? editalResult.totalBudget : 0,
+                eligibilityCriteria: {
+                    minYearsActive: typeof editalResult.eligibilityCriteria?.minYearsActive === 'number' ? editalResult.eligibilityCriteria.minYearsActive : 0,
+                    requiredLocations: editalResult.eligibilityCriteria?.requiredLocations?.length > 0
+                        ? editalResult.eligibilityCriteria.requiredLocations
+                        : ['Nacional'],
+                    requiredDocumentation: editalResult.eligibilityCriteria?.requiredDocumentation?.length > 0
+                        ? editalResult.eligibilityCriteria.requiredDocumentation
+                        : ['Estatuto Social'],
+                    allowedActivities: editalResult.eligibilityCriteria?.allowedActivities?.length > 0
+                        ? editalResult.eligibilityCriteria.allowedActivities
+                        : ['Geral']
+                }
+            };
+
+            // Re-run validation with recovered data
+            parseResult = editalSchema.safeParse(recoveredData);
+            if (parseResult.success) {
+                console.info(`[Extraction Trace] Graceful recovery successful for trusted source ${discoverySource}.`);
+            }
+        }
 
         let docRef: FirebaseFirestore.DocumentReference | null = null;
 

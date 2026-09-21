@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { collection, query, where, getDocs, Timestamp, orderBy } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { editalSchema, matchSchema } from '../../shared/schemas';
-import { format, startOfDay, endOfDay } from 'date-fns';
+import { format, startOfDay, endOfDay, subDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import DatePicker from 'react-datepicker';
 import { ChevronDown, ChevronUp, Calendar as CalendarIcon, Briefcase, FileText } from 'lucide-react';
@@ -32,7 +32,8 @@ export function CacadorAdminDashboard() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const start = startOfDay(selectedDate);
+      // 7-day sliding window: from 6 days before the selected date up to the selected date
+      const start = subDays(startOfDay(selectedDate), 6);
       const end = endOfDay(selectedDate);
 
       const editaisRef = collection(db, 'editais');
@@ -127,7 +128,7 @@ export function CacadorAdminDashboard() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Caçador de OSCs</h1>
-          <p className="text-muted-foreground mt-2">Visão Diária de Oportunidades e Matches Gerados</p>
+          <p className="text-muted-foreground mt-2">Visão Semanal (7 Dias) de Oportunidades e Matches Gerados</p>
         </div>
         <div className="flex items-center gap-2 bg-background border p-2 rounded-lg">
           <CalendarIcon className="w-5 h-5 text-muted-foreground" />
@@ -145,7 +146,7 @@ export function CacadorAdminDashboard() {
       <div className="flex justify-between items-center bg-muted/30 p-4 rounded-xl border">
         <div>
            <h3 className="font-semibold text-lg">Geração Manual de Matches</h3>
-           <p className="text-sm text-muted-foreground">Dispare manualmente o motor de IA para cruzar os editais deste dia com o banco ativo de OSCs.</p>
+           <p className="text-sm text-muted-foreground">Dispare manualmente o motor de IA para cruzar os editais deste período com o banco ativo de OSCs.</p>
         </div>
         <button
            onClick={handleGenerateMatches}
@@ -153,7 +154,7 @@ export function CacadorAdminDashboard() {
            className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg font-medium shadow hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-          {isGenerating ? 'Processando...' : 'Gerar Matches para Editais do Dia'}
+          {isGenerating ? 'Processando...' : 'Gerar Matches para Editais do Período'}
         </button>
       </div>
 
@@ -171,7 +172,7 @@ export function CacadorAdminDashboard() {
         <div className="text-center py-12 bg-card rounded-xl border">
           <FileText className="mx-auto h-12 w-12 text-muted-foreground/50 mb-4" />
           <h3 className="text-lg font-medium">Nenhum edital ingerido</h3>
-          <p className="text-muted-foreground">Não encontramos novos editais processados na data selecionada.</p>
+          <p className="text-muted-foreground">Não encontramos novos editais processados no período selecionado.</p>
         </div>
       ) : (
         <div className="space-y-4">
