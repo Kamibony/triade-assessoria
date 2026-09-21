@@ -56,16 +56,21 @@ export const triggerReverseMatch = onDocumentCreated('editais/{editalId}', async
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const oscsSnapshot = await (db.collection('oscs') as any)
             .findNearest('embedding', vectorQuery, {
-                limit: 30,
+                limit: 100,
                 distanceMeasure: 'COSINE',
                 distanceResultField: 'vectorDistance'
             })
             .get();
 
-        const candidates = oscsSnapshot.docs.map((doc: any) => ({
-            id: doc.id,
-            distance: doc.get('vectorDistance')
-        }));
+        const validCandidates = oscsSnapshot.docs
+            .map((doc: any) => ({
+                id: doc.id,
+                distance: doc.get('vectorDistance'),
+                similarity: 1 - doc.get('vectorDistance')
+            }))
+            .filter((c: any) => c.similarity >= 0.25);
+
+        const candidates = validCandidates;
 
         logger.info(`Found ${candidates.length} potential OSC matches for Edital ${editalId}. Enqueuing to evaluation task...`);
 
