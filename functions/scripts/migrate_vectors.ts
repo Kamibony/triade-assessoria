@@ -1,19 +1,19 @@
-import * as admin from 'firebase-admin';
-import { FieldValue } from 'firebase-admin/firestore';
+import { initializeApp } from 'firebase-admin/app';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 
-admin.initializeApp();
-const db = admin.firestore();
+initializeApp();
+const db = getFirestore();
 
 async function migrateCollection(collectionName: string) {
     console.log(`Starting migration for ${collectionName}...`);
     let count = 0;
 
     // We'll process in batches to avoid memory issues
-    let lastDoc = null;
+    let lastDoc: FirebaseFirestore.DocumentSnapshot | null = null;
     let keepGoing = true;
 
     while (keepGoing) {
-        let query = db.collection(collectionName).orderBy('__name__').limit(500);
+        let query: FirebaseFirestore.Query = db.collection(collectionName).orderBy('__name__').limit(500);
         if (lastDoc) {
             query = query.startAfter(lastDoc);
         }
