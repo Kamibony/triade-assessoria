@@ -8,7 +8,7 @@ service cloud.firestore {
     match /editais/{edital} {
       allow read, write: if true;
     }
-    match /matches/{match} {
+    match /matches/{matchId} {
       allow read, write: if true;
     }
     match /rss_sources/{source} {
