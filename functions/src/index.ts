@@ -5404,3 +5404,75 @@ export const migrateOscVectors = onCall({
         throw new HttpsError('internal', 'Vector migration failed.');
     }
 });
+
+export const ingestProsasNewsletterWebhook = onRequest({
+    timeoutSeconds: 540,
+    memory: '1GiB',
+}, async (request, response) => {
+    if (request.method !== 'POST') {
+        response.status(405).send('Method Not Allowed');
+        return;
+    }
+
+    const secret = request.get('x-prosas-webhook-secret');
+    const expectedSecret = process.env.PROSAS_WEBHOOK_SECRET;
+    if (!expectedSecret || secret !== expectedSecret) {
+        logger.warn('[Prosas Webhook] Unauthorized attempt.');
+        response.status(403).send('Forbidden');
+        return;
+    }
+
+    const html = request.body.html || request.body;
+    if (!html || typeof html !== 'string') {
+        response.status(400).send('Bad Request: Missing or invalid HTML payload.');
+        return;
+    }
+
+    try {
+        const $ = cheerio.load(html);
+        const urls = new Set<string>();
+
+        $('a').each((i, el) => {
+            const text = $(el).text().toLowerCase();
+            const href = $(el).attr('href');
+
+            // Heuristic to find edital links
+            if (href && (text.includes('edital') || text.includes('conheça') || text.includes('saiba mais') || text.includes('inscreva-se'))) {
+                urls.add(href);
+            }
+        });
+
+        logger.info(`[Prosas Webhook] Found ${urls.size} potential edital URLs.`);
+
+        const results = [];
+        for (const url of Array.from(urls)) {
+            logger.info(`[Prosas Webhook] Processing URL: ${url}`);
+            try {
+                // Pass the URL only to enqueueEditalExtraction (which expects link, text, reason, searchId, discoverySource)
+                // We pass empty text here because the extraction worker will use the url if needed,
+                // or the user specifically just wants to enqueue it. Wait, the extractionWorker requires text.
+                // Let's use routeEditalUrl to do the heavy lifting of fetching text and routing,
+                // as it's the standard entrypoint for URLs.
+                // Ah, the user explicitly asked to use enqueueEditalExtraction.
+                // We will fetch text first to avoid extractionWorker errors.
+
+                let text = await fetchAndExtractText(url);
+                if (!text) {
+                     logger.warn(`[Prosas Webhook] Could not extract text for ${url}, using fallback.`);
+                     text = "URL_ONLY: " + url; // fallback to avoid crashing worker
+                }
+
+                await enqueueEditalExtraction(url, text, "Prosas Newsletter", "PROSAS_NEWSLETTER", "PROSAS_NEWSLETTER");
+                results.push({ url, status: 'enqueued' });
+            } catch (error) {
+                logger.error(`[Prosas Webhook] Error processing ${url}:`, error);
+                results.push({ url, status: 'error', error: error instanceof Error ? error.message : String(error) });
+            }
+        }
+
+        response.status(200).json({ success: true, processed: results.length, results });
+    } catch (error) {
+        logger.error('[Prosas Webhook] Fatal error:', error);
+        response.status(500).send('Internal Server Error');
+    }
+});
