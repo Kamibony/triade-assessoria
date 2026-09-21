@@ -3,6 +3,8 @@ import { collection, query, where, getDocs, Timestamp, orderBy } from 'firebase/
 import { db } from '../lib/firebase';
 import { editalSchema, matchSchema } from '../../shared/schemas';
 import { format, startOfDay, endOfDay } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import DatePicker from 'react-datepicker';
 import { ChevronDown, ChevronUp, Calendar as CalendarIcon, Briefcase, FileText } from 'lucide-react';
 import { z } from 'zod';
 
@@ -96,11 +98,12 @@ export function CacadorAdminDashboard() {
         </div>
         <div className="flex items-center gap-2 bg-background border p-2 rounded-lg">
           <CalendarIcon className="w-5 h-5 text-muted-foreground" />
-          <input
-            type="date"
-            value={format(selectedDate, 'yyyy-MM-dd')}
-            onChange={(e) => setSelectedDate(new Date(e.target.value))}
-            className="bg-transparent border-none outline-none text-sm font-medium"
+          <DatePicker
+            selected={selectedDate}
+            onChange={(date: Date | null) => { if (date) setSelectedDate(date); }}
+            dateFormat="dd/MM/yyyy"
+            locale={ptBR}
+            className="bg-transparent border-none outline-none text-sm font-medium w-24 cursor-pointer"
           />
         </div>
       </div>
