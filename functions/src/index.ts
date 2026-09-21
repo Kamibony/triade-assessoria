@@ -11,7 +11,7 @@ const pLimit = require('p-limit');
 // @ts-ignore
 const { PDFParse } = require('pdf-parse');
 import stealth from 'puppeteer-extra-plugin-stealth';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getFirestore, FieldValue, FieldPath } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { getFunctions } from 'firebase-admin/functions';
 import { ProsasScraper } from './scrapers/ProsasScraper.js';
@@ -2254,7 +2254,7 @@ export const processOscChunkWorker = onTaskDispatched({
             };
 
             if (!oscDoc.exists) {
-                Object.assign(upsertData, { createdAt: now });
+                Object.assign(upsertData, { createdAt: now, lastSearchAt: new Date(0) });
             }
 
             // Clean undefined values from object before Firestore save to avoid errors
@@ -5161,3 +5161,126 @@ export const refreshOscOpportunities = onCall({
 });
 
 export { triggerReverseMatch } from './services/reverseMatchmaker.js';
+
+
+export const scheduleAgenticSearchCron = onSchedule({
+    schedule: "0 * * * *", // Run every hour
+    timeZone: "America/Sao_Paulo",
+    timeoutSeconds: 300
+}, async (event) => {
+    logger.info("Executing slow-burn Agentic Search CRON...");
+    const db = getFirestore();
+    const queue = getFunctions().taskQueue('agenticSearchWorker');
+
+    try {
+        // Find OSCs that have never been searched, or haven't been searched recently
+        // Limit to 5 to prevent Vertex/LLM rate limit spikes
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+
+        // Note: For this to work on brand new OSCs, the ingestion script MUST set lastSearchAt: admin.firestore.Timestamp.fromMillis(0)
+        const oscsSnapshot = await db.collection('oscs')
+            .where('lastSearchAt', '<', yesterday)
+            .orderBy('lastSearchAt', 'asc')
+            .limit(5)
+            .get();
+
+        if (oscsSnapshot.empty) {
+            logger.info("No OSCs require agentic search at this time.");
+            return;
+        }
+
+        let enqueued = 0;
+        for (const doc of oscsSnapshot.docs) {
+             const oscId = doc.id;
+             // Update timestamp immediately so we don't fetch it again on the next tick if the task gets delayed
+             await doc.ref.update({ lastSearchAt: FieldValue.serverTimestamp() });
+
+             await queue.enqueue({
+                 oscId: oscId,
+                 jobId: `cron_${oscId}_${Date.now()}`
+             });
+             enqueued++;
+        }
+
+        logger.info(`Successfully enqueued ${enqueued} OSCs for slow-burn Agentic Search.`);
+    } catch (e) {
+        logger.error("Error during slow-burn Agentic Search CRON:", e);
+    }
+});
+
+
+export const migrateOscVectors = onCall({
+    timeoutSeconds: 540,
+    memory: '1GiB'
+}, async (request) => {
+    // Require auth
+    if (!request.auth) {
+        throw new HttpsError('unauthenticated', 'User must be authenticated.');
+    }
+    const db = getFirestore();
+    const userDoc = await db.collection('users').doc(request.auth.uid).get();
+    if (userDoc.data()?.role !== 'admin') {
+        throw new HttpsError('permission-denied', 'Admin access required.');
+    }
+
+    // We will do a limited batch of 50 per call, caller can invoke this multiple times.
+    let migratedCount = 0;
+    const { startAfterId } = request.data as { startAfterId?: string };
+
+    try {
+        let query = db.collection('oscs').orderBy(FieldPath.documentId());
+        if (startAfterId) {
+             query = query.startAfter(startAfterId);
+        }
+        const oscsSnapshot = await query.limit(50).get();
+        const lastDoc = oscsSnapshot.docs[oscsSnapshot.docs.length - 1];
+        const nextStartAfterId = lastDoc ? lastDoc.id : null;
+
+
+        const promises = oscsSnapshot.docs.map(async (doc) => {
+            const data = doc.data();
+            let needsUpdate = false;
+            let updatePayload: any = {};
+
+            // Fix: set a default lastSearchAt if it doesn't exist to allow the CRON to pick it up
+            if (!data.lastSearchAt) {
+                updatePayload.lastSearchAt = new Date(0);
+                needsUpdate = true;
+            }
+
+            if (data.embedding && Array.isArray(data.embedding) && data.embedding.length > 0) {
+                 // Fast path: Just convert the existing array to a FieldValue.vector to save costs
+                 updatePayload.embedding = FieldValue.vector(data.embedding);
+                 needsUpdate = true;
+                 migratedCount++;
+            } else if (!data.embedding) {
+                // Only generate if it's truly missing
+                try {
+                     const oscText = `Missão: ${data.mission || ''}. Foco: ${(data.coreActivities || []).join(', ')}. Nome: ${data.name || ''}`;
+                     const embeddingArray = await generateTextEmbedding(oscText);
+                     if (embeddingArray) {
+                         updatePayload.embedding = FieldValue.vector(embeddingArray);
+                         needsUpdate = true;
+                         migratedCount++;
+                     }
+                } catch (e) {
+                     logger.error(`Failed to generate vector for OSC ${doc.id}`, e);
+                }
+            }
+
+            if (needsUpdate) {
+                // Mark as migrated only if we successfully updated something or didn't need to generate a new one
+                updatePayload.vectorMigrated = true;
+                await doc.ref.update(updatePayload);
+            }
+        });
+
+        await Promise.all(promises);
+
+        return { success: true, migratedCount, nextStartAfterId };
+    } catch (e) {
+        logger.error("Migration failed:", e);
+        throw new HttpsError('internal', 'Vector migration failed.');
+    }
+});
