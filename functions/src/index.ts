@@ -5055,6 +5055,8 @@ async function executeUnifiedIngestion(runId: string) {
         'phases.unified.status': 'COMPLETED',
         'phases.unified.urlsDiscovered': urlsDiscovered,
         'phases.unified.newEditaisEnqueued': enqueuedTotal,
+        'phases.prosas.status': 'COMPLETED',
+        'phases.internalFontes.status': 'COMPLETED',
     });
     // We don't mark the whole run as COMPLETED synchronously here because processScrapingTargetQueue and rssQueue are async.
     // The legacy `checkAndUpdateGlobalRunStatus` function expects all phases to be evaluated.
