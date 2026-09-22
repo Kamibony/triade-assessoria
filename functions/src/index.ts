@@ -5472,6 +5472,8 @@ export const ingestProsasNewsletterWebhook = onRequest({
             }
         });
 
+        logger.info(`[Prosas Webhook] Initially extracted link objects: ${JSON.stringify(linkObjects)}`);
+
         for (const { text, href } of linkObjects) {
             // Heuristic to find edital links
             if (text.includes('edital') || text.includes('conheça') || text.includes('saiba mais') || text.includes('inscreva-se')) {
@@ -5480,6 +5482,11 @@ export const ingestProsasNewsletterWebhook = onRequest({
                     try {
                         // Resolve the tracking link to get the actual Prosas URL
                         const res = await fetch(href, { method: 'HEAD', redirect: 'follow' });
+                        logger.info(`[Prosas Webhook] HTTP Status: ${res.status} ${res.statusText} for ${href}`);
+                        const headersObj: Record<string, string> = {};
+                        res.headers.forEach((val, key) => headersObj[key] = val);
+                        logger.info(`[Prosas Webhook] Headers for ${href}: ${JSON.stringify(headersObj)}`);
+
                         if (res.url) {
                             finalUrl = res.url;
                             logger.info(`[Prosas Webhook] Resolved tracking link ${href} to ${finalUrl}`);
@@ -5493,6 +5500,7 @@ export const ingestProsasNewsletterWebhook = onRequest({
         }
 
         logger.info(`[Prosas Webhook] Found ${urls.size} potential edital URLs.`);
+        logger.info(`[Prosas Webhook] Final resolved URLs to dispatch: ${Array.from(urls).join(', ')}`);
 
         const results = [];
         const queue = getFunctions().taskQueue('prosasAuthenticatedWorker');
