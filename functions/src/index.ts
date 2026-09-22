@@ -5469,34 +5469,25 @@ export const ingestProsasNewsletterWebhook = onRequest({
 
             // Heuristic to find edital links
             if (href && (text.includes('edital') || text.includes('conheça') || text.includes('saiba mais') || text.includes('inscreva-se'))) {
-                urls.add(href);
+                if (href.startsWith('http://') || href.startsWith('https://')) {
+                    urls.add(href);
+                }
             }
         });
 
         logger.info(`[Prosas Webhook] Found ${urls.size} potential edital URLs.`);
 
         const results = [];
+        const queue = getFunctions().taskQueue('prosasAuthenticatedWorker');
+
         for (const url of Array.from(urls)) {
             logger.info(`[Prosas Webhook] Processing URL: ${url}`);
             try {
-                // Pass the URL only to enqueueEditalExtraction (which expects link, text, reason, searchId, discoverySource)
-                // We pass empty text here because the extraction worker will use the url if needed,
-                // or the user specifically just wants to enqueue it. Wait, the extractionWorker requires text.
-                // Let's use routeEditalUrl to do the heavy lifting of fetching text and routing,
-                // as it's the standard entrypoint for URLs.
-                // Ah, the user explicitly asked to use enqueueEditalExtraction.
-                // We will fetch text first to avoid extractionWorker errors.
-
-                let text = await fetchAndExtractText(url);
-                if (!text) {
-                     logger.warn(`[Prosas Webhook] Could not extract text for ${url}, using fallback.`);
-                     text = "URL_ONLY: " + url; // fallback to avoid crashing worker
-                }
-
-                await enqueueEditalExtraction(url, text, "Prosas Newsletter", "PROSAS_NEWSLETTER", "PROSAS_NEWSLETTER");
-                results.push({ url, status: 'enqueued' });
+                // Dispatch directly to prosasAuthenticatedWorker to bypass the login wall and avoid sending raw HTML/URLs to Gemini
+                await queue.enqueue({ url, searchId: "PROSAS_NEWSLETTER" });
+                results.push({ url, status: 'enqueued_to_prosas_worker' });
             } catch (error) {
-                logger.error(`[Prosas Webhook] Error processing ${url}:`, error);
+                logger.error(`[Prosas Webhook] Error enqueueing ${url}:`, error);
                 results.push({ url, status: 'error', error: error instanceof Error ? error.message : String(error) });
             }
         }
