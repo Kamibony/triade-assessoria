@@ -38,7 +38,7 @@ export class BraveScraper implements IScraperStrategy {
 
         // 48-hour Lookback Window
         const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
-        if (watermarkDate > fortyEightHoursAgo) {
+        if (watermarkDate < fortyEightHoursAgo) {
              watermarkDate = fortyEightHoursAgo;
         }
 
