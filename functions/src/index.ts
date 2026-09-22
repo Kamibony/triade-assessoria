@@ -3860,10 +3860,42 @@ export const extractionWorker = onTaskDispatched({
 
         const editalResult = await extractEditalRules({ text });
 
-        // Deduplication Enhancement: Generate ID from a normalized slug of the title
-        let normalizedTitle = editalResult.title || 'untitled';
-        normalizedTitle = normalizedTitle.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "");
-        editalResult.externalProviderId = `slug_${normalizedTitle}_${require('crypto').createHash('md5').update(normalizedTitle).digest('hex').substring(0, 8)}`;
+        // Deduplication Enhancement: Generate ID from a normalized source URL
+        let normalizedUrl = link;
+        try {
+            const urlObj = new URL(link);
+            // Remove irrelevant query parameters
+            const paramsToKeep = new URLSearchParams();
+            for (const [key, value] of urlObj.searchParams.entries()) {
+                if (!['source', 'utm_source', 'utm_medium', 'utm_campaign'].includes(key.toLowerCase())) {
+                    paramsToKeep.append(key, value);
+                }
+            }
+            urlObj.search = paramsToKeep.toString();
+            normalizedUrl = urlObj.toString();
+        } catch (e) {
+            // Fallback if not a valid URL
+        }
+        // Strip protocols, www, and trailing slashes
+        normalizedUrl = normalizedUrl.replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/$/, '');
+
+        editalResult.externalProviderId = `url_${require('crypto').createHash('md5').update(normalizedUrl).digest('hex')}`;
+
+        // Pre-parsing Date Standardization (pt-BR to ISO)
+        if (editalResult.deadline) {
+            const brDateMatch = editalResult.deadline.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+            if (brDateMatch) {
+                const [, day, month, year] = brDateMatch;
+                editalResult.deadline = `${year}-${month}-${day}`;
+            }
+        }
+        if (editalResult.publicationDate) {
+            const brDateMatch = editalResult.publicationDate.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+            if (brDateMatch) {
+                const [, day, month, year] = brDateMatch;
+                editalResult.publicationDate = `${year}-${month}-${day}`;
+            }
+        }
 
         // Trusted Source Normalization Layer
         const isTrustedSource = Boolean(
@@ -3915,17 +3947,31 @@ export const extractionWorker = onTaskDispatched({
             // Hard-reject expired editais
             if (editalData.deadline) {
                 const deadlineDate = new Date(editalData.deadline);
-                const currentDate = new Date();
-                // Set to start of day for accurate comparison
-                currentDate.setHours(0, 0, 0, 0);
-                if (deadlineDate < currentDate) {
-                    console.info(`[Extraction Trace] Skipping expired edital: ${editalData.title} (Deadline: ${editalData.deadline})`);
-                    if (searchRef) {
-                        await searchRef.set({
-                            logs: FieldValue.arrayUnion({ link, status: 'Rejeitado (Expirado)', reason: `Prazo encerrado em ${editalData.deadline}` })
-                        }, { merge: true });
+
+                // Strict validation check for invalid dates
+                if (isNaN(deadlineDate.getTime())) {
+                    if (!editalData.isContinuous) {
+                        console.info(`[Extraction Trace] Skipping edital with invalid deadline date: ${editalData.title} (Deadline: ${editalData.deadline})`);
+                        if (searchRef) {
+                            await searchRef.set({
+                                logs: FieldValue.arrayUnion({ link, status: 'Rejeitado (Data Inválida)', reason: `Formato de data de prazo inválido: ${editalData.deadline}` })
+                            }, { merge: true });
+                        }
+                        return;
                     }
-                    return;
+                } else {
+                    const currentDate = new Date();
+                    // Set to start of day for accurate comparison
+                    currentDate.setHours(0, 0, 0, 0);
+                    if (deadlineDate < currentDate) {
+                        console.info(`[Extraction Trace] Skipping expired edital: ${editalData.title} (Deadline: ${editalData.deadline})`);
+                        if (searchRef) {
+                            await searchRef.set({
+                                logs: FieldValue.arrayUnion({ link, status: 'Rejeitado (Expirado)', reason: `Prazo encerrado em ${editalData.deadline}` })
+                            }, { merge: true });
+                        }
+                        return;
+                    }
                 }
             }
 
@@ -3938,19 +3984,27 @@ export const extractionWorker = onTaskDispatched({
                 console.warn("Failed to generate embedding for new edital:", embedError);
             }
 
-            const editalDocData = {
+            let editalDocData: any = {
                 ...parseResult.data,
                 rawText: text.substring(0, 5000),
                 sourceUrl: link,
                 embedding: embedding.length > 0 ? FieldValue.vector(embedding) : null,
                 discoverySource: discoverySource || contentDoc.data()?.discoverySource || null,
-                createdAt: FieldValue.serverTimestamp(),
             };
 
 
             const externalProviderId = editalDocData.externalProviderId;
             editalDocData.externalProviderId = externalProviderId;
             docRef = db.collection('editais').doc(externalProviderId);
+
+            // Read-before-write to ensure safe timestamp handling
+            const existingDoc = await docRef.get();
+            if (existingDoc.exists) {
+                editalDocData.updatedAt = FieldValue.serverTimestamp();
+            } else {
+                editalDocData.createdAt = FieldValue.serverTimestamp();
+            }
+
             await docRef.withConverter(editalConverter).set(editalDocData as Partial<z.infer<typeof editalSchema>>, { merge: true });
 
             if (searchRef) {
