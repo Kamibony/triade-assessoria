@@ -2509,8 +2509,8 @@ export async function enqueueEditalExtraction(link: string, text: string, reason
 
 export const triggerManualEditalMatches = onCall({
     cors: true,
-    timeoutSeconds: 540,
-    memory: '1GiB',
+    timeoutSeconds: 60,
+    memory: '256MiB',
     invoker: 'public',
 }, async (request) => {
     if (!request.auth) {
@@ -2542,79 +2542,13 @@ export const triggerManualEditalMatches = onCall({
             updatedAt: FieldValue.serverTimestamp(),
         });
 
-        let matchesTriggered = 0;
-        const matchEvaluatorQueue = getFunctions().taskQueue('matchEvaluatorWorker');
+        const vectorSearchQueue = getFunctions().taskQueue('editalVectorSearchWorker');
+        await vectorSearchQueue.enqueue({
+            jobId: jobId,
+            editalIds: editalIds,
+        });
 
-        for (const editalId of editalIds) {
-            const editalDoc = await db.collection('editais').doc(editalId).get();
-            if (!editalDoc.exists) continue;
-
-            const editalData = editalDoc.data()!;
-            let editalEmbedding = editalData.embedding;
-
-            if (!editalEmbedding) {
-                const editalText = `Objetivo e Título: ${editalData.title || ''}. Elegibilidade: Atividades permitidas: ${(editalData.eligibilityCriteria?.allowedActivities || []).join(', ')}.`;
-                try {
-                    const { genkit } = await import('genkit');
-                    const { vertexAI } = await import('@genkit-ai/google-genai');
-                    const ai = genkit({
-                        plugins: [vertexAI({ location: 'us-central1' })],
-                    });
-                    const response = await ai.embed({
-                        embedder: 'vertexai/text-embedding-004',
-                        content: editalText.substring(0, 5000)
-                    });
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    const embeddingArray = response.map((e: any) => e.embedding)[0];
-                    if (embeddingArray) {
-                        editalEmbedding = FieldValue.vector(embeddingArray);
-                        await db.collection('editais').doc(editalId).update({ embedding: editalEmbedding });
-                    }
-                } catch (e) {
-                    console.error(`Failed to generate embedding for Edital ${editalId}:`, e);
-                    continue;
-                }
-            }
-
-            if (!editalEmbedding) continue;
-
-            const vectorQuery = Array.isArray(editalEmbedding) ? FieldValue.vector(editalEmbedding) : editalEmbedding;
-
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const oscsSnapshot = await (db.collection('oscs') as any)
-                .findNearest('embedding', vectorQuery, {
-                    limit: 100,
-                    distanceMeasure: 'COSINE',
-                    distanceResultField: 'vectorDistance'
-                })
-                .get();
-
-            const validCandidates = oscsSnapshot.docs
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                .map((doc: any) => ({
-                    id: doc.id,
-                    similarity: 1 - doc.get('vectorDistance')
-                }))
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                .filter((c: any) => c.similarity >= 0.25);
-
-            for (const osc of validCandidates) {
-                await matchEvaluatorQueue.enqueue({
-                    oscId: osc.id,
-                    editalId: editalId,
-                    jobId: jobId
-                });
-                matchesTriggered++;
-            }
-
-            await jobRef.update({
-                editaisProcessed: FieldValue.increment(1),
-                matchesTriggered: matchesTriggered,
-                updatedAt: FieldValue.serverTimestamp()
-            });
-        }
-
-        return { success: true, jobId, message: `Disparados ${matchesTriggered} matches para ${editalIds.length} editais.` };
+        return { success: true, jobId, message: 'Processamento iniciado em segundo plano.' };
     } catch (error: unknown) {
         console.error('Error in triggerManualEditalMatches:', error);
         await jobRef.update({
@@ -5514,5 +5448,142 @@ export const ingestProsasNewsletterWebhook = onRequest({
     } catch (error) {
         logger.error('[Prosas Webhook] Fatal error:', error);
         response.status(500).send('Internal Server Error');
+    }
+});
+
+export const editalVectorSearchWorker = onTaskDispatched({
+    retryConfig: {
+        maxAttempts: 3,
+        minBackoffSeconds: 60,
+    },
+    rateLimits: {
+        maxConcurrentDispatches: 2,
+    },
+    memory: '1GiB',
+    timeoutSeconds: 540,
+}, async (request) => {
+    const { editalIds, jobId } = request.data as { editalIds: string[], jobId: string };
+
+    if (!jobId || !editalIds || !Array.isArray(editalIds) || editalIds.length === 0) {
+        console.error('Invalid payload. editalIds and jobId are required.');
+        return;
+    }
+
+    const db = getFirestore();
+    const jobRef = db.collection('system_jobs').doc(jobId);
+
+    try {
+        const jobDoc = await jobRef.get();
+        if (jobDoc.exists && jobDoc.data()?.status !== 'running') {
+            console.log(`Job ${jobId} is not in running state. Skipping.`);
+            return;
+        }
+
+        const matchEvaluatorQueue = getFunctions().taskQueue('matchEvaluatorWorker');
+
+
+
+        for (const editalId of editalIds) {
+            // Idempotency check: prevent duplicate processing if task is retried
+            const processedKey = `processed_${editalId}`;
+            if (jobDoc.exists && jobDoc.data()?.[processedKey] === true) {
+                console.log(`Edital ${editalId} already processed for job ${jobId}. Skipping.`);
+                continue;
+            }
+
+            const editalDoc = await db.collection('editais').doc(editalId).get();
+            if (!editalDoc.exists) {
+
+                continue;
+            }
+
+            const editalData = editalDoc.data()!;
+            let editalEmbedding = editalData.embedding;
+
+            if (!editalEmbedding) {
+                const editalText = `Objetivo e Título: ${editalData.title || ''}. Elegibilidade: Atividades permitidas: ${(editalData.eligibilityCriteria?.allowedActivities || []).join(', ')}.`;
+                try {
+                    const { genkit } = await import('genkit');
+                    const { vertexAI } = await import('@genkit-ai/google-genai');
+                    const ai = genkit({
+                        plugins: [vertexAI({ location: 'us-central1' })],
+                    });
+                    const response = await ai.embed({
+                        embedder: 'vertexai/text-embedding-004',
+                        content: editalText.substring(0, 5000)
+                    });
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const embeddingArray = response.map((e: any) => e.embedding)[0];
+                    if (embeddingArray) {
+                        editalEmbedding = FieldValue.vector(embeddingArray);
+                        await db.collection('editais').doc(editalId).update({ embedding: editalEmbedding });
+                    }
+                } catch (e) {
+                    console.error(`Failed to generate embedding for Edital ${editalId}:`, e);
+
+                    continue;
+                }
+            }
+
+            if (!editalEmbedding) {
+
+                continue;
+            }
+
+            const vectorQuery = Array.isArray(editalEmbedding) ? FieldValue.vector(editalEmbedding) : editalEmbedding;
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const oscsSnapshot = await (db.collection('oscs') as any)
+                .findNearest('embedding', vectorQuery, {
+                    limit: 100,
+                    distanceMeasure: 'COSINE',
+                    distanceResultField: 'vectorDistance'
+                })
+                .get();
+
+            const validCandidates = oscsSnapshot.docs
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                .map((doc: any) => ({
+                    id: doc.id,
+                    similarity: 1 - doc.get('vectorDistance')
+                }))
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                .filter((c: any) => c.similarity >= 0.25);
+
+            const batchSize = 50;
+            for (let i = 0; i < validCandidates.length; i += batchSize) {
+                const batch = validCandidates.slice(i, i + batchSize);
+                await Promise.all(batch.map((osc: any) =>
+                    matchEvaluatorQueue.enqueue({
+                        oscId: osc.id,
+                        editalId: editalId,
+                        jobId: jobId
+                    })
+                ));
+            }
+
+
+
+
+            await jobRef.update({
+                editaisProcessed: FieldValue.increment(1),
+                matchesTriggered: FieldValue.increment(validCandidates.length),
+                [processedKey]: true,
+                updatedAt: FieldValue.serverTimestamp()
+            });
+        }
+
+        await jobRef.update({
+            status: 'completed',
+            updatedAt: FieldValue.serverTimestamp()
+        });
+
+    } catch (error: unknown) {
+        console.error(`Error in editalVectorSearchWorker for job ${jobId}:`, error);
+        await jobRef.update({
+            status: 'error',
+            error: error instanceof Error ? error.message : String(error),
+            updatedAt: FieldValue.serverTimestamp()
+        }).catch(e => console.error('Failed to update job status on error:', e));
     }
 });
