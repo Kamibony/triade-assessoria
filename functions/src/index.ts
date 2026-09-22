@@ -1984,7 +1984,7 @@ export const matchEvaluatorWorker = onTaskDispatched({
         maxConcurrentDispatches: 5, // Prevent Vertex AI rate limits (HTTP 429)
     },
     timeoutSeconds: 540, // Allow enough time for Genkit execution
-    memory: '1GiB'
+    memory: '2GiB'
 }, async (request) => {
     const { oscId, editalId, jobId } = request.data as { oscId: string, editalId: string, jobId?: string };
 
@@ -3834,7 +3834,7 @@ export const extractionWorker = onTaskDispatched({
     retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
     rateLimits: { maxConcurrentDispatches: 2 },
     timeoutSeconds: 540,
-    memory: '1GiB'
+    memory: '2GiB'
 }, async (request) => {
     const { searchId, link, contentId, reason, discoverySource } = request.data as { searchId?: string, link: string, contentId: string, reason: string, discoverySource?: string };
 
@@ -5463,17 +5463,34 @@ export const ingestProsasNewsletterWebhook = onRequest({
         const $ = cheerio.load(html);
         const urls = new Set<string>();
 
+        const linkObjects: {text: string, href: string}[] = [];
         $('a').each((i, el) => {
             const text = $(el).text().toLowerCase();
             const href = $(el).attr('href');
-
-            // Heuristic to find edital links
-            if (href && (text.includes('edital') || text.includes('conheça') || text.includes('saiba mais') || text.includes('inscreva-se'))) {
-                if (href.startsWith('http://') || href.startsWith('https://')) {
-                    urls.add(href);
-                }
+            if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
+                linkObjects.push({ text, href });
             }
         });
+
+        for (const { text, href } of linkObjects) {
+            // Heuristic to find edital links
+            if (text.includes('edital') || text.includes('conheça') || text.includes('saiba mais') || text.includes('inscreva-se')) {
+                let finalUrl = href;
+                if (href.includes('t.rdsv2.net')) {
+                    try {
+                        // Resolve the tracking link to get the actual Prosas URL
+                        const res = await fetch(href, { method: 'HEAD', redirect: 'follow' });
+                        if (res.url) {
+                            finalUrl = res.url;
+                            logger.info(`[Prosas Webhook] Resolved tracking link ${href} to ${finalUrl}`);
+                        }
+                    } catch (e) {
+                        logger.error(`[Prosas Webhook] Failed to resolve tracking link ${href}: `, e);
+                    }
+                }
+                urls.add(finalUrl);
+            }
+        }
 
         logger.info(`[Prosas Webhook] Found ${urls.size} potential edital URLs.`);
 
