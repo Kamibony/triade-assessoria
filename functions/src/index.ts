@@ -5480,22 +5480,41 @@ export const ingestProsasNewsletterWebhook = onRequest({
                 let finalUrl = href;
                 if (href.includes('t.rdsv2.net')) {
                     try {
-                        // Resolve the tracking link to get the actual Prosas URL
-                        const res = await fetch(href, { method: 'HEAD', redirect: 'follow' });
-                        logger.info(`[Prosas Webhook] HTTP Status: ${res.status} ${res.statusText} for ${href}`);
-                        const headersObj: Record<string, string> = {};
-                        res.headers.forEach((val, key) => headersObj[key] = val);
-                        logger.info(`[Prosas Webhook] Headers for ${href}: ${JSON.stringify(headersObj)}`);
+                        // Resolve the tracking link to get the actual Prosas URL using GET
+                        const res = await fetch(href, { method: 'GET', redirect: 'follow' });
+                        logger.info(`[Prosas Webhook] GET Status: ${res.status} ${res.statusText} for ${href}`);
 
-                        if (res.url) {
-                            finalUrl = res.url;
+                        let currentUrl = res.url; // May be updated by native 3xx redirects
+
+                        // If it's HTML, check for a meta refresh tag used by some tracking platforms
+                        const contentType = res.headers.get('content-type') || '';
+                        if (contentType.includes('text/html')) {
+                            const htmlBody = await res.text();
+                            const _$ = cheerio.load(htmlBody);
+                            const metaRefresh = _$('meta[http-equiv="refresh"]').attr('content');
+                            if (metaRefresh) {
+                                const urlMatch = metaRefresh.match(/url=([^;]+)/i);
+                                if (urlMatch && urlMatch[1]) {
+                                    // Remove any quotes around the URL
+                                    currentUrl = urlMatch[1].replace(/^['"]|['"]$/g, '').trim();
+                                    logger.info(`[Prosas Webhook] Found meta-refresh destination: ${currentUrl}`);
+                                }
+                            }
+                        }
+
+                        if (currentUrl) {
+                            finalUrl = currentUrl;
                             logger.info(`[Prosas Webhook] Resolved tracking link ${href} to ${finalUrl}`);
                         }
                     } catch (e) {
                         logger.error(`[Prosas Webhook] Failed to resolve tracking link ${href}: `, e);
                     }
                 }
-                urls.add(finalUrl);
+                if (finalUrl.includes('prosas.com.br')) {
+                    urls.add(finalUrl);
+                } else {
+                    logger.info(`[Prosas Webhook] Ignored non-Prosas URL: ${finalUrl}`);
+                }
             }
         }
 
