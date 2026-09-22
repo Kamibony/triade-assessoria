@@ -19,7 +19,7 @@ import { VertexAIScraper } from './scrapers/VertexAIScraper.js';
 import { BraveScraper } from './scrapers/BraveScraper.js';
 import { IScraperStrategy } from './scrapers/interfaces.js';
 import * as admin from 'firebase-admin';
-import { defineString } from 'firebase-functions/params';
+import { defineString, defineSecret } from 'firebase-functions/params';
 import { GoogleAuth } from 'google-auth-library';
 import { genkit } from 'genkit';
 export function formatGenkitError(error: unknown, defaultMessage: string = "Erro interno desconhecido.") {
@@ -5433,9 +5433,12 @@ export const migrateOscVectors = onCall({
     }
 });
 
+const prosasSecret = defineSecret('PROSAS_WEBHOOK_SECRET');
+
 export const ingestProsasNewsletterWebhook = onRequest({
     timeoutSeconds: 540,
     memory: '1GiB',
+    secrets: [prosasSecret]
 }, async (request, response) => {
     if (request.method !== 'POST') {
         response.status(405).send('Method Not Allowed');
@@ -5443,7 +5446,7 @@ export const ingestProsasNewsletterWebhook = onRequest({
     }
 
     const secret = request.get('x-prosas-webhook-secret');
-    const expectedSecret = process.env.PROSAS_WEBHOOK_SECRET;
+    const expectedSecret = prosasSecret.value();
     if (!expectedSecret || secret !== expectedSecret) {
         logger.warn('[Prosas Webhook] Unauthorized attempt.');
         response.status(403).send('Forbidden');
