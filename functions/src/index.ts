@@ -2001,12 +2001,22 @@ export const matchEvaluatorWorker = onTaskDispatched({
             throw new Error(`OSC (${oscId}) or Edital (${editalId}) not found`);
         }
 
-        const oscData = oscDoc.data();
-        const editalData = editalDoc.data();
+        const oscData = oscDoc.data() || {};
+        const editalData = editalDoc.data() || {};
+
+        // Strip heavy/unnecessary fields to save tokens
+        const oscDataClean = { ...oscData };
+        delete oscDataClean.embedding;
+        delete oscDataClean.rawText;
+
+        const editalDataClean = { ...editalData };
+        delete editalDataClean.embedding;
+        delete editalDataClean.rawText;
+        delete editalDataClean.sourceUrl;
 
         const prompt = `Act as a strict grant-matching analyst. Evaluate the OSC's profile against the Edital's strict requirements (location, years of existence, thematic alignment).
-        OSC Profile: ${JSON.stringify(oscData)}
-        Edital: ${JSON.stringify(editalData)}`;
+        OSC Profile: ${JSON.stringify(oscDataClean)}
+        Edital: ${JSON.stringify(editalDataClean)}`;
 
         const result = await ai.generate({
             prompt,
