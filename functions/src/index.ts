@@ -2520,7 +2520,7 @@ export async function enqueueEditalExtraction(link: string, text: string, reason
 export const triggerManualEditalMatches = onCall({
     cors: true,
     timeoutSeconds: 60,
-    memory: '256MiB',
+    memory: '512MiB',
     invoker: 'public',
 }, async (request) => {
     if (!request.auth) {
