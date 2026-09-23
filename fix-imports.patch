@@ -1,0 +1,38 @@
+--- functions/src/index.ts
++++ functions/src/index.ts
+@@ -62,6 +62,7 @@
+ import { ingestOscDataFunction, processOscChunkWorker } from './services/ingestOscData.js';
+ import { matchEvaluatorWorker } from './services/matchEvaluatorWorker.js';
+ import { triggerManualEditalMatches } from './services/triggerManualEditalMatches.js';
++import { cosineSimilarity, findTopVectorMatches } from './services/vectorSearch.js';
+
+ admin.initializeApp();
+
+@@ -1078,28 +1079,6 @@
+     }
+ }
+
+-function cosineSimilarity(vecA: any, vecB: any): number {
+-    const a = vecA?.toArray ? vecA.toArray() : vecA;
+-    const b = vecB?.toArray ? vecB.toArray() : vecB;
+-
+-    if (!a || !b || a.length !== b.length) {
+-        console.warn(`cosineSimilarity returning 0 due to missing vectors or dimension mismatch. vecA.length: ${a?.length}, vecB.length: ${b?.length}`);
+-        return 0;
+-    }
+-    let dotProduct = 0; let normA = 0; let normB = 0;
+-    for (let i = 0; i < a.length; i++) {
+-        dotProduct += (a[i] || 0) * (b[i] || 0);
+-        normA += (a[i] || 0) * (a[i] || 0);
+-        normB += (b[i] || 0) * (b[i] || 0);
+-    }
+-    if (normA === 0 || normB === 0) {
+-        console.warn(`cosineSimilarity returning 0 due to zero norm. normA: ${normA}, normB: ${normB}`);
+-        return 0;
+-    }
+-    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+-}
+-
+ async function generateTextEmbedding(text: string): Promise<number[]> {
+     try {
+         const response = await ai.embed({
