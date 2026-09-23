@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../lib/firebase';
 import { Loader2, RefreshCw } from 'lucide-react';
+import { ManualMatchRadar } from './ManualMatchRadar';
 
 
 type Edital = z.infer<typeof editalSchema> & { id: string };
@@ -125,6 +126,8 @@ export function CacadorAdminDashboard() {
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8">
+      <ManualMatchRadar onComplete={fetchData} />
+
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Caçador de OSCs</h1>
@@ -154,7 +157,7 @@ export function CacadorAdminDashboard() {
            className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg font-medium shadow hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-          {isGenerating ? 'Processando...' : 'Gerar Matches para Editais do Período'}
+          {isGenerating ? 'Iniciando...' : 'Gerar Matches para Editais do Período'}
         </button>
       </div>
 
