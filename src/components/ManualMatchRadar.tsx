@@ -216,9 +216,34 @@ export function ManualMatchRadar({ onComplete }: { onComplete?: () => void }) {
       )}
 
       {activeJob.status === 'completed' && !summary && loadingSummary && (
-         <div className="flex justify-center items-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
-            <span className="ml-3 text-emerald-700 font-medium">Carregando sumário...</span>
+         <div className="animate-in fade-in duration-500">
+           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              <div className="bg-white p-4 rounded-xl border shadow-sm flex flex-col items-center justify-center text-center space-y-2">
+                 <div className="h-4 bg-muted/50 rounded w-24 animate-pulse"></div>
+                 <div className="h-8 bg-muted/50 rounded w-16 animate-pulse"></div>
+              </div>
+              <div className="bg-emerald-50/50 p-4 rounded-xl border border-emerald-100 flex flex-col items-center justify-center text-center space-y-2">
+                 <div className="h-4 bg-emerald-100 rounded w-24 animate-pulse"></div>
+                 <div className="h-8 bg-emerald-100 rounded w-16 animate-pulse"></div>
+              </div>
+              <div className="bg-amber-50/50 p-4 rounded-xl border border-amber-100 flex flex-col items-center justify-center text-center space-y-2">
+                 <div className="h-4 bg-amber-100 rounded w-24 animate-pulse"></div>
+                 <div className="h-8 bg-amber-100 rounded w-16 animate-pulse"></div>
+              </div>
+              <div className="bg-red-50/50 p-4 rounded-xl border border-red-100 flex flex-col items-center justify-center text-center space-y-2">
+                 <div className="h-4 bg-red-100 rounded w-24 animate-pulse"></div>
+                 <div className="h-8 bg-red-100 rounded w-16 animate-pulse"></div>
+              </div>
+           </div>
+
+           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white p-4 rounded-xl border opacity-50 pointer-events-none">
+              <div className="flex items-center text-sm text-muted-foreground">
+                 <BarChart className="w-4 h-4 mr-2" />
+                 Carregando sumário...
+              </div>
+
+              <div className="w-full sm:w-auto h-10 bg-muted/50 rounded-lg w-32 animate-pulse"></div>
+           </div>
          </div>
       )}
 
