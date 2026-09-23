@@ -2538,6 +2538,8 @@ export const triggerManualEditalMatches = onCall({
         throw new HttpsError('invalid-argument', 'O parâmetro editalIds é obrigatório e deve ser um array.');
     }
 
+    console.log(`[triggerManualEditalMatches] Found ${editalIds.length} editais to process from request.`);
+
     const jobRef = db.collection('system_jobs').doc();
     const jobId = jobRef.id;
 
@@ -2557,6 +2559,8 @@ export const triggerManualEditalMatches = onCall({
             jobId: jobId,
             editalIds: editalIds,
         });
+
+        console.log(`[triggerManualEditalMatches] Successfully enqueued job ${jobId} to editalVectorSearchWorker for ${editalIds.length} editais.`);
 
         return { success: true, jobId, message: 'Processamento iniciado em segundo plano.' };
     } catch (error: unknown) {
@@ -5541,6 +5545,8 @@ export const editalVectorSearchWorker = onTaskDispatched({
         return;
     }
 
+    console.log(`[editalVectorSearchWorker] Starting job ${jobId} with ${editalIds.length} editais.`);
+
     const db = getFirestore();
     const jobRef = db.collection('system_jobs').doc(jobId);
 
@@ -5556,16 +5562,18 @@ export const editalVectorSearchWorker = onTaskDispatched({
 
 
         for (const editalId of editalIds) {
+            console.log(`[editalVectorSearchWorker] Processing edital ${editalId}`);
+
             // Idempotency check: prevent duplicate processing if task is retried
             const processedKey = `processed_${editalId}`;
             if (jobDoc.exists && jobDoc.data()?.[processedKey] === true) {
-                console.log(`Edital ${editalId} already processed for job ${jobId}. Skipping.`);
+                console.log(`[editalVectorSearchWorker] Edital ${editalId} already processed for job ${jobId}. Skipping.`);
                 continue;
             }
 
             const editalDoc = await db.collection('editais').doc(editalId).get();
             if (!editalDoc.exists) {
-
+                console.log(`[editalVectorSearchWorker] Edital ${editalId} does not exist in DB. Skipping.`);
                 continue;
             }
 
@@ -5591,18 +5599,20 @@ export const editalVectorSearchWorker = onTaskDispatched({
                         await db.collection('editais').doc(editalId).update({ embedding: editalEmbedding });
                     }
                 } catch (e) {
-                    console.error(`Failed to generate embedding for Edital ${editalId}:`, e);
+                    console.error(`[editalVectorSearchWorker] Failed to generate embedding for Edital ${editalId}:`, e);
 
                     continue;
                 }
             }
 
             if (!editalEmbedding) {
-
+                console.log(`[editalVectorSearchWorker] No embedding available for edital ${editalId}. Skipping.`);
                 continue;
             }
 
             const vectorQuery = Array.isArray(editalEmbedding) ? FieldValue.vector(editalEmbedding) : editalEmbedding;
+
+            console.log(`[editalVectorSearchWorker] Executing vector search for edital ${editalId}...`);
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const oscsSnapshot = await (db.collection('oscs') as any)
@@ -5613,6 +5623,8 @@ export const editalVectorSearchWorker = onTaskDispatched({
                 })
                 .get();
 
+            console.log(`[editalVectorSearchWorker] Found ${oscsSnapshot.docs.length} raw nearest OSC candidates for edital ${editalId}`);
+
             const validCandidates = oscsSnapshot.docs
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 .map((doc: any) => ({
@@ -5622,7 +5634,10 @@ export const editalVectorSearchWorker = onTaskDispatched({
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 .filter((c: any) => c.similarity >= 0.25);
 
+            console.log(`[editalVectorSearchWorker] Filtered down to ${validCandidates.length} valid OSC candidates (similarity >= 0.25) for edital ${editalId}`);
+
             const batchSize = 50;
+            let enqueuedForEdital = 0;
             for (let i = 0; i < validCandidates.length; i += batchSize) {
                 const batch = validCandidates.slice(i, i + batchSize);
                 await Promise.all(batch.map((osc: any) =>
@@ -5632,9 +5647,10 @@ export const editalVectorSearchWorker = onTaskDispatched({
                         jobId: jobId
                     })
                 ));
+                enqueuedForEdital += batch.length;
             }
 
-
+            console.log(`[editalVectorSearchWorker] Successfully enqueued ${enqueuedForEdital} matchEvaluatorWorker tasks for edital ${editalId}`);
 
 
             await jobRef.update({
