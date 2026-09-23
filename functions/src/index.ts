@@ -2015,7 +2015,7 @@ export const matchEvaluatorWorker = onTaskDispatched({
         const matchResult = result.output;
 
         if (matchResult) {
-            const fullMatchDocument = {
+            const fullMatchDocument: any = {
                 ...matchResult,
                 oscId,
                 editalId,
@@ -2024,6 +2024,11 @@ export const matchEvaluatorWorker = onTaskDispatched({
                 createdAt: FieldValue.serverTimestamp(),
                 updatedAt: FieldValue.serverTimestamp()
             };
+
+            if (jobId) {
+                fullMatchDocument.jobId = jobId;
+            }
+
             await db.collection('matches').doc(`${oscId}_${editalId}`).set(fullMatchDocument, { merge: true });
         }
 
@@ -2044,8 +2049,8 @@ export const matchEvaluatorWorker = onTaskDispatched({
 
                 const jobDoc = await jobRef.get();
                 const data = jobDoc.data();
-                // Update job to completed if all evaluated
-                if (data && data.matchesEvaluated >= data.matchesTriggered) {
+                // Update job to completed if all evaluated and search is complete or missing (for backwards compat)
+                if (data && data.matchesEvaluated >= data.matchesTriggered && (data.searchCompleted === true || data.type !== 'manual_edital_matches')) {
                     await jobRef.update({
                         status: 'completed',
                         evaluationsCompleted: true,
@@ -2539,6 +2544,8 @@ export const triggerManualEditalMatches = onCall({
             totalEditais: editalIds.length,
             editaisProcessed: 0,
             matchesTriggered: 0,
+            matchesEvaluated: 0,
+            evaluationsCompleted: false,
             createdAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp(),
         });
@@ -5469,6 +5476,8 @@ export const editalVectorSearchWorker = onTaskDispatched({
             return;
         }
 
+        let totalMatchesTriggered = 0;
+
         for (const editalId of editalIds) {
             logger.info(`[editalVectorSearchWorker] Processing edital ${editalId}`);
 
@@ -5540,6 +5549,7 @@ export const editalVectorSearchWorker = onTaskDispatched({
 
             logger.info(`[editalVectorSearchWorker] Successfully enqueued ${validCandidates.length} matchEvaluatorWorker tasks for edital ${editalId}`);
 
+            totalMatchesTriggered += validCandidates.length;
 
             await jobRef.update({
                 editaisProcessed: FieldValue.increment(1),
@@ -5549,10 +5559,32 @@ export const editalVectorSearchWorker = onTaskDispatched({
             });
         }
 
-        await jobRef.update({
-            status: 'completed',
-            updatedAt: FieldValue.serverTimestamp()
-        });
+        // Only mark as completed here if no matches were found overall.
+        // Otherwise, matchEvaluatorWorker will mark it completed.
+        if (totalMatchesTriggered === 0) {
+            await jobRef.update({
+                status: 'completed',
+                searchCompleted: true,
+                evaluationsCompleted: true,
+                updatedAt: FieldValue.serverTimestamp()
+            });
+        } else {
+            await jobRef.update({
+                searchCompleted: true,
+                updatedAt: FieldValue.serverTimestamp()
+            });
+
+            // Resolve race condition where evaluations finish before job dispatch is complete
+            const finalJobDoc = await jobRef.get();
+            const finalJobData = finalJobDoc.data();
+            if (finalJobData && finalJobData.matchesEvaluated >= finalJobData.matchesTriggered) {
+                await jobRef.update({
+                    status: 'completed',
+                    evaluationsCompleted: true,
+                    updatedAt: FieldValue.serverTimestamp()
+                });
+            }
+        }
 
     } catch (error: unknown) {
         logger.error(`Error in editalVectorSearchWorker for job ${jobId}:`, error);
