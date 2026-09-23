@@ -52,6 +52,7 @@ import * as cheerio from 'cheerio';
 const Parser = require('rss-parser');
 
 import { cosineSimilarity, findTopVectorMatches } from './services/vectorSearch.js';
+import { safeEnqueueTasks } from './services/safeTasks.js';
 
 const braveApiKeyString = defineString('BRAVE_SEARCH_API_KEY');
 const vertexAiSearchEngineIdString = defineString('VERTEX_AI_SEARCH_ENGINE_ID');
@@ -1476,7 +1477,6 @@ export const agenticSearchWorker = onTaskDispatched({
             });
         }
 
-        const matchEvaluatorQueue = getFunctions().taskQueue('locations/us-central1/functions/matchEvaluatorWorker');
         let instantMatches = 0;
 
         // Use Firestore Vector Search for tier 1 search
@@ -1516,13 +1516,17 @@ export const agenticSearchWorker = onTaskDispatched({
 
         console.log('Filtered internal vector matches (threshold 0.25, max 15):', validInternalMatches.map((m: any) => ({ id: m.doc.id, distance: m.distance, similarity: m.similarity })));
 
-        for (const match of validInternalMatches) {
-            await matchEvaluatorQueue.enqueue({
-                oscId: oscId,
-                editalId: match.doc.id
-            });
-            instantMatches++;
-        }
+        const internalMatchTasks = validInternalMatches.map((match: any) => ({
+            oscId: oscId,
+            editalId: match.doc.id
+        }));
+
+        await safeEnqueueTasks(
+            'locations/us-central1/functions/matchEvaluatorWorker',
+            internalMatchTasks,
+            (data) => `eval_internal_${data.oscId}_${data.editalId}`
+        );
+        instantMatches += internalMatchTasks.length;
 
         console.log(`Found ${instantMatches} instant internal matches for OSC ${oscId}.`);
 
@@ -2604,7 +2608,6 @@ export const triggerBulkInternalMatch = onCall({
 
         let matchesTriggered = 0;
         let oscsProcessed = 0;
-        const matchEvaluatorQueue = getFunctions().taskQueue('locations/us-central1/functions/matchEvaluatorWorker');
 
         for (const osc of oscs) {
             let oscEmbedding = osc.embedding;
@@ -2653,14 +2656,18 @@ export const triggerBulkInternalMatch = onCall({
                 })
                 .filter((m: any) => m.similarity >= 0.25);
 
-            for (const match of validInternalMatches) {
-                await matchEvaluatorQueue.enqueue({
-                    oscId: osc.id,
-                    editalId: match.id,
-                    jobId: jobId
-                });
-                matchesTriggered++;
-            }
+            const internalMatchTasks = validInternalMatches.map((match: any) => ({
+                oscId: osc.id,
+                editalId: match.id,
+                jobId: jobId
+            }));
+
+            await safeEnqueueTasks(
+                'locations/us-central1/functions/matchEvaluatorWorker',
+                internalMatchTasks,
+                (data) => `eval_chunk_${data.jobId}_${data.oscId}_${data.editalId}`
+            );
+            matchesTriggered += internalMatchTasks.length;
 
             oscsProcessed++;
             if (oscsProcessed % 5 === 0 || oscsProcessed === oscs.length) {
@@ -3965,11 +3972,11 @@ export const extractionWorker = onTaskDispatched({
         if (docRef && searchId && searchId.startsWith("AGENTIC_")) {
             const realOscId = searchId.replace("AGENTIC_", "");
             try {
-                const matchQueue = getFunctions().taskQueue('locations/us-central1/functions/matchEvaluatorWorker');
-                await matchQueue.enqueue({
-                    oscId: realOscId,
-                    editalId: docRef.id
-                });
+                await safeEnqueueTasks(
+                    'locations/us-central1/functions/matchEvaluatorWorker',
+                    [{ oscId: realOscId, editalId: docRef.id }],
+                    (data) => `eval_handoff_${data.oscId}_${data.editalId}`
+                );
                 console.info(`[Handoff Trace] Successfully enqueued match evaluation for new edital ${docRef.id} and OSC ${realOscId}`);
             } catch (matchErr) {
                 console.error(`[Handoff Trace] Failed to enqueue match evaluator for edital ${docRef.id}:`, matchErr);
@@ -3977,11 +3984,11 @@ export const extractionWorker = onTaskDispatched({
         } else if (docRef && searchId && searchId !== "MANUAL" && searchId !== "RSS" && searchId.length > 15 && !searchId.startsWith("GLOBAL_") && !searchId.startsWith("BULK_")) {
             // Fallback for any legacy enqueue that directly passed the oscId
              try {
-                const matchQueue = getFunctions().taskQueue('locations/us-central1/functions/matchEvaluatorWorker');
-                await matchQueue.enqueue({
-                    oscId: searchId,
-                    editalId: docRef.id
-                });
+                await safeEnqueueTasks(
+                    'locations/us-central1/functions/matchEvaluatorWorker',
+                    [{ oscId: searchId, editalId: docRef.id }],
+                    (data) => `eval_legacy_${data.oscId}_${data.editalId}`
+                );
                 console.info(`[Handoff Trace] Successfully enqueued match evaluation (legacy) for new edital ${docRef.id} and OSC ${searchId}`);
             } catch (matchErr) {
                 console.error(`[Handoff Trace] Failed to enqueue match evaluator for edital ${docRef.id} (legacy):`, matchErr);
@@ -5202,16 +5209,17 @@ export const refreshOscOpportunities = onCall({
     });
 
     // Generate fresh matches decoupled using matchEvaluatorWorker
-    const queue = getFunctions().taskQueue('locations/us-central1/functions/matchEvaluatorWorker');
+    const matchTasks = validInternalMatches.map((match: any) => ({
+        oscId: targetId,
+        editalId: match.id,
+        jobId: jobId
+    }));
 
-    for (const match of validInternalMatches) {
-        try {
-            await queue.enqueue({ oscId: targetId, editalId: match.id, jobId });
-            logger.info(`[matchEvaluatorWorker] Successfully enqueued oscId: ${targetId}, editalId: ${match.id}`);
-        } catch (enqueueErr: any) {
-            logger.error(`[matchEvaluatorWorker] Failed to enqueue oscId: ${targetId}, editalId: ${match.id}: ${enqueueErr.message}`, enqueueErr);
-        }
-    }
+    await safeEnqueueTasks(
+        'locations/us-central1/functions/matchEvaluatorWorker',
+        matchTasks,
+        (data) => `eval_trigger_${data.jobId}_${data.oscId}_${data.editalId}`
+    );
 
 
     // Resolve race condition where evaluations finish before job dispatch is complete
@@ -5461,9 +5469,6 @@ export const editalVectorSearchWorker = onTaskDispatched({
             return;
         }
 
-        // Ensure explicit routing to the correct region
-        const matchEvaluatorQueue = getFunctions().taskQueue('locations/us-central1/functions/matchEvaluatorWorker');
-
         for (const editalId of editalIds) {
             logger.info(`[editalVectorSearchWorker] Processing edital ${editalId}`);
 
@@ -5521,22 +5526,19 @@ export const editalVectorSearchWorker = onTaskDispatched({
 
             logger.info(`[editalVectorSearchWorker] Filtered down to ${validCandidates.length} valid OSC candidates (similarity >= 0.25) for edital ${editalId}`);
 
-            let enqueuedForEdital = 0;
-            for (const osc of validCandidates) {
-                try {
-                    await matchEvaluatorQueue.enqueue({
-                        oscId: osc.id,
-                        editalId: editalId,
-                        jobId: jobId
-                    });
-                    enqueuedForEdital++;
-                    logger.info(`[editalVectorSearchWorker] Successfully enqueued matchEvaluatorWorker for OSC ${osc.id} and Edital ${editalId}`);
-                } catch (enqueueError: any) {
-                    logger.error(`[editalVectorSearchWorker] Failed to enqueue matchEvaluatorWorker for OSC ${osc.id} and Edital ${editalId}: ${enqueueError.message}`, enqueueError);
-                }
-            }
+            const tasksPayload = validCandidates.map(osc => ({
+                oscId: osc.id,
+                editalId: editalId,
+                jobId: jobId
+            }));
 
-            logger.info(`[editalVectorSearchWorker] Successfully enqueued ${enqueuedForEdital} matchEvaluatorWorker tasks for edital ${editalId}`);
+            await safeEnqueueTasks(
+                'locations/us-central1/functions/matchEvaluatorWorker',
+                tasksPayload,
+                (data) => `eval_${data.jobId}_${data.oscId}_${data.editalId}`
+            );
+
+            logger.info(`[editalVectorSearchWorker] Successfully enqueued ${validCandidates.length} matchEvaluatorWorker tasks for edital ${editalId}`);
 
 
             await jobRef.update({
