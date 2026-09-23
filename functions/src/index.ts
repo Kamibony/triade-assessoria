@@ -604,13 +604,18 @@ export const triggerBatchVerification = onCall({
         updatedAt: FieldValue.serverTimestamp()
     });
 
-    const queue = getFunctions().taskQueue('verifyMatchConstraintWorker');
+    const queue = getFunctions().taskQueue('locations/us-central1/functions/verifyMatchConstraintWorker');
 
-    const enqueuePromises = pendingMatches.map(matchDoc =>
-        queue.enqueue({ matchId: matchDoc.id, jobId })
-    );
 
-    await Promise.all(enqueuePromises);
+    for (const matchDoc of pendingMatches) {
+        try {
+            await queue.enqueue({ matchId: matchDoc.id, jobId });
+            logger.info(`[verifyMatchConstraintWorker] Successfully enqueued matchId: ${matchDoc.id}`);
+        } catch (enqueueErr: any) {
+            logger.error(`[verifyMatchConstraintWorker] Failed to enqueue matchId ${matchDoc.id}: ${enqueueErr.message}`, enqueueErr);
+        }
+    }
+
 
     return { success: true, jobId, message: `${pendingMatches.length} tarefas enfileiradas.` };
 });
@@ -665,7 +670,7 @@ export const parsePdfProfileFunction = onCall({
         createdAt: FieldValue.serverTimestamp()
     });
 
-    const queue = getFunctions().taskQueue('parsePdfProfileWorker');
+    const queue = getFunctions().taskQueue('locations/us-central1/functions/parsePdfProfileWorker');
     await queue.enqueue({
         storagePaths: storagePaths,
         trackingId: trackingRef.id
@@ -939,7 +944,7 @@ export const extractEditalRulesFunction = onCall({
         createdAt: FieldValue.serverTimestamp()
     });
 
-    const queue = getFunctions().taskQueue('extractEditalRulesWorker');
+    const queue = getFunctions().taskQueue('locations/us-central1/functions/extractEditalRulesWorker');
     await queue.enqueue({
         data: request.data,
         trackingId: trackingRef.id
@@ -1471,7 +1476,7 @@ export const agenticSearchWorker = onTaskDispatched({
             });
         }
 
-        const matchEvaluatorQueue = getFunctions().taskQueue('matchEvaluatorWorker');
+        const matchEvaluatorQueue = getFunctions().taskQueue('locations/us-central1/functions/matchEvaluatorWorker');
         let instantMatches = 0;
 
         // Use Firestore Vector Search for tier 1 search
@@ -2373,7 +2378,7 @@ export const ingestOscDataFunction = onCall({
 
     // 2. Chunk the results and enqueue to Cloud Tasks
     const CHUNK_SIZE = 250;
-    const queue = getFunctions().taskQueue('processOscChunkWorker');
+    const queue = getFunctions().taskQueue('locations/us-central1/functions/processOscChunkWorker');
 
     const db = getFirestore();
     const jobRef = db.collection('system_jobs').doc();
@@ -2420,7 +2425,7 @@ export const ingestOscDataFunction = onCall({
 async function routeEditalUrl(url: string, sourceContext: string, searchId?: string, options?: { searchQuery?: string | undefined }, discoverySource?: string): Promise<{ success: boolean, message: string, outcome: 'PROSAS' | 'HEURISTIC_REJECT' | 'AI_REJECT' | 'AI_APPROVE' | 'ERROR' }> {
     if (url.toLowerCase().includes('prosas.com.br')) {
         logger.info(`[Smart Router] Routing Prosas link to authenticated worker: ${url}`);
-        await getFunctions().taskQueue('prosasAuthenticatedWorker').enqueue({ url, searchId: searchId || sourceContext });
+        await getFunctions().taskQueue('locations/us-central1/functions/prosasAuthenticatedWorker').enqueue({ url, searchId: searchId || sourceContext });
         return { success: true, message: "Edital encaminhado para o raspador autenticado (Prosas).", outcome: 'PROSAS' };
     }
 
@@ -2485,7 +2490,7 @@ export async function enqueueEditalExtraction(link: string, text: string, reason
         expireAt: expireAt
     });
 
-    const queue = getFunctions().taskQueue('extractionWorker');
+    const queue = getFunctions().taskQueue('locations/us-central1/functions/extractionWorker');
     await queue.enqueue({
         searchId: searchId || null,
         link: link,
@@ -2534,7 +2539,7 @@ export const triggerManualEditalMatches = onCall({
             updatedAt: FieldValue.serverTimestamp(),
         });
 
-        const vectorSearchQueue = getFunctions().taskQueue('editalVectorSearchWorker');
+        const vectorSearchQueue = getFunctions().taskQueue('locations/us-central1/functions/editalVectorSearchWorker');
         await vectorSearchQueue.enqueue({
             jobId: jobId,
             editalIds: editalIds,
@@ -2599,7 +2604,7 @@ export const triggerBulkInternalMatch = onCall({
 
         let matchesTriggered = 0;
         let oscsProcessed = 0;
-        const matchEvaluatorQueue = getFunctions().taskQueue('matchEvaluatorWorker');
+        const matchEvaluatorQueue = getFunctions().taskQueue('locations/us-central1/functions/matchEvaluatorWorker');
 
         for (const osc of oscs) {
             let oscEmbedding = osc.embedding;
@@ -3353,7 +3358,7 @@ export const manualTriggerRssSyncFunction = onCall({
     }
 
     try {
-        const rssQueue = getFunctions().taskQueue('rssWorker');
+        const rssQueue = getFunctions().taskQueue('locations/us-central1/functions/rssWorker');
         await rssQueue.enqueue({});
         return { success: true, message: 'RSS sync triggered' };
     } catch (error: unknown) {
@@ -3531,7 +3536,7 @@ export const triggerAgenticSearch = onCall({
             updatedAt: FieldValue.serverTimestamp(),
         });
 
-        const agenticQueue = getFunctions().taskQueue('agenticSearchWorker');
+        const agenticQueue = getFunctions().taskQueue('locations/us-central1/functions/agenticSearchWorker');
         await agenticQueue.enqueue({
             oscId: oscId,
             jobId: jobRef.id
@@ -3635,7 +3640,7 @@ export const triggerScrapingWorker = onCall({
             savedCount: 0
         });
 
-        const queue = getFunctions().taskQueue('processScrapingTargetWorker');
+        const queue = getFunctions().taskQueue('locations/us-central1/functions/processScrapingTargetWorker');
         await queue.enqueue({
             searchId: searchRef.id,
             target: targetData,
@@ -3960,7 +3965,7 @@ export const extractionWorker = onTaskDispatched({
         if (docRef && searchId && searchId.startsWith("AGENTIC_")) {
             const realOscId = searchId.replace("AGENTIC_", "");
             try {
-                const matchQueue = getFunctions().taskQueue('matchEvaluatorWorker');
+                const matchQueue = getFunctions().taskQueue('locations/us-central1/functions/matchEvaluatorWorker');
                 await matchQueue.enqueue({
                     oscId: realOscId,
                     editalId: docRef.id
@@ -3972,7 +3977,7 @@ export const extractionWorker = onTaskDispatched({
         } else if (docRef && searchId && searchId !== "MANUAL" && searchId !== "RSS" && searchId.length > 15 && !searchId.startsWith("GLOBAL_") && !searchId.startsWith("BULK_")) {
             // Fallback for any legacy enqueue that directly passed the oscId
              try {
-                const matchQueue = getFunctions().taskQueue('matchEvaluatorWorker');
+                const matchQueue = getFunctions().taskQueue('locations/us-central1/functions/matchEvaluatorWorker');
                 await matchQueue.enqueue({
                     oscId: searchId,
                     editalId: docRef.id
@@ -4602,7 +4607,7 @@ export const processScrapingTargetWorker = onTaskDispatched({
             }
         }
 
-        const queue = getFunctions().taskQueue('processScrapingTargetWorker');
+        const queue = getFunctions().taskQueue('locations/us-central1/functions/processScrapingTargetWorker');
 
         if (remainingLinks.length > 0) {
             // Still have links from the current page to process
@@ -4726,18 +4731,23 @@ export const onSearchCreated = onDocumentCreated({ document: 'searches/{searchId
 
     const db = getFirestore();
     const searchRef = db.collection('searches').doc(searchId);
-    const queue = getFunctions().taskQueue('processScrapingTargetWorker');
+    const queue = getFunctions().taskQueue('locations/us-central1/functions/processScrapingTargetWorker');
 
     try {
-        const enqueuePromises = targets.map(target => {
-            return queue.enqueue({
-                searchId,
-                target,
-                query: data.query
-            });
-        });
 
-        await Promise.all(enqueuePromises);
+        for (const target of targets) {
+            try {
+                await queue.enqueue({
+                    searchId,
+                    target,
+                    query: data.query
+                });
+                logger.info(`[startScrapingJobs] Successfully enqueued searchId ${searchId} for target strategy ${target.strategy}`);
+            } catch (enqueueErr: any) {
+                logger.error(`[startScrapingJobs] Failed to enqueue searchId ${searchId} for target strategy ${target.strategy}: ${enqueueErr.message}`, enqueueErr);
+            }
+        }
+
 
         await searchRef.update({
             status: 'running',
@@ -4858,9 +4868,9 @@ export const triggerGlobalIngestion = onCall({
 
 async function executeUnifiedIngestion(runId: string) {
     const db = getFirestore();
-    const extractionQueue = getFunctions().taskQueue('extractionWorker');
-    const processScrapingTargetQueue = getFunctions().taskQueue('processScrapingTargetWorker');
-    const rssQueue = getFunctions().taskQueue('rssWorker');
+    const extractionQueue = getFunctions().taskQueue('locations/us-central1/functions/extractionWorker');
+    const processScrapingTargetQueue = getFunctions().taskQueue('locations/us-central1/functions/processScrapingTargetWorker');
+    const rssQueue = getFunctions().taskQueue('locations/us-central1/functions/rssWorker');
 
     await db.collection('ingestion_runs').doc(runId).set({
         id: runId,
@@ -5192,12 +5202,17 @@ export const refreshOscOpportunities = onCall({
     });
 
     // Generate fresh matches decoupled using matchEvaluatorWorker
-    const queue = getFunctions().taskQueue('matchEvaluatorWorker');
-    const enqueuePromises = validInternalMatches.map((match: any) =>
-        queue.enqueue({ oscId: targetId, editalId: match.id, jobId })
-    );
+    const queue = getFunctions().taskQueue('locations/us-central1/functions/matchEvaluatorWorker');
 
-    await Promise.all(enqueuePromises);
+    for (const match of validInternalMatches) {
+        try {
+            await queue.enqueue({ oscId: targetId, editalId: match.id, jobId });
+            logger.info(`[matchEvaluatorWorker] Successfully enqueued oscId: ${targetId}, editalId: ${match.id}`);
+        } catch (enqueueErr: any) {
+            logger.error(`[matchEvaluatorWorker] Failed to enqueue oscId: ${targetId}, editalId: ${match.id}: ${enqueueErr.message}`, enqueueErr);
+        }
+    }
+
 
     // Resolve race condition where evaluations finish before job dispatch is complete
     const finalJobDoc = await jobRef.get();
@@ -5223,7 +5238,7 @@ export const scheduleAgenticSearchCron = onSchedule({
 }, async (event) => {
     logger.info("Executing slow-burn Agentic Search CRON...");
     const db = getFirestore();
-    const queue = getFunctions().taskQueue('agenticSearchWorker');
+    const queue = getFunctions().taskQueue('locations/us-central1/functions/agenticSearchWorker');
 
     try {
         // Find OSCs that have never been searched, or haven't been searched recently
@@ -5395,7 +5410,7 @@ export const ingestProsasNewsletterWebhook = onRequest({
         logger.info(`[Prosas Webhook] Final resolved URLs to dispatch: ${Array.from(urls).join(', ')}`);
 
         const results = [];
-        const queue = getFunctions().taskQueue('prosasAuthenticatedWorker');
+        const queue = getFunctions().taskQueue('locations/us-central1/functions/prosasAuthenticatedWorker');
 
         for (const url of Array.from(urls)) {
             logger.info(`[Prosas Webhook] Processing URL: ${url}`);
@@ -5446,9 +5461,8 @@ export const editalVectorSearchWorker = onTaskDispatched({
             return;
         }
 
-        const matchEvaluatorQueue = getFunctions().taskQueue('matchEvaluatorWorker');
-
-
+        // Ensure explicit routing to the correct region
+        const matchEvaluatorQueue = getFunctions().taskQueue('locations/us-central1/functions/matchEvaluatorWorker');
 
         for (const editalId of editalIds) {
             logger.info(`[editalVectorSearchWorker] Processing edital ${editalId}`);
@@ -5507,18 +5521,19 @@ export const editalVectorSearchWorker = onTaskDispatched({
 
             logger.info(`[editalVectorSearchWorker] Filtered down to ${validCandidates.length} valid OSC candidates (similarity >= 0.25) for edital ${editalId}`);
 
-            const batchSize = 50;
             let enqueuedForEdital = 0;
-            for (let i = 0; i < validCandidates.length; i += batchSize) {
-                const batch = validCandidates.slice(i, i + batchSize);
-                await Promise.all(batch.map((osc: any) =>
-                    matchEvaluatorQueue.enqueue({
+            for (const osc of validCandidates) {
+                try {
+                    await matchEvaluatorQueue.enqueue({
                         oscId: osc.id,
                         editalId: editalId,
                         jobId: jobId
-                    })
-                ));
-                enqueuedForEdital += batch.length;
+                    });
+                    enqueuedForEdital++;
+                    logger.info(`[editalVectorSearchWorker] Successfully enqueued matchEvaluatorWorker for OSC ${osc.id} and Edital ${editalId}`);
+                } catch (enqueueError: any) {
+                    logger.error(`[editalVectorSearchWorker] Failed to enqueue matchEvaluatorWorker for OSC ${osc.id} and Edital ${editalId}: ${enqueueError.message}`, enqueueError);
+                }
             }
 
             logger.info(`[editalVectorSearchWorker] Successfully enqueued ${enqueuedForEdital} matchEvaluatorWorker tasks for edital ${editalId}`);
