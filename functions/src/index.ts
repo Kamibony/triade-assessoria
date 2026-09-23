@@ -2017,6 +2017,7 @@ export const matchEvaluatorWorker = onTaskDispatched({
         if (matchResult) {
             const fullMatchDocument: any = {
                 ...matchResult,
+                jobId,
                 oscId,
                 editalId,
                 eligibility: matchResult.matchScore >= 20, // Example threshold
@@ -2025,42 +2026,41 @@ export const matchEvaluatorWorker = onTaskDispatched({
                 updatedAt: FieldValue.serverTimestamp()
             };
 
-            if (jobId) {
-                fullMatchDocument.jobId = jobId;
-            }
+            // Clean undefined values before saving to Firestore to avoid errors (e.g. if jobId is missing)
+            const cleanFullMatchDocument = Object.fromEntries(Object.entries(fullMatchDocument).filter(([_, v]) => v !== undefined));
 
-            await db.collection('matches').doc(`${oscId}_${editalId}`).set(fullMatchDocument, { merge: true });
+            await db.collection('matches').doc(`${oscId}_${editalId}`).set(cleanFullMatchDocument, { merge: true });
+
+            // Mark job progress ONLY when task truly succeeds
+            if (jobId) {
+                try {
+                    const db = getFirestore();
+                    const jobRef = db.collection('system_jobs').doc(jobId);
+                    await jobRef.update({
+                        matchesEvaluated: FieldValue.increment(1),
+                        updatedAt: FieldValue.serverTimestamp()
+                    });
+
+                    const jobDoc = await jobRef.get();
+                    const data = jobDoc.data();
+                    // Update job to completed if all evaluated
+                    if (data && data.matchesEvaluated >= data.matchesTriggered) {
+                        await jobRef.update({
+                            status: 'completed',
+                            evaluationsCompleted: true,
+                            updatedAt: FieldValue.serverTimestamp()
+                        });
+                    }
+                } catch (jobError) {
+                     console.error(`Failed to update job progress for ${jobId}:`, jobError);
+                }
+            }
         }
 
     } catch (error) {
         console.error(`Task execution failed for OSC ${oscId} and Edital ${editalId}`, error);
-        // Do not throw error here to avoid infinite retries on unparseable/bad data
-        // We will just log it and mark the job progress.
-    } finally {
-        // Ensure job progress is marked even if the evaluation fails or hits rate limits
-        if (jobId) {
-            try {
-                const db = getFirestore();
-                const jobRef = db.collection('system_jobs').doc(jobId);
-                await jobRef.update({
-                    matchesEvaluated: FieldValue.increment(1),
-                    updatedAt: FieldValue.serverTimestamp()
-                });
-
-                const jobDoc = await jobRef.get();
-                const data = jobDoc.data();
-                // Update job to completed if all evaluated and search is complete or missing (for backwards compat)
-                if (data && data.matchesEvaluated >= data.matchesTriggered && (data.searchCompleted === true || data.type !== 'manual_edital_matches')) {
-                    await jobRef.update({
-                        status: 'completed',
-                        evaluationsCompleted: true,
-                        updatedAt: FieldValue.serverTimestamp()
-                    });
-                }
-            } catch (jobError) {
-                 console.error(`Failed to update job progress for ${jobId}:`, jobError);
-            }
-        }
+        // Throw error here to ensure Cloud Tasks retries transient errors like 429
+        throw error;
     }
 });
 
