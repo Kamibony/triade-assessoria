@@ -51,6 +51,8 @@ const matchConverter = createConverter(matchSchema);
 import * as cheerio from 'cheerio';
 const Parser = require('rss-parser');
 
+import { cosineSimilarity, findTopVectorMatches } from './services/vectorSearch.js';
+
 const braveApiKeyString = defineString('BRAVE_SEARCH_API_KEY');
 const vertexAiSearchEngineIdString = defineString('VERTEX_AI_SEARCH_ENGINE_ID');
 const vertexAiSearchLocationString = defineString('VERTEX_AI_SEARCH_LOCATION');
@@ -1076,28 +1078,6 @@ Retorne apenas as queries geradas no array.`;
         return response.output;
     }
 );
-
-
-function cosineSimilarity(vecA: any, vecB: any): number {
-    const a = vecA?.toArray ? vecA.toArray() : vecA;
-    const b = vecB?.toArray ? vecB.toArray() : vecB;
-
-    if (!a || !b || a.length !== b.length) {
-        console.warn(`cosineSimilarity returning 0 due to missing vectors or dimension mismatch. vecA.length: ${a?.length}, vecB.length: ${b?.length}`);
-        return 0;
-    }
-    let dotProduct = 0; let normA = 0; let normB = 0;
-    for (let i = 0; i < a.length; i++) {
-        dotProduct += (a[i] || 0) * (b[i] || 0);
-        normA += (a[i] || 0) * (a[i] || 0);
-        normB += (b[i] || 0) * (b[i] || 0);
-    }
-    if (normA === 0 || normB === 0) {
-        console.warn(`cosineSimilarity returning 0 due to zero norm. normA: ${normA}, normB: ${normB}`);
-        return 0;
-    }
-    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-}
 
 async function generateTextEmbedding(text: string): Promise<number[]> {
     try {
@@ -3402,7 +3382,7 @@ export const scheduledMatchSweeper = onSchedule('0 0 * * 0', async () => {
 
     for (const editalDoc of editaisSnapshot.docs) {
         if (enqueuedCount >= MAX_ENQUEUES) {
-             console.log(`Sweeper reached safety limit of ${MAX_ENQUEUES} enqueues. Stopping.`);
+             logger.info(`Sweeper reached safety limit of ${MAX_ENQUEUES} enqueues. Stopping.`);
              break;
         }
 
@@ -3411,7 +3391,7 @@ export const scheduledMatchSweeper = onSchedule('0 0 * * 0', async () => {
         const editalEmbedding = editalData.embedding;
 
         if (!editalEmbedding || !Array.isArray(editalEmbedding) || editalEmbedding.length === 0) {
-            console.log(`Skipping edital ${editalId} because it lacks a valid embedding.`);
+            logger.info(`Skipping edital ${editalId} because it lacks a valid embedding.`);
             continue;
         }
 
@@ -3423,27 +3403,21 @@ export const scheduledMatchSweeper = onSchedule('0 0 * * 0', async () => {
         const matchedOscIds = new Set(matchesQuery.docs.map(doc => doc.data().oscId));
 
         // Retrieve top 50 nearest OSCs using Vector Search
-        let oscsSnapshot;
+        let oscIds: string[] = [];
         try {
-            // Note: findNearest is available in Node.js Firestore SDK for Vector Search
-            // We'll fallback to a regular query if not supported by types yet, but standard @google-cloud/firestore should support it
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            oscsSnapshot = await (db.collection('oscs') as any)
-                .findNearest('embedding', editalEmbedding, { limit: 50, distanceMeasure: 'COSINE' })
-                .get();
+            const topMatches = await findTopVectorMatches('oscs', editalEmbedding, 0, 50, db);
+            oscIds = topMatches.map((m: any) => m.id);
         } catch (error) {
-            console.error(`Vector search failed for edital ${editalId}:`, error);
+            logger.error(`Vector search failed for edital ${editalId}:`, error);
             continue;
         }
-
-        const oscIds = oscsSnapshot.docs.map((doc: any) => doc.id);
 
         // Find missing oscIds
         const missingOscIds = oscIds.filter((id: string) => !matchedOscIds.has(id));
 
         const oscsToEnqueue = missingOscIds.slice(0, MAX_ENQUEUES - enqueuedCount);
 
-        console.log(`Sweeping ${oscsToEnqueue.length} missing matches for Edital ${editalId}`);
+        logger.info(`Sweeping ${oscsToEnqueue.length} missing matches for Edital ${editalId}`);
 
         const enqueuePromises = oscsToEnqueue.map((oscId: string) => {
             return queue.enqueue({
@@ -3456,7 +3430,7 @@ export const scheduledMatchSweeper = onSchedule('0 0 * * 0', async () => {
         enqueuedCount += oscsToEnqueue.length;
     }
 
-    console.log(`Weekly sweeper complete. Enqueued ${enqueuedCount} missing matches.`);
+    logger.info(`Weekly sweeper complete. Enqueued ${enqueuedCount} missing matches.`);
 });
 
 import { NotificationService, MockNotificationProvider } from './services/notifications.js';
@@ -5253,33 +5227,17 @@ export const refreshOscOpportunities = onCall({
 
     const vectorQuery = Array.isArray(oscEmbedding) ? FieldValue.vector(oscEmbedding) : oscEmbedding;
 
-    // Fetch top matching editais
+    // Fetch top matching editais using centralized vector search fallback
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const internalEditaisSnapshot = await (db.collection('editais') as any)
-        .where('ativo', '==', true)
-        .findNearest('embedding', vectorQuery, { limit: 15, distanceMeasure: 'COSINE', distanceResultField: 'vectorDistance' })
-        .get();
-
-    const validInternalMatches = internalEditaisSnapshot.docs
-        .map((editalDoc: any) => {
-            let vectorDistance = (editalDoc.get('vectorDistance') ?? editalDoc.data()?.vectorDistance) as number | undefined;
-            let similarity: number;
-
-            if (vectorDistance === undefined || vectorDistance === null) {
-                const editalEmbedding = editalDoc.data()?.embedding;
-                similarity = cosineSimilarity(oscEmbedding, editalEmbedding);
-                vectorDistance = 1 - similarity;
-            } else {
-                similarity = 1 - vectorDistance;
-            }
-
-            return {
-                id: editalDoc.id,
-                distance: vectorDistance,
-                similarity: similarity
-            };
-        })
-        .filter((m: any) => m.similarity >= 0.25);
+    const validInternalMatches = await findTopVectorMatches(
+        'editais',
+        vectorQuery,
+        0.25,
+        15,
+        db,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (q: any) => q.where('ativo', '==', true)
+    );
 
     const jobRef = db.collection('system_jobs').doc();
     const jobId = jobRef.id;
@@ -5541,11 +5499,11 @@ export const editalVectorSearchWorker = onTaskDispatched({
     const { editalIds, jobId } = request.data as { editalIds: string[], jobId: string };
 
     if (!jobId || !editalIds || !Array.isArray(editalIds) || editalIds.length === 0) {
-        console.error('Invalid payload. editalIds and jobId are required.');
+        logger.error('Invalid payload. editalIds and jobId are required.');
         return;
     }
 
-    console.log(`[editalVectorSearchWorker] Starting job ${jobId} with ${editalIds.length} editais.`);
+    logger.info(`[editalVectorSearchWorker] Starting job ${jobId} with ${editalIds.length} editais.`);
 
     const db = getFirestore();
     const jobRef = db.collection('system_jobs').doc(jobId);
@@ -5553,7 +5511,7 @@ export const editalVectorSearchWorker = onTaskDispatched({
     try {
         const jobDoc = await jobRef.get();
         if (jobDoc.exists && jobDoc.data()?.status !== 'running') {
-            console.log(`Job ${jobId} is not in running state. Skipping.`);
+            logger.info(`Job ${jobId} is not in running state. Skipping.`);
             return;
         }
 
@@ -5562,18 +5520,18 @@ export const editalVectorSearchWorker = onTaskDispatched({
 
 
         for (const editalId of editalIds) {
-            console.log(`[editalVectorSearchWorker] Processing edital ${editalId}`);
+            logger.info(`[editalVectorSearchWorker] Processing edital ${editalId}`);
 
             // Idempotency check: prevent duplicate processing if task is retried
             const processedKey = `processed_${editalId}`;
             if (jobDoc.exists && jobDoc.data()?.[processedKey] === true) {
-                console.log(`[editalVectorSearchWorker] Edital ${editalId} already processed for job ${jobId}. Skipping.`);
+                logger.info(`[editalVectorSearchWorker] Edital ${editalId} already processed for job ${jobId}. Skipping.`);
                 continue;
             }
 
             const editalDoc = await db.collection('editais').doc(editalId).get();
             if (!editalDoc.exists) {
-                console.log(`[editalVectorSearchWorker] Edital ${editalId} does not exist in DB. Skipping.`);
+                logger.info(`[editalVectorSearchWorker] Edital ${editalId} does not exist in DB. Skipping.`);
                 continue;
             }
 
@@ -5599,42 +5557,24 @@ export const editalVectorSearchWorker = onTaskDispatched({
                         await db.collection('editais').doc(editalId).update({ embedding: editalEmbedding });
                     }
                 } catch (e) {
-                    console.error(`[editalVectorSearchWorker] Failed to generate embedding for Edital ${editalId}:`, e);
+                    logger.error(`[editalVectorSearchWorker] Failed to generate embedding for Edital ${editalId}:`, e);
 
                     continue;
                 }
             }
 
             if (!editalEmbedding) {
-                console.log(`[editalVectorSearchWorker] No embedding available for edital ${editalId}. Skipping.`);
+                logger.info(`[editalVectorSearchWorker] No embedding available for edital ${editalId}. Skipping.`);
                 continue;
             }
 
             const vectorQuery = Array.isArray(editalEmbedding) ? FieldValue.vector(editalEmbedding) : editalEmbedding;
 
-            console.log(`[editalVectorSearchWorker] Executing vector search for edital ${editalId}...`);
+            logger.info(`[editalVectorSearchWorker] Executing vector search for edital ${editalId}...`);
 
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const oscsSnapshot = await (db.collection('oscs') as any)
-                .findNearest('embedding', vectorQuery, {
-                    limit: 100,
-                    distanceMeasure: 'COSINE',
-                    distanceResultField: 'vectorDistance'
-                })
-                .get();
+            const validCandidates = await findTopVectorMatches('oscs', vectorQuery, 0.25, 100, db);
 
-            console.log(`[editalVectorSearchWorker] Found ${oscsSnapshot.docs.length} raw nearest OSC candidates for edital ${editalId}`);
-
-            const validCandidates = oscsSnapshot.docs
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                .map((doc: any) => ({
-                    id: doc.id,
-                    similarity: 1 - doc.get('vectorDistance')
-                }))
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                .filter((c: any) => c.similarity >= 0.25);
-
-            console.log(`[editalVectorSearchWorker] Filtered down to ${validCandidates.length} valid OSC candidates (similarity >= 0.25) for edital ${editalId}`);
+            logger.info(`[editalVectorSearchWorker] Filtered down to ${validCandidates.length} valid OSC candidates (similarity >= 0.25) for edital ${editalId}`);
 
             const batchSize = 50;
             let enqueuedForEdital = 0;
@@ -5650,7 +5590,7 @@ export const editalVectorSearchWorker = onTaskDispatched({
                 enqueuedForEdital += batch.length;
             }
 
-            console.log(`[editalVectorSearchWorker] Successfully enqueued ${enqueuedForEdital} matchEvaluatorWorker tasks for edital ${editalId}`);
+            logger.info(`[editalVectorSearchWorker] Successfully enqueued ${enqueuedForEdital} matchEvaluatorWorker tasks for edital ${editalId}`);
 
 
             await jobRef.update({
@@ -5667,11 +5607,11 @@ export const editalVectorSearchWorker = onTaskDispatched({
         });
 
     } catch (error: unknown) {
-        console.error(`Error in editalVectorSearchWorker for job ${jobId}:`, error);
+        logger.error(`Error in editalVectorSearchWorker for job ${jobId}:`, error);
         await jobRef.update({
             status: 'error',
             error: error instanceof Error ? error.message : String(error),
             updatedAt: FieldValue.serverTimestamp()
-        }).catch(e => console.error('Failed to update job status on error:', e));
+        }).catch(e => logger.error('Failed to update job status on error:', e));
     }
 });
