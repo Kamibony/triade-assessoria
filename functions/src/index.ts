@@ -2010,7 +2010,7 @@ export const matchEvaluatorWorker = onTaskDispatched({
         const result = await ai.generate({
             prompt,
             output: { schema: reverseMatchResultSchema },
-            model: 'vertexai/gemini-1.5-flash'
+            model: 'vertexai/gemini-2.5-flash'
         });
         const matchResult = result.output;
 
