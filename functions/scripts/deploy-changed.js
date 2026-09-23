@@ -7,7 +7,7 @@ const allFunctions = [
   'matchEvaluatorWorker', 'processOscChunkWorker', 'ingestOscDataFunction',
   'triggerMatchOrchestrator', 'onOscUpdated',
   'ingestManualOscFunction', 'ingestManualEditalFunction', 'askCopilotFunction',
-  'manualTriggerRssSyncFunction', 'scheduledMatchSweeper', 'onMatchGenerated',
+  'manualTriggerRssSyncFunction', 'onMatchGenerated',
   'triggerAgenticSearch', 'autonomousSearchWorker', 'triggerScrapingWorker',
   'seedScrapingTargets', 'extractionWorker', 'processScrapingTargetWorker',
   'onSearchCreated', 'prosasAuthenticatedWorker', 'renewProsasSessionCron', 'prosasBulkDiscoveryWorker',
