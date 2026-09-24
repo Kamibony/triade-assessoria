@@ -4098,16 +4098,19 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
 
         // 2. Playwright Scraping
         chromium.use(stealth());
-        const browser = await chromium.launch({
-            args: chromiumSparticuz.args,
-            executablePath: await chromiumSparticuz.executablePath(),
-            headless: true,
-        });
         let combinedText = '';
         const downloadedPdfPaths: string[] = [];
 
+        let browser: any;
+        let context: any;
+
         try {
-            const context = await browser.newContext({ storageState: sessionFilePath });
+            browser = await chromium.launch({
+                args: chromiumSparticuz.args,
+                executablePath: await chromiumSparticuz.executablePath(),
+                headless: true,
+            });
+            context = await browser.newContext({ storageState: sessionFilePath });
             const page = await context.newPage();
 
             logger.info(`[Prosas Auth Worker] Navigating to ${url}...`);
@@ -4196,7 +4199,12 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
             logger.info(`[Prosas Auth Worker] Enqueued extraction for ${url}`);
 
         } finally {
-            await browser.close();
+            if (context) {
+                await context.close();
+            }
+            if (browser) {
+                await browser.close();
+            }
             // Clean up session file
             if (fs.existsSync(sessionFilePath)) {
                 fs.unlinkSync(sessionFilePath);
