@@ -2942,6 +2942,7 @@ async function processRssFeeds(runId?: string) {
                     'phases.rssAndQueries.errors': FieldValue.arrayUnion(`Error on feed ${feedUrl}: ${error.message}`)
                 });
             }
+            throw error; // Re-throw to allow rssWorker to fail the phase
         }
     }
 
@@ -4910,6 +4911,7 @@ async function executeUnifiedIngestion(runId: string) {
 
     let enqueuedTotal = 0;
     let urlsDiscovered = 0;
+    let hasRssTargets = false;
 
     for (const doc of targetsSnap.docs) {
         const target = { id: doc.id, ...doc.data() } as any;
@@ -4931,6 +4933,7 @@ async function executeUnifiedIngestion(runId: string) {
              });
              continue;
         } else if (target.strategy === 'RSS') {
+             hasRssTargets = true;
              await rssQueue.enqueue({ runId });
              continue;
         }
@@ -4962,13 +4965,21 @@ async function executeUnifiedIngestion(runId: string) {
                     expireAt: expireAt
                 });
 
-                await extractionQueue.enqueue({
-                    searchId: runId,
-                    link: extracted.url,
-                    contentId: tempContentRef.id,
-                    reason: `Found by ${target.strategy}`,
-                    discoverySource: target.strategy
-                });
+                if (extracted.url.toLowerCase().includes('prosas.com.br')) {
+                    logger.info(`[Orchestrator] Routing Prosas link to authenticated worker: ${extracted.url}`);
+                    await getFunctions().taskQueue('locations/us-central1/functions/prosasAuthenticatedWorker').enqueue({
+                        url: extracted.url,
+                        searchId: runId
+                    });
+                } else {
+                    await extractionQueue.enqueue({
+                        searchId: runId,
+                        link: extracted.url,
+                        contentId: tempContentRef.id,
+                        reason: `Found by ${target.strategy}`,
+                        discoverySource: target.strategy
+                    });
+                }
                 enqueuedCount++;
                 enqueuedTotal++;
             }
@@ -4987,13 +4998,20 @@ async function executeUnifiedIngestion(runId: string) {
         }
     }
 
-    await db.collection('ingestion_runs').doc(runId).update({
+    const finalUpdate: any = {
         'phases.unified.status': 'COMPLETED',
         'phases.unified.urlsDiscovered': urlsDiscovered,
         'phases.unified.newEditaisEnqueued': enqueuedTotal,
         'phases.prosas.status': 'COMPLETED',
         'phases.internalFontes.status': 'COMPLETED',
-    });
+    };
+
+    if (!hasRssTargets) {
+        finalUpdate['phases.rssAndQueries.status'] = 'COMPLETED';
+    }
+
+    await db.collection('ingestion_runs').doc(runId).update(finalUpdate);
+
     // We don't mark the whole run as COMPLETED synchronously here because processScrapingTargetQueue and rssQueue are async.
     // The legacy `checkAndUpdateGlobalRunStatus` function expects all phases to be evaluated.
     // However, the unified phase is now complete. We will trigger the checker to see if everything else is done too.
