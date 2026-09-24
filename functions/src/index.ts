@@ -4909,22 +4909,41 @@ async function executeUnifiedIngestion(runId: string) {
 
     const targetsSnap = await db.collection('scraping_targets').get();
 
+    logger.info(`[Orchestrator] Fetched ${targetsSnap.docs.length} total targets from scraping_targets collection.`);
+
     let enqueuedTotal = 0;
     let urlsDiscovered = 0;
     let hasRssTargets = false;
+
+    // Target counters for logging
+    let prosasTargetsCount = 0;
+    let autoTargetsCount = 0;
+    let rssTargetsCount = 0;
+    let vertexTargetsCount = 0;
+    let braveTargetsCount = 0;
 
     for (const doc of targetsSnap.docs) {
         const target = { id: doc.id, ...doc.data() } as any;
 
         let strategy: IScraperStrategy | null = null;
 
+        logger.info(`[Orchestrator] Evaluating target: ${target.name} (strategy: ${target.strategy})`);
+
         if (target.strategy === 'PROSAS') {
+            prosasTargetsCount++;
             strategy = new ProsasScraper();
+            logger.info(`[Orchestrator] Assigned PROSAS strategy for ${target.name}.`);
         } else if (target.strategy === 'VERTEX' && target.query) {
+            vertexTargetsCount++;
             strategy = new VertexAIScraper(target.query);
+            logger.info(`[Orchestrator] Assigned VERTEX strategy for ${target.name}.`);
         } else if (target.strategy === 'BRAVE' && target.query) {
+            braveTargetsCount++;
             strategy = new BraveScraper(target.query);
+            logger.info(`[Orchestrator] Assigned BRAVE strategy for ${target.name}.`);
         } else if (target.strategy === 'AUTO') {
+             autoTargetsCount++;
+             logger.info(`[Orchestrator] Dispatching AUTO target to background worker: ${target.name}.`);
              await safeEnqueueTasks(
                  'locations/us-central1/functions/processScrapingTargetWorker',
                  [{
@@ -4937,7 +4956,9 @@ async function executeUnifiedIngestion(runId: string) {
              );
              continue;
         } else if (target.strategy === 'RSS') {
+             rssTargetsCount++;
              hasRssTargets = true;
+             logger.info(`[Orchestrator] Dispatching RSS target to background worker: ${target.name}.`);
              await safeEnqueueTasks(
                  'locations/us-central1/functions/rssWorker',
                  [{ runId }],
@@ -4946,11 +4967,20 @@ async function executeUnifiedIngestion(runId: string) {
              continue;
         }
 
-        if (!strategy) continue;
+        if (!strategy) {
+            logger.warn(`[Orchestrator] No valid strategy matched for target ${target.name} (strategy field: ${target.strategy}). Skipping.`);
+            continue;
+        }
 
         try {
             logger.info(`[Orchestrator] Processing target ${target.name} with strategy ${target.strategy}`);
             const rawItems = await strategy.fetchDelta();
+
+            logger.info(`[Orchestrator] Target ${target.name} fetchDelta() returned ${rawItems.length} items.`);
+            if (rawItems.length === 0) {
+                logger.warn(`[Orchestrator] Skipping further processing for ${target.name} because fetchDelta returned 0 URLs.`);
+            }
+
             urlsDiscovered += rawItems.length;
             let enqueuedCount = 0;
 
@@ -5021,6 +5051,16 @@ async function executeUnifiedIngestion(runId: string) {
         'phases.prosas.status': 'COMPLETED',
         'phases.internalFontes.status': 'COMPLETED',
     };
+
+    logger.info(`[Orchestrator] Target breakdown summary: PROSAS=${prosasTargetsCount}, AUTO=${autoTargetsCount}, RSS=${rssTargetsCount}, VERTEX=${vertexTargetsCount}, BRAVE=${braveTargetsCount}`);
+
+    if (prosasTargetsCount === 0) {
+        logger.warn(`[Orchestrator] Explicit Warning: Skipping Prosas because 0 targets were found in DB.`);
+    }
+
+    if (rssTargetsCount === 0) {
+        logger.warn(`[Orchestrator] Explicit Warning: Skipping RSS because 0 targets were found in DB.`);
+    }
 
     if (!hasRssTargets) {
         finalUpdate['phases.rssAndQueries.status'] = 'COMPLETED';
