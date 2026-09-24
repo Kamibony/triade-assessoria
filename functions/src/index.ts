@@ -4851,7 +4851,10 @@ export const renewProsasSessionCron = onSchedule({
 });
 
 
-export const unifiedIngestionWorker = onSchedule('0 2 * * *', async () => {
+export const unifiedIngestionWorker = onSchedule({
+    schedule: '0 2 * * *',
+    memory: '512MiB'
+}, async () => {
     const runId = `RUN-CRON-${new Date().toISOString().replace(/[:.]/g, '-')}`;
     await executeUnifiedIngestion(runId);
 });
@@ -5050,7 +5053,10 @@ export const rssWorker = onTaskDispatched({
 });
 
 
-export const scheduledIngestionTimeoutSweeper = onSchedule('*/30 * * * *', async () => {
+export const scheduledIngestionTimeoutSweeper = onSchedule({
+    schedule: '*/30 * * * *',
+    memory: '1GiB'
+}, async () => {
     const db = getFirestore();
     const now = Date.now();
     const timeoutMs = 45 * 60 * 1000; // 45 minutes
@@ -5091,6 +5097,7 @@ export const cronDeactivateExpiredEditais = onSchedule({
     schedule: 'every day 00:00',
     timeZone: 'America/Sao_Paulo',
     retryCount: 3,
+    memory: '512MiB'
 }, async (event) => {
     const db = getFirestore();
     const currentDate = new Date().toISOString().split('T')[0]!;
@@ -5249,7 +5256,8 @@ export { triggerReverseMatch } from './services/reverseMatchmaker.js';
 export const scheduleAgenticSearchCron = onSchedule({
     schedule: "0 * * * *", // Run every hour
     timeZone: "America/Sao_Paulo",
-    timeoutSeconds: 300
+    timeoutSeconds: 300,
+    memory: '1GiB'
 }, async (event) => {
     logger.info("Executing slow-burn Agentic Search CRON...");
     const db = getFirestore();
