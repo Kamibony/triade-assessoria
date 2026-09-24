@@ -134,8 +134,8 @@ export function IngestionRadar() {
         </div>
       </div>
 
-      {/* Detail View of Latest Run if Running */}
-      {runs.length > 0 && runs[0].status === 'RUNNING' && (
+      {/* Detail View of Latest Run */}
+      {runs.length > 0 && (
          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-card border rounded-lg p-6 space-y-4">
                <div className="flex items-center justify-between">

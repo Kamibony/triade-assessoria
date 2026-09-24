@@ -4925,16 +4925,24 @@ async function executeUnifiedIngestion(runId: string) {
         } else if (target.strategy === 'BRAVE' && target.query) {
             strategy = new BraveScraper(target.query);
         } else if (target.strategy === 'AUTO') {
-             await processScrapingTargetQueue.enqueue({
-                 searchId: 'GLOBAL_RUN',
-                 target: target,
-                 query: '',
-                 runId
-             });
+             await safeEnqueueTasks(
+                 'locations/us-central1/functions/processScrapingTargetWorker',
+                 [{
+                     searchId: 'GLOBAL_RUN',
+                     target: target,
+                     query: '',
+                     runId
+                 }],
+                 (data) => `auto_${data.runId}_${data.target.id}`
+             );
              continue;
         } else if (target.strategy === 'RSS') {
              hasRssTargets = true;
-             await rssQueue.enqueue({ runId });
+             await safeEnqueueTasks(
+                 'locations/us-central1/functions/rssWorker',
+                 [{ runId }],
+                 (data) => `rss_${data.runId}`
+             );
              continue;
         }
 
@@ -4967,18 +4975,26 @@ async function executeUnifiedIngestion(runId: string) {
 
                 if (extracted.url.toLowerCase().includes('prosas.com.br')) {
                     logger.info(`[Orchestrator] Routing Prosas link to authenticated worker: ${extracted.url}`);
-                    await getFunctions().taskQueue('locations/us-central1/functions/prosasAuthenticatedWorker').enqueue({
-                        url: extracted.url,
-                        searchId: runId
-                    });
+                    await safeEnqueueTasks(
+                        'locations/us-central1/functions/prosasAuthenticatedWorker',
+                        [{
+                            url: extracted.url,
+                            searchId: runId
+                        }],
+                        (data) => `prosas_${data.searchId}_${data.url.replace(/[^a-zA-Z0-9]/g, '').substring(0, 50)}`
+                    );
                 } else {
-                    await extractionQueue.enqueue({
-                        searchId: runId,
-                        link: extracted.url,
-                        contentId: tempContentRef.id,
-                        reason: `Found by ${target.strategy}`,
-                        discoverySource: target.strategy
-                    });
+                    await safeEnqueueTasks(
+                        'locations/us-central1/functions/extractionWorker',
+                        [{
+                            searchId: runId,
+                            link: extracted.url,
+                            contentId: tempContentRef.id,
+                            reason: `Found by ${target.strategy}`,
+                            discoverySource: target.strategy
+                        }],
+                        (data) => `extract_${data.searchId}_${data.contentId}`
+                    );
                 }
                 enqueuedCount++;
                 enqueuedTotal++;
