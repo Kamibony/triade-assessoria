@@ -38,7 +38,18 @@ export class ProsasScraper implements IScraperStrategy {
                     console.error(errorMsg);
                     throw new Error(errorMsg);
                 }
-                const data = await response.json();
+
+                const rawText = await response.text();
+                console.log(`[ProsasScraper] RAW PROSAS RESPONSE (Page ${page}):`, rawText);
+
+                let data: any = {};
+                try {
+                    data = JSON.parse(rawText);
+                } catch (e) {
+                    console.error(`[ProsasScraper] Failed to parse JSON from Prosas API response:`, e);
+                    throw new Error("Failed to parse JSON from Prosas API response");
+                }
+
                 const items = data.data || [];
 
                 if (items.length === 0) {
