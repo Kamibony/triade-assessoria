@@ -36,7 +36,7 @@
     "playwright-extra": "^4.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "rss-parser": "^3.13.0",
-    "zod": "^3.25.76",
+    "zod": "^3.22.4",
     "zx": "^8.8.5"
   },
   "devDependencies": {
