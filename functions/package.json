@@ -7,7 +7,8 @@
     "build": "tsc",
     "gcp-build": "test -d node_modules/playwright-core/.local-browsers || (PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium --with-deps)",
     "start": "npm run build && firebase emulators:start --only functions",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:scrapers": "npx tsx scripts/tests/run-all-scrapers.ts"
   },
   "keywords": [],
   "author": "",
