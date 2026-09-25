@@ -1,6 +1,7 @@
 import { IScraperStrategy } from './interfaces';
 import { getFirestore } from 'firebase-admin/firestore';
 import * as crypto from 'crypto';
+import { logger } from 'firebase-functions/logger';
 
 export class ProsasScraper implements IScraperStrategy {
     public readonly stateDocId = 'prosas';
@@ -16,15 +17,16 @@ export class ProsasScraper implements IScraperStrategy {
         const watermark = await this.getWatermark();
         let watermarkDate = watermark ? new Date(watermark) : new Date(0);
 
-        // 48-hour Lookback Window
-        const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
-        if (watermarkDate < fortyEightHoursAgo) {
-             watermarkDate = fortyEightHoursAgo;
+        // 7-day Lookback Window
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        if (watermarkDate < sevenDaysAgo) {
+             watermarkDate = sevenDaysAgo;
         }
 
         let page = 1;
         const allItems: any[] = [];
         const maxPages = 50;
+        let debugCounter = 0;
 
         while (page <= maxPages) {
             // Include 'created_at' in the API fields. This URL assumes API v2 structure from codebase
@@ -62,10 +64,18 @@ export class ProsasScraper implements IScraperStrategy {
 
                      if (itemDateString) {
                          const itemDate = new Date(itemDateString);
+                         if (page === 1 && debugCounter < 5) {
+                             logger.info(`[ProsasScraper Debug] Raw: ${itemDateString} | Parsed: ${itemDate} | Watermark: ${watermarkDate} | Keep?: ${itemDate > watermarkDate}`);
+                             debugCounter++;
+                         }
                          if (itemDate > watermarkDate) {
                              allItems.push(item);
                          }
                      } else {
+                         if (page === 1 && debugCounter < 5) {
+                             logger.info(`[ProsasScraper Debug] Raw: null/undefined | Parsed: N/A | Watermark: ${watermarkDate} | Keep?: true (default)`);
+                             debugCounter++;
+                         }
                          allItems.push(item);
                      }
                 }
