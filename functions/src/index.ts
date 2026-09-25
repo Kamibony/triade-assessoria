@@ -52,7 +52,6 @@ import * as cheerio from 'cheerio';
 const Parser = require('rss-parser');
 
 import { cosineSimilarity, findTopVectorMatches } from './services/vectorSearch.js';
-import { safeEnqueueTasks } from './services/safeTasks.js';
 
 const braveApiKeyString = defineString('BRAVE_SEARCH_API_KEY');
 const vertexAiSearchEngineIdString = defineString('VERTEX_AI_SEARCH_ENGINE_ID');
@@ -1521,11 +1520,15 @@ export const agenticSearchWorker = onTaskDispatched({
             editalId: match.doc.id
         }));
 
-        await safeEnqueueTasks(
-            'locations/us-central1/functions/matchEvaluatorWorker',
-            internalMatchTasks,
-            (data) => `eval_internal_${data.oscId}_${data.editalId}`
-        );
+        const queue = getFunctions().taskQueue('locations/us-central1/functions/matchEvaluatorWorker');
+        for (const data of internalMatchTasks) {
+            try {
+                const taskId = `eval_internal_${data.oscId}_${data.editalId}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
+                await queue.enqueue(data, { id: taskId });
+            } catch (err) {
+                console.error(`Failed to enqueue task for eval_internal_${data.oscId}_${data.editalId}`, err);
+            }
+        }
         instantMatches += internalMatchTasks.length;
 
         console.log(`Found ${instantMatches} instant internal matches for OSC ${oscId}.`);
@@ -2669,11 +2672,15 @@ export const triggerBulkInternalMatch = onCall({
                 jobId: jobId
             }));
 
-            await safeEnqueueTasks(
-                'locations/us-central1/functions/matchEvaluatorWorker',
-                internalMatchTasks,
-                (data) => `eval_chunk_${data.jobId}_${data.oscId}_${data.editalId}`
-            );
+            const queue = getFunctions().taskQueue('locations/us-central1/functions/matchEvaluatorWorker');
+            for (const data of internalMatchTasks) {
+                try {
+                    const taskId = `eval_chunk_${data.jobId}_${data.oscId}_${data.editalId}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
+                    await queue.enqueue(data, { id: taskId });
+                } catch (err) {
+                    console.error(`Failed to enqueue task for eval_chunk_${data.jobId}_${data.oscId}_${data.editalId}`, err);
+                }
+            }
             matchesTriggered += internalMatchTasks.length;
 
             oscsProcessed++;
@@ -3982,14 +3989,12 @@ export const extractionWorker = onTaskDispatched({
 
         // Handoff: Trigger Match Evaluator for agentic search if searchId contains an oscId pattern
         // Note: In agentic search, we passed oscId in place of searchId in enqueueEditalExtraction
+        const matchQueue = getFunctions().taskQueue('locations/us-central1/functions/matchEvaluatorWorker');
         if (docRef && searchId && searchId.startsWith("AGENTIC_")) {
             const realOscId = searchId.replace("AGENTIC_", "");
             try {
-                await safeEnqueueTasks(
-                    'locations/us-central1/functions/matchEvaluatorWorker',
-                    [{ oscId: realOscId, editalId: docRef.id }],
-                    (data) => `eval_handoff_${data.oscId}_${data.editalId}`
-                );
+                const taskId = `eval_handoff_${realOscId}_${docRef.id}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
+                await matchQueue.enqueue({ oscId: realOscId, editalId: docRef.id }, { id: taskId });
                 console.info(`[Handoff Trace] Successfully enqueued match evaluation for new edital ${docRef.id} and OSC ${realOscId}`);
             } catch (matchErr) {
                 console.error(`[Handoff Trace] Failed to enqueue match evaluator for edital ${docRef.id}:`, matchErr);
@@ -3997,11 +4002,8 @@ export const extractionWorker = onTaskDispatched({
         } else if (docRef && searchId && searchId !== "MANUAL" && searchId !== "RSS" && searchId.length > 15 && !searchId.startsWith("GLOBAL_") && !searchId.startsWith("BULK_")) {
             // Fallback for any legacy enqueue that directly passed the oscId
              try {
-                await safeEnqueueTasks(
-                    'locations/us-central1/functions/matchEvaluatorWorker',
-                    [{ oscId: searchId, editalId: docRef.id }],
-                    (data) => `eval_legacy_${data.oscId}_${data.editalId}`
-                );
+                const taskId = `eval_legacy_${searchId}_${docRef.id}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
+                await matchQueue.enqueue({ oscId: searchId, editalId: docRef.id }, { id: taskId });
                 console.info(`[Handoff Trace] Successfully enqueued match evaluation (legacy) for new edital ${docRef.id} and OSC ${searchId}`);
             } catch (matchErr) {
                 console.error(`[Handoff Trace] Failed to enqueue match evaluator for edital ${docRef.id} (legacy):`, matchErr);
@@ -4911,10 +4913,8 @@ export const triggerGlobalIngestion = onCall({
     const runId = `RUN-${new Date().toISOString().replace(/[:.]/g, '-')}`;
 
     // Decouple the execution context by enqueuing a task for the background worker
-    await safeEnqueueTasks(
-        'runUnifiedIngestionWorker',
-        [{ runId }]
-    );
+    const queue = getFunctions().taskQueue('locations/us-central1/functions/runUnifiedIngestionWorker');
+    await queue.enqueue({ runId });
 
     return { success: true, runId, message: "Ingestion loop enqueued" };
 });
@@ -4979,26 +4979,20 @@ async function executeUnifiedIngestion(runId: string) {
         } else if (target.strategy === 'AUTO') {
              autoTargetsCount++;
              logger.info(`[Orchestrator] Dispatching AUTO target to background worker: ${target.name}.`);
-             await safeEnqueueTasks(
-                 'locations/us-central1/functions/processScrapingTargetWorker',
-                 [{
-                     searchId: 'GLOBAL_RUN',
-                     target: target,
-                     query: '',
-                     runId
-                 }],
-                 (data) => `auto_${data.runId}_${data.target.id}`
-             );
+             const taskId = `auto_${runId}_${target.id}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
+             await processScrapingTargetQueue.enqueue({
+                 searchId: 'GLOBAL_RUN',
+                 target: target,
+                 query: '',
+                 runId
+             }, { id: taskId });
              continue;
         } else if (target.strategy === 'RSS') {
              rssTargetsCount++;
              hasRssTargets = true;
              logger.info(`[Orchestrator] Dispatching RSS target to background worker: ${target.name}.`);
-             await safeEnqueueTasks(
-                 'locations/us-central1/functions/rssWorker',
-                 [{ runId }],
-                 (data) => `rss_${data.runId}`
-             );
+             const taskId = `rss_${runId}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
+             await rssQueue.enqueue({ runId }, { id: taskId });
              continue;
         }
 
@@ -5040,26 +5034,21 @@ async function executeUnifiedIngestion(runId: string) {
 
                 if (extracted.url.toLowerCase().includes('prosas.com.br')) {
                     logger.info(`[Orchestrator] Routing Prosas link to authenticated worker: ${extracted.url}`);
-                    await safeEnqueueTasks(
-                        'locations/us-central1/functions/prosasAuthenticatedWorker',
-                        [{
-                            url: extracted.url,
-                            searchId: runId
-                        }],
-                        (data) => `prosas_${data.searchId}_${data.url.replace(/[^a-zA-Z0-9]/g, '').substring(0, 50)}`
-                    );
+                    const queue = getFunctions().taskQueue('locations/us-central1/functions/prosasAuthenticatedWorker');
+                    const taskId = `prosas_${runId}_${extracted.url.replace(/[^a-zA-Z0-9]/g, '').substring(0, 50)}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
+                    await queue.enqueue({
+                        url: extracted.url,
+                        searchId: runId
+                    }, { id: taskId });
                 } else {
-                    await safeEnqueueTasks(
-                        'locations/us-central1/functions/extractionWorker',
-                        [{
-                            searchId: runId,
-                            link: extracted.url,
-                            contentId: tempContentRef.id,
-                            reason: `Found by ${target.strategy}`,
-                            discoverySource: target.strategy
-                        }],
-                        (data) => `extract_${data.searchId}_${data.contentId}`
-                    );
+                    const taskId = `extract_${runId}_${tempContentRef.id}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
+                    await extractionQueue.enqueue({
+                        searchId: runId,
+                        link: extracted.url,
+                        contentId: tempContentRef.id,
+                        reason: `Found by ${target.strategy}`,
+                        discoverySource: target.strategy
+                    }, { id: taskId });
                 }
                 enqueuedCount++;
                 enqueuedTotal++;
@@ -5338,11 +5327,15 @@ export const refreshOscOpportunities = onCall({
         jobId: jobId
     }));
 
-    await safeEnqueueTasks(
-        'locations/us-central1/functions/matchEvaluatorWorker',
-        matchTasks,
-        (data) => `eval_trigger_${data.jobId}_${data.oscId}_${data.editalId}`
-    );
+    const queue = getFunctions().taskQueue('locations/us-central1/functions/matchEvaluatorWorker');
+    for (const data of matchTasks) {
+        try {
+            const taskId = `eval_trigger_${data.jobId}_${data.oscId}_${data.editalId}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
+            await queue.enqueue(data, { id: taskId });
+        } catch (err) {
+            logger.error(`Failed to enqueue task for eval_trigger_${data.jobId}_${data.oscId}_${data.editalId}`, err);
+        }
+    }
 
 
     // Resolve race condition where evaluations finish before job dispatch is complete
@@ -5658,11 +5651,15 @@ export const editalVectorSearchWorker = onTaskDispatched({
                 jobId: jobId
             }));
 
-            await safeEnqueueTasks(
-                'locations/us-central1/functions/matchEvaluatorWorker',
-                tasksPayload,
-                (data) => `eval_${data.jobId}_${data.oscId}_${data.editalId}`
-            );
+            const queue = getFunctions().taskQueue('locations/us-central1/functions/matchEvaluatorWorker');
+            for (const data of tasksPayload) {
+                try {
+                    const taskId = `eval_${data.jobId}_${data.oscId}_${data.editalId}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
+                    await queue.enqueue(data, { id: taskId });
+                } catch (err) {
+                    logger.error(`Failed to enqueue task for eval_${data.jobId}_${data.oscId}_${data.editalId}`, err);
+                }
+            }
 
             logger.info(`[editalVectorSearchWorker] Successfully enqueued ${validCandidates.length} matchEvaluatorWorker tasks for edital ${editalId}`);
 
