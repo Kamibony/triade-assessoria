@@ -4914,7 +4914,12 @@ export const triggerGlobalIngestion = onCall({
 
     // Decouple the execution context by enqueuing a task for the background worker
     const queue = getFunctions().taskQueue('locations/us-central1/functions/runUnifiedIngestionWorker');
-    await queue.enqueue({ runId });
+    try {
+        await queue.enqueue({ runId });
+    } catch (error: any) {
+        logger.error(`[triggerGlobalIngestion] Failed to dispatch ingestion worker for runId: ${runId}`, error);
+        throw new HttpsError('internal', 'Failed to dispatch ingestion worker', { details: error.message });
+    }
 
     return { success: true, runId, message: "Ingestion loop enqueued" };
 });
