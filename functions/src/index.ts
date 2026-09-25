@@ -4873,6 +4873,26 @@ export const unifiedIngestionWorker = onSchedule({
     await executeUnifiedIngestion(runId);
 });
 
+export const runUnifiedIngestionWorker = onTaskDispatched({
+    timeoutSeconds: 1800,
+    memory: '2GiB'
+}, async (request) => {
+    const { runId } = request.data;
+    if (!runId) {
+        logger.error('[runUnifiedIngestionWorker] Missing runId in payload');
+        return;
+    }
+
+    logger.info(`[runUnifiedIngestionWorker] Starting background execution for runId: ${runId}`);
+    try {
+        await executeUnifiedIngestion(runId);
+        logger.info(`[runUnifiedIngestionWorker] Successfully completed background execution for runId: ${runId}`);
+    } catch (error) {
+        logger.error(`[runUnifiedIngestionWorker] Failed background execution for runId: ${runId}`, error);
+        throw error;
+    }
+});
+
 export const triggerGlobalIngestion = onCall({
     cors: true,
     invoker: 'public',
@@ -4890,11 +4910,13 @@ export const triggerGlobalIngestion = onCall({
 
     const runId = `RUN-${new Date().toISOString().replace(/[:.]/g, '-')}`;
 
-    // We await this synchronously, as dispatching Cloud Tasks is generally fast enough
-    // and we must ensure the background execution context remains active in GCF.
-    await executeUnifiedIngestion(runId);
+    // Decouple the execution context by enqueuing a task for the background worker
+    await safeEnqueueTasks(
+        'runUnifiedIngestionWorker',
+        [{ runId }]
+    );
 
-    return { success: true, runId, message: "Ingestion loop completed" };
+    return { success: true, runId, message: "Ingestion loop enqueued" };
 });
 
 async function executeUnifiedIngestion(runId: string) {
