@@ -4942,7 +4942,7 @@ export const triggerGlobalIngestion = onCall({
 
 export const runUnifiedIngestionWorker = onDocumentCreated({
     document: 'ingestion_runs/{runId}',
-    timeoutSeconds: 1800,
+    timeoutSeconds: 540,
     memory: '2GiB'
 }, async (event) => {
     const snapshot = event.data;
