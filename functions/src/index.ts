@@ -4901,7 +4901,7 @@ export const triggerGlobalIngestion = onCall({
     cors: true,
     invoker: 'public',
     timeoutSeconds: 30, // Trigger is fast, no need for long timeout
-    memory: '256MiB'
+    memory: '512MiB'
 }, async (request) => {
     if (!request.auth) {
         throw new HttpsError('unauthenticated', 'User must be authenticated.');
@@ -4914,28 +4914,27 @@ export const triggerGlobalIngestion = onCall({
 
     const runId = `RUN-${new Date().toISOString().replace(/[:.]/g, '-')}`;
 
-    try {
-        await db.collection('ingestion_runs').doc(runId).set({
-            id: runId,
-            triggerSource: 'MANUAL',
-            startTime: FieldValue.serverTimestamp(),
-            endTime: null,
-            status: 'PENDING',
-            totalUrlsScanned: 0,
-            totalValidEditaisFound: 0,
-            totalErrors: 0,
-            phases: {
-                unified: { status: 'PENDING', targetsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
-                prosas: { status: 'PENDING', pagesScanned: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
-                internalFontes: { status: 'PENDING', targetsProcessed: 0, totalTargets: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
-                rssAndQueries: { status: 'PENDING', feedsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] }
-            }
-        });
+    await db.collection('ingestion_runs').doc(runId).set({
+        id: runId,
+        triggerSource: 'MANUAL',
+        startTime: FieldValue.serverTimestamp(),
+        endTime: null,
+        status: 'PENDING',
+        totalUrlsScanned: 0,
+        totalValidEditaisFound: 0,
+        totalErrors: 0,
+        phases: {
+            unified: { status: 'PENDING', targetsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
+            prosas: { status: 'PENDING', pagesScanned: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
+            internalFontes: { status: 'PENDING', targetsProcessed: 0, totalTargets: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
+            rssAndQueries: { status: 'PENDING', feedsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] }
+        }
+    }).then(() => {
         logger.info(`[triggerGlobalIngestion] Created PENDING ingestion_run document for runId: ${runId}`);
-    } catch (error: any) {
+    }).catch((error: any) => {
         logger.error(`[triggerGlobalIngestion] Failed to create ingestion_run document for runId: ${runId}`, error);
-        throw new HttpsError('internal', 'Failed to trigger ingestion worker via document creation', { details: error.message });
-    }
+        throw new HttpsError('internal', 'Failed to trigger ingestion worker via document creation', error.message);
+    });
 
     return { success: true, runId, message: "Ingestion loop triggered via Firestore document" };
 });
