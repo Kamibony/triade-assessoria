@@ -2872,7 +2872,13 @@ async function processRssFeeds(runId?: string) {
     for (const feedUrl of RSS_URLS) {
         try {
             console.log(`Fetching RSS feed: ${feedUrl}`);
-            const feed = await parser.parseURL(feedUrl);
+            let feed;
+            try {
+                feed = await parser.parseURL(feedUrl);
+            } catch (err) {
+                logger.warn(`Failed to fetch feed ${feedUrl}`);
+                continue;
+            }
 
             if (runId) {
                 await db.collection('ingestion_runs').doc(runId).update({
@@ -2936,13 +2942,12 @@ async function processRssFeeds(runId?: string) {
 
             }
         } catch (error: any) {
-            console.error(`Error fetching or parsing RSS feed ${feedUrl}:`, error);
+            console.error(`Error processing RSS feed items for ${feedUrl}:`, error);
             if (runId) {
                 await db.collection('ingestion_runs').doc(runId).update({
-                    'phases.rssAndQueries.errors': FieldValue.arrayUnion(`Error on feed ${feedUrl}: ${error.message}`)
+                    'phases.rssAndQueries.errors': FieldValue.arrayUnion(`Error processing items for feed ${feedUrl}: ${error.message}`)
                 });
             }
-            throw error; // Re-throw to allow rssWorker to fail the phase
         }
     }
 
