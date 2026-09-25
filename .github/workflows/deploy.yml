@@ -59,6 +59,14 @@ jobs:
           echo "VERTEX_AI_SEARCH_LOCATION=${{ secrets.VERTEX_AI_SEARCH_LOCATION }}" >> functions/.env
           echo "VERTEX_AI_SEARCH_ENGINE_ID=${{ secrets.VERTEX_AI_SEARCH_ENGINE_ID }}" >> functions/.env
 
+      - name: Test Scrapers (Dry-Run)
+        run: cd functions && npm run test:scrapers
+        env:
+          BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+          VERTEX_AI_SEARCH_PROJECT_ID: ${{ secrets.VERTEX_AI_SEARCH_PROJECT_ID }}
+          VERTEX_AI_SEARCH_LOCATION: ${{ secrets.VERTEX_AI_SEARCH_LOCATION }}
+          VERTEX_AI_SEARCH_ENGINE_ID: ${{ secrets.VERTEX_AI_SEARCH_ENGINE_ID }}
+
       - name: Deploy to Firebase (Hosting, Storage Rules, and Firestore Indexes)
         run: npx firebase-tools deploy --only hosting,storage,firestore:indexes --project triade-assessoria --force
         env:
