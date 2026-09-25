@@ -4872,34 +4872,36 @@ export const unifiedIngestionWorker = onSchedule({
     memory: '512MiB'
 }, async () => {
     const runId = `RUN-CRON-${new Date().toISOString().replace(/[:.]/g, '-')}`;
-    await executeUnifiedIngestion(runId);
-});
+    const db = getFirestore();
 
-export const runUnifiedIngestionWorker = onTaskDispatched({
-    timeoutSeconds: 1800,
-    memory: '2GiB'
-}, async (request) => {
-    const { runId } = request.data;
-    if (!runId) {
-        logger.error('[runUnifiedIngestionWorker] Missing runId in payload');
-        return;
-    }
-
-    logger.info(`[runUnifiedIngestionWorker] Starting background execution for runId: ${runId}`);
     try {
-        await executeUnifiedIngestion(runId);
-        logger.info(`[runUnifiedIngestionWorker] Successfully completed background execution for runId: ${runId}`);
-    } catch (error) {
-        logger.error(`[runUnifiedIngestionWorker] Failed background execution for runId: ${runId}`, error);
-        throw error;
+        await db.collection('ingestion_runs').doc(runId).set({
+            id: runId,
+            triggerSource: 'CRON',
+            startTime: FieldValue.serverTimestamp(),
+            endTime: null,
+            status: 'PENDING',
+            totalUrlsScanned: 0,
+            totalValidEditaisFound: 0,
+            totalErrors: 0,
+            phases: {
+                unified: { status: 'PENDING', targetsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
+                prosas: { status: 'PENDING', pagesScanned: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
+                internalFontes: { status: 'PENDING', targetsProcessed: 0, totalTargets: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
+                rssAndQueries: { status: 'PENDING', feedsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] }
+            }
+        });
+        logger.info(`[unifiedIngestionWorker] Created PENDING ingestion_run document for runId: ${runId}`);
+    } catch (error: any) {
+        logger.error(`[unifiedIngestionWorker] Failed to create ingestion_run document for runId: ${runId}`, error);
     }
 });
 
 export const triggerGlobalIngestion = onCall({
     cors: true,
     invoker: 'public',
-    timeoutSeconds: 540,
-    memory: '1GiB'
+    timeoutSeconds: 30, // Trigger is fast, no need for long timeout
+    memory: '256MiB'
 }, async (request) => {
     if (!request.auth) {
         throw new HttpsError('unauthenticated', 'User must be authenticated.');
@@ -4912,16 +4914,58 @@ export const triggerGlobalIngestion = onCall({
 
     const runId = `RUN-${new Date().toISOString().replace(/[:.]/g, '-')}`;
 
-    // Decouple the execution context by enqueuing a task for the background worker
-    const queue = getFunctions().taskQueue('locations/us-central1/functions/runUnifiedIngestionWorker');
     try {
-        await queue.enqueue({ runId });
+        await db.collection('ingestion_runs').doc(runId).set({
+            id: runId,
+            triggerSource: 'MANUAL',
+            startTime: FieldValue.serverTimestamp(),
+            endTime: null,
+            status: 'PENDING',
+            totalUrlsScanned: 0,
+            totalValidEditaisFound: 0,
+            totalErrors: 0,
+            phases: {
+                unified: { status: 'PENDING', targetsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
+                prosas: { status: 'PENDING', pagesScanned: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
+                internalFontes: { status: 'PENDING', targetsProcessed: 0, totalTargets: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
+                rssAndQueries: { status: 'PENDING', feedsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] }
+            }
+        });
+        logger.info(`[triggerGlobalIngestion] Created PENDING ingestion_run document for runId: ${runId}`);
     } catch (error: any) {
-        logger.error(`[triggerGlobalIngestion] Failed to dispatch ingestion worker for runId: ${runId}`, error);
-        throw new HttpsError('internal', 'Failed to dispatch ingestion worker', { details: error.message });
+        logger.error(`[triggerGlobalIngestion] Failed to create ingestion_run document for runId: ${runId}`, error);
+        throw new HttpsError('internal', 'Failed to trigger ingestion worker via document creation', { details: error.message });
     }
 
-    return { success: true, runId, message: "Ingestion loop enqueued" };
+    return { success: true, runId, message: "Ingestion loop triggered via Firestore document" };
+});
+
+export const runUnifiedIngestionWorker = onDocumentCreated({
+    document: 'ingestion_runs/{runId}',
+    timeoutSeconds: 1800,
+    memory: '2GiB'
+}, async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) {
+        logger.error('[runUnifiedIngestionWorker] No data associated with the event');
+        return;
+    }
+    const data = snapshot.data();
+    if (data.status !== 'PENDING') {
+         logger.info(`[runUnifiedIngestionWorker] Ignoring creation of ingestion_run ${event.params.runId} because status is ${data.status}`);
+         return;
+    }
+
+    const runId = event.params.runId;
+
+    logger.info(`[runUnifiedIngestionWorker] Starting background execution for runId: ${runId} triggered by onDocumentCreated`);
+    try {
+        await executeUnifiedIngestion(runId);
+        logger.info(`[runUnifiedIngestionWorker] Successfully completed background execution for runId: ${runId}`);
+    } catch (error) {
+        logger.error(`[runUnifiedIngestionWorker] Failed background execution for runId: ${runId}`, error);
+        throw error;
+    }
 });
 
 async function executeUnifiedIngestion(runId: string) {
@@ -4930,21 +4974,13 @@ async function executeUnifiedIngestion(runId: string) {
     const processScrapingTargetQueue = getFunctions().taskQueue('locations/us-central1/functions/processScrapingTargetWorker');
     const rssQueue = getFunctions().taskQueue('locations/us-central1/functions/rssWorker');
 
-    await db.collection('ingestion_runs').doc(runId).set({
-        id: runId,
-        triggerSource: runId.includes('CRON') ? 'CRON' : 'MANUAL',
-        startTime: FieldValue.serverTimestamp(),
-        endTime: null,
+    // Document is already created with status PENDING by the trigger. Just update to RUNNING.
+    await db.collection('ingestion_runs').doc(runId).update({
         status: 'RUNNING',
-        totalUrlsScanned: 0,
-        totalValidEditaisFound: 0,
-        totalErrors: 0,
-        phases: {
-            unified: { status: 'RUNNING', targetsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
-            prosas: { status: 'RUNNING', pagesScanned: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
-            internalFontes: { status: 'RUNNING', targetsProcessed: 0, totalTargets: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] },
-            rssAndQueries: { status: 'RUNNING', feedsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] }
-        }
+        'phases.unified.status': 'RUNNING',
+        'phases.prosas.status': 'RUNNING',
+        'phases.internalFontes.status': 'RUNNING',
+        'phases.rssAndQueries.status': 'RUNNING'
     });
 
     const targetsSnap = await db.collection('scraping_targets').get();
