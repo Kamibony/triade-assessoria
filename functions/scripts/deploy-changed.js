@@ -2,17 +2,20 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const allFunctions = [
-  'parsePdfProfileFunction', 'extractEditalRulesFunction', 'agenticSearchWorker',
-  'matchEvaluatorWorker', 'processOscChunkWorker', 'ingestOscDataFunction',
-  'triggerMatchOrchestrator', 'onOscUpdated',
-  'ingestManualOscFunction', 'ingestManualEditalFunction', 'askCopilotFunction',
-  'manualTriggerRssSyncFunction', 'onMatchGenerated',
-  'triggerAgenticSearch', 'autonomousSearchWorker', 'triggerScrapingWorker',
-  'seedScrapingTargets', 'extractionWorker', 'processScrapingTargetWorker',
-  'onSearchCreated', 'prosasAuthenticatedWorker', 'renewProsasSessionCron', 'prosasBulkDiscoveryWorker',
-  'triggerGlobalIngestion', 'scheduledGlobalIngestion', 'runVectorMigration'
-];
+// Dynamically extract all exported functions from index.ts
+let allFunctions = [];
+try {
+  const indexFileContent = fs.readFileSync(path.join(__dirname, '../src/index.ts'), 'utf8');
+  const exportRegex = /^export\s+(?:const|let|var)\s+([a-zA-Z0-9_]+)\s*=/gm;
+  let match;
+  while ((match = exportRegex.exec(indexFileContent)) !== null) {
+    allFunctions.push(match[1]);
+  }
+  console.log(`Dynamically found ${allFunctions.length} exported functions.`);
+} catch (e) {
+  console.error('Failed to parse index.ts for exported functions:', e);
+  process.exit(1);
+}
 
 try {
   let functionsToDeploy = [];

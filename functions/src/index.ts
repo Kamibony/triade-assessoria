@@ -4867,7 +4867,7 @@ export const renewProsasSessionCron = onSchedule({
 });
 
 
-export const unifiedIngestionWorker = onSchedule({
+export const scheduledGlobalIngestionTrigger = onSchedule({
     schedule: '0 2 * * *',
     memory: '512MiB'
 }, async () => {
@@ -4891,9 +4891,9 @@ export const unifiedIngestionWorker = onSchedule({
                 rssAndQueries: { status: 'PENDING', feedsProcessed: 0, urlsDiscovered: 0, newEditaisEnqueued: 0, errors: [] }
             }
         });
-        logger.info(`[unifiedIngestionWorker] Created PENDING ingestion_run document for runId: ${runId}`);
+        logger.info(`[scheduledGlobalIngestionTrigger] Created PENDING ingestion_run document for runId: ${runId}`);
     } catch (error: any) {
-        logger.error(`[unifiedIngestionWorker] Failed to create ingestion_run document for runId: ${runId}`, error);
+        logger.error(`[scheduledGlobalIngestionTrigger] Failed to create ingestion_run document for runId: ${runId}`, error);
     }
 });
 
@@ -4940,30 +4940,30 @@ export const triggerGlobalIngestion = onCall({
     return { success: true, runId, message: "Ingestion loop triggered via Firestore document" };
 });
 
-export const runUnifiedIngestionWorker = onDocumentCreated({
+export const globalIngestionOrchestratorWorker = onDocumentCreated({
     document: 'ingestion_runs/{runId}',
     timeoutSeconds: 540,
     memory: '2GiB'
 }, async (event) => {
     const snapshot = event.data;
     if (!snapshot) {
-        logger.error('[runUnifiedIngestionWorker] No data associated with the event');
+        logger.error('[globalIngestionOrchestratorWorker] No data associated with the event');
         return;
     }
     const data = snapshot.data();
     if (data.status !== 'PENDING') {
-         logger.info(`[runUnifiedIngestionWorker] Ignoring creation of ingestion_run ${event.params.runId} because status is ${data.status}`);
+         logger.info(`[globalIngestionOrchestratorWorker] Ignoring creation of ingestion_run ${event.params.runId} because status is ${data.status}`);
          return;
     }
 
     const runId = event.params.runId;
 
-    logger.info(`[runUnifiedIngestionWorker] Starting background execution for runId: ${runId} triggered by onDocumentCreated`);
+    logger.info(`[globalIngestionOrchestratorWorker] Starting background execution for runId: ${runId} triggered by onDocumentCreated`);
     try {
         await executeUnifiedIngestion(runId);
-        logger.info(`[runUnifiedIngestionWorker] Successfully completed background execution for runId: ${runId}`);
+        logger.info(`[globalIngestionOrchestratorWorker] Successfully completed background execution for runId: ${runId}`);
     } catch (error) {
-        logger.error(`[runUnifiedIngestionWorker] Failed background execution for runId: ${runId}`, error);
+        logger.error(`[globalIngestionOrchestratorWorker] Failed background execution for runId: ${runId}`, error);
         throw error;
     }
 });
