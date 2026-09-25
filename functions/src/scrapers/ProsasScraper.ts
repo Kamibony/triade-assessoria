@@ -22,10 +22,11 @@ export class ProsasScraper implements IScraperStrategy {
             }
 
             const [fileContent] = await file.download();
-            const cookiesArray = JSON.parse(fileContent.toString('utf-8'));
+            const sessionData = JSON.parse(fileContent.toString('utf-8'));
+            const cookiesArray = sessionData.cookies;
 
             if (!Array.isArray(cookiesArray)) {
-                throw new Error("Parsed session is not an array");
+                throw new Error("Parsed session is missing a cookies array");
             }
 
             return cookiesArray.map((c: any) => `${c.name}=${c.value}`).join('; ');

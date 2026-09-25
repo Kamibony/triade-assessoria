@@ -137,12 +137,13 @@ export class VertexAIScraper implements IScraperStrategy {
                     console.warn(`[VertexAIScraper] API failed with status ${response.status}. Retrying ${attempt}/${maxAttempts}...`);
                     await new Promise(res => setTimeout(res, 1000 * Math.pow(2, attempt)));
                 } else {
-                    console.error(`[VertexAIScraper] API failed permanently with status: ${response.status}`);
-                    break;
+                    const errorMsg = `[VertexAIScraper] API failed permanently with status: ${response.status}`;
+                    console.error(errorMsg);
+                    throw new Error(errorMsg);
                 }
             } catch (e) {
                  console.error(`[VertexAIScraper] Exception during fetch:`, e);
-                 break;
+                 throw e;
             }
         }
 
