@@ -62,8 +62,9 @@ export class BraveScraper implements IScraperStrategy {
                 });
 
                 if (!searchResponse.ok) {
-                    console.warn(`[BraveScraper] API request failed for offset ${offset} with status: ${searchResponse.status}`);
-                    continue;
+                    const errorMsg = `[BraveScraper] API request failed for offset ${offset} with status: ${searchResponse.status}`;
+                    console.error(errorMsg);
+                    throw new Error(errorMsg);
                 }
 
                 const braveData = await searchResponse.json() as any;
@@ -117,7 +118,8 @@ export class BraveScraper implements IScraperStrategy {
                     }
                 }
             } catch (e) {
-                console.warn(`[BraveScraper] API request threw error for offset ${offset}`, e);
+                console.error(`[BraveScraper] API request threw error for offset ${offset}`, e);
+                throw e;
             }
         }
 
