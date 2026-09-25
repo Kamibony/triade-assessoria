@@ -59,7 +59,7 @@ jobs:
           echo "VERTEX_AI_SEARCH_LOCATION=${{ secrets.VERTEX_AI_SEARCH_LOCATION }}" >> functions/.env
           echo "VERTEX_AI_SEARCH_ENGINE_ID=${{ secrets.VERTEX_AI_SEARCH_ENGINE_ID }}" >> functions/.env
 
-      - name: Run Automated Scraper Dry-Run Tests
+      - name: Test Scrapers (Dry-Run)
         run: cd functions && npm run test:scrapers
         env:
           BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}

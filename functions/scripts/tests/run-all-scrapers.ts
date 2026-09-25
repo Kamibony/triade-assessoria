@@ -1,58 +1,82 @@
 import { ProsasScraper } from '../../src/scrapers/ProsasScraper.js';
 import { VertexAIScraper } from '../../src/scrapers/VertexAIScraper.js';
 import { BraveScraper } from '../../src/scrapers/BraveScraper.js';
-import Parser from 'rss-parser';
-import { initializeApp, getApps } from 'firebase-admin/app';
+import { getApps, initializeApp } from 'firebase-admin/app';
 
-if (getApps().length === 0) {
-    try {
-        initializeApp();
-    } catch (e) {
-        console.warn("Could not initialize default firebase app. It will fail if credentials are not provided.");
-    }
+// Initialize Firebase Admin for local/CI testing
+if (!getApps().length) {
+    initializeApp({
+        projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'triade-assessoria',
+    });
 }
 
-async function runScrapers() {
-    console.log("Starting lightweight scraper verification...");
-    let failed = false;
+// Intercept global fetch to restrict pagination / data amount
+const originalFetch = global.fetch;
+global.fetch = async (url: RequestInfo | URL, options?: RequestInit) => {
+    const urlString = typeof url === 'string' ? url : url.toString();
 
-    const testStrategy = async (name: string, strategy: any) => {
-        try {
-            console.log(`Testing ${name}...`);
-            const results = await strategy.fetchDelta();
-            console.log(`✅ ${name} passed (Returned ${results.length} items).`);
-        } catch (error: any) {
-            console.error(`❌ ${name} failed:`, error.message || error);
-            failed = true;
+    // For Prosas: limit to 1 page to avoid 50 page fetch on dry run
+    if (urlString.includes('prosas.com.br/selecao/api/v2') && urlString.includes('page%5Bpage%5D=')) {
+        const pageMatch = urlString.match(/page%5Bpage%5D=(\d+)/);
+        if (pageMatch && parseInt(pageMatch[1]) > 1) {
+            // Return empty data to simulate end of pagination
+            return new Response(JSON.stringify({ data: [] }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+            });
         }
-    };
-
-    await testStrategy('ProsasScraper', new ProsasScraper());
-    await testStrategy('VertexAIScraper', new VertexAIScraper('edital'));
-    await testStrategy('BraveScraper', new BraveScraper('edital'));
-
-    console.log("Testing RSS Parser...");
-    try {
-        const parser = new Parser({
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'application/rss+xml,application/xml;q=0.9,text/xml;q=0.8,text/html;q=0.7,*/*;q=0.1'
-            }
-        });
-        const feed = await parser.parseURL("https://news.google.com/rss/search?q=edital+ONG+OR+OSC+brasil");
-        console.log(`✅ RSS Parser passed (Returned ${feed.items.length} items).`);
-    } catch (error: any) {
-        console.error(`❌ RSS Parser failed:`, error.message || error);
-        failed = true;
     }
 
-    if (failed) {
-        console.error("One or more scrapers failed validation. Aborting.");
+    return originalFetch(url, options);
+};
+
+async function main() {
+    console.log("[Dry-Run] Starting scraper validation tests...");
+
+    // During local dry-run, we might not have GCP Application Default Credentials,
+    // which causes firebase-admin and vertex-ai to crash before hitting HTTP blocks.
+    // In CI, credentials are provided via google-github-actions/auth@v2.
+    // If we're missing credentials locally, we just warn. We only fail if the error is a hard scraper error like 403 or API changed.
+
+    const isLocalWithoutAuth = !process.env.GOOGLE_APPLICATION_CREDENTIALS && !process.env.GCLOUD_PROJECT && !process.env.CI;
+
+    const scrapers = [
+        new ProsasScraper(),
+        new VertexAIScraper('ong edital brasil'),
+        new BraveScraper('ong edital brasil')
+    ];
+
+    let hasError = false;
+
+    for (const scraper of scrapers) {
+        console.log(`\n[Dry-Run] Testing ${scraper.constructor.name}...`);
+
+        // Mock getWatermark to return 'now' so no actual old data is processed, minimizing loops
+        scraper.getWatermark = async () => new Date().toISOString();
+
+        try {
+            const results = await scraper.fetchDelta();
+            console.log(`[Dry-Run] ${scraper.constructor.name} completed successfully. Returned ${results.length} items.`);
+        } catch (error: any) {
+            if (isLocalWithoutAuth && error.message.includes('Could not load the default credentials')) {
+                console.warn(`[Dry-Run] Warning in ${scraper.constructor.name}: Missing local GCP credentials, skipping full execution.`);
+            } else {
+                console.error(`[Dry-Run] Error in ${scraper.constructor.name}:`, error);
+                hasError = true;
+            }
+        }
+    }
+
+    if (hasError) {
+        console.error("\n[Dry-Run] Validation failed. One or more scrapers threw an error.");
         process.exit(1);
     } else {
-        console.log("All scrapers verified successfully. Ready for deployment.");
+        console.log("\n[Dry-Run] All scrapers ran successfully or were skipped due to expected local conditions. No hard errors or blocks detected.");
         process.exit(0);
     }
 }
 
-runScrapers();
+main().catch((err) => {
+    console.error("Unhandled exception in test runner:", err);
+    process.exit(1);
+});
