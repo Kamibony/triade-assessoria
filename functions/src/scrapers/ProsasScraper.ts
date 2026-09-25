@@ -1,10 +1,39 @@
 import { IScraperStrategy } from './interfaces';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
 import * as crypto from 'crypto';
 import { logger } from 'firebase-functions/logger';
 
 export class ProsasScraper implements IScraperStrategy {
     public readonly stateDocId = 'prosas';
+    private readonly bucketName = 'triade-prosas-session-state';
+    private readonly sessionFileName = 'prosas_session.json';
+
+    private async getSessionCookies(): Promise<string> {
+        try {
+            const bucket = getStorage().bucket(this.bucketName);
+            const file = bucket.file(this.sessionFileName);
+            const [exists] = await file.exists();
+
+            if (!exists) {
+                const errorMsg = `[ProsasScraper] Session file ${this.sessionFileName} missing in bucket ${this.bucketName}.`;
+                logger.error(errorMsg);
+                throw new Error(errorMsg);
+            }
+
+            const [fileContent] = await file.download();
+            const cookiesArray = JSON.parse(fileContent.toString('utf-8'));
+
+            if (!Array.isArray(cookiesArray)) {
+                throw new Error("Parsed session is not an array");
+            }
+
+            return cookiesArray.map((c: any) => `${c.name}=${c.value}`).join('; ');
+        } catch (error) {
+            logger.error(`[ProsasScraper] Failed to retrieve or parse session cookies:`, error);
+            throw error;
+        }
+    }
 
     async getWatermark(): Promise<string | null> {
         const db = getFirestore();
@@ -23,6 +52,9 @@ export class ProsasScraper implements IScraperStrategy {
              watermarkDate = sevenDaysAgo;
         }
 
+        // Fetch authenticated session cookies once before the loop
+        const cookieString = await this.getSessionCookies();
+
         let page = 1;
         const allItems: any[] = [];
         const maxPages = 50;
@@ -33,7 +65,20 @@ export class ProsasScraper implements IScraperStrategy {
             const fetchUrl = `https://prosas.com.br/selecao/api/v2/third_party/oportunidades/inscricoes_abertas?include=area_interesses%2Cincentivador&page%5Bpage%5D=${page}&page%5Bsize%5D=20&&sort=`;
 
             try {
-                const response = await fetch(fetchUrl);
+                const response = await fetch(fetchUrl, {
+                    headers: {
+                        'Cookie': cookieString,
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'application/json, text/plain, */*'
+                    }
+                });
+
+                if (response.status === 403) {
+                    const errorMsg = `[ProsasScraper] 403 Forbidden: Authenticated session state is expired or invalid. (Page ${page})`;
+                    logger.error(errorMsg);
+                    throw new Error(errorMsg);
+                }
+
                 if (!response.ok) {
                     const errorMsg = `[ProsasScraper] API request failed for page ${page} with status: ${response.status}`;
                     console.error(errorMsg);
