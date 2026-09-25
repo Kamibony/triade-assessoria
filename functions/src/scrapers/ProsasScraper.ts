@@ -24,10 +24,9 @@ export class ProsasScraper implements IScraperStrategy {
 
         let page = 1;
         const allItems: any[] = [];
-        let shouldContinue = true;
         const maxPages = 50;
 
-        while (shouldContinue && page <= maxPages) {
+        while (page <= maxPages) {
             // Include 'created_at' in the API fields. This URL assumes API v2 structure from codebase
             const fetchUrl = `https://prosas.com.br/selecao/api/v2/third_party/oportunidades/inscricoes_abertas?include=area_interesses%2Cincentivador&page%5Bpage%5D=${page}&page%5Bsize%5D=20&&sort=`;
 
@@ -63,12 +62,12 @@ export class ProsasScraper implements IScraperStrategy {
 
                      if (itemDateString) {
                          const itemDate = new Date(itemDateString);
-                         if (itemDate <= watermarkDate) {
-                             shouldContinue = false; // We hit the watermark, stop paginating
-                             break; // Skip this and all older items on this page
+                         if (itemDate > watermarkDate) {
+                             allItems.push(item);
                          }
+                     } else {
+                         allItems.push(item);
                      }
-                     allItems.push(item);
                 }
                 page++;
 
