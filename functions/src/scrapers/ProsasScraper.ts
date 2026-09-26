@@ -1,37 +1,104 @@
 import { IScraperStrategy } from './interfaces';
 import { getFirestore } from 'firebase-admin/firestore';
-import { getStorage } from 'firebase-admin/storage';
 import * as crypto from 'crypto';
 import { logger } from 'firebase-functions/logger';
 
 export class ProsasScraper implements IScraperStrategy {
     public readonly stateDocId = 'prosas';
-    private readonly bucketName = 'triade-prosas-session-state';
-    private readonly sessionFileName = 'prosas_session.json';
 
-    private async getSessionCookies(): Promise<string> {
+
+private async authenticate(): Promise<string> {
+        const username = process.env.PROSAS_USERNAME;
+        const password = process.env.PROSAS_PASSWORD;
+
+        if (!username || !password) {
+            throw new Error("[ProsasScraper] PROSAS_USERNAME or PROSAS_PASSWORD environment variables are not set.");
+        }
+
         try {
-            const bucket = getStorage().bucket(this.bucketName);
-            const file = bucket.file(this.sessionFileName);
-            const [exists] = await file.exists();
+            logger.info("[ProsasScraper] Initiating authentication sequence...");
 
-            if (!exists) {
-                const errorMsg = `[ProsasScraper] Session file ${this.sessionFileName} missing in bucket ${this.bucketName}.`;
-                logger.error(errorMsg);
-                throw new Error(errorMsg);
+            // Step 1: GET request to grab CSRF token and initial session cookie
+            const getResponse = await fetch('https://prosas.com.br/users/sign_in', {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                }
+            });
+
+            if (!getResponse.ok) {
+                 throw new Error(`[ProsasScraper] Initial GET request failed with status: ${getResponse.status}`);
             }
 
-            const [fileContent] = await file.download();
-            const sessionData = JSON.parse(fileContent.toString('utf-8'));
-            const cookiesArray = sessionData.cookies;
-
-            if (!Array.isArray(cookiesArray)) {
-                throw new Error("Parsed session is missing a cookies array");
+            // Collect initial cookies
+            const initialSetCookie = getResponse.headers.get('set-cookie');
+            let initialCookies = '';
+            if (initialSetCookie) {
+                // Split multiple cookies, handling the fact they might be comma separated, though we just need the raw value parts
+                // Browsers usually take everything before the first ';' as the key=value
+                const cookies = String(initialSetCookie).split(/,(?=\s*[a-zA-Z0-9_-]+\s*=)/).map((c: string) => { const p = c.split(';'); return p[0] ? p[0].trim() : ''; });
+                initialCookies = cookies.join('; ');
             }
 
-            return cookiesArray.map((c: any) => `${c.name}=${c.value}`).join('; ');
+            const html = await getResponse.text();
+
+            // Extract authenticity_token using regex
+            const csrfMatch = html.match(/<meta name="csrf-token" content="([^"]+)"/);
+            const authenticityToken = csrfMatch ? csrfMatch[1] : null;
+
+            if (!authenticityToken) {
+                logger.warn("[ProsasScraper] Could not find CSRF token on login page, attempting to proceed without it...");
+            } else {
+                logger.info("[ProsasScraper] Successfully extracted CSRF token.");
+            }
+
+            const formData = new URLSearchParams();
+            if (authenticityToken) {
+                formData.append('authenticity_token', authenticityToken);
+            }
+            formData.append('user[email]', username);
+            formData.append('user[password]', password);
+            formData.append('commit', 'Entrar');
+
+            // Step 2: POST credentials with CSRF token and initial session cookie
+            logger.info("[ProsasScraper] Authenticating directly with Prosas API...");
+            const postResponse = await fetch('https://prosas.com.br/users/sign_in', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                    'Cookie': initialCookies,
+                    // Typically needed for rails CSRF protection on form submissions if not standard HTML navigation
+                    'X-CSRF-Token': authenticityToken || ''
+                },
+                redirect: 'manual', // Prevent automatic following to capture cookies from 302
+                body: formData.toString()
+            });
+
+            // Accept 200 or 302 as successful login indicators
+            if (postResponse.status !== 200 && postResponse.status !== 302 && postResponse.status !== 303) {
+                throw new Error(`[ProsasScraper] Authentication request failed with status: ${postResponse.status}`);
+            }
+
+            const setCookieHeader = postResponse.headers.get('set-cookie');
+            if (!setCookieHeader) {
+                throw new Error("[ProsasScraper] No set-cookie header received from authentication endpoint.");
+            }
+
+            // Properly parse Set-Cookie headers into a compliant Cookie string
+            // Fetch concatenates multiple Set-Cookie headers with a comma.
+            // Example: _proses_session=abc; path=/; HttpOnly, _prosesv2_session=''; Expires=...
+            // We split by comma (taking care not to split on commas inside date strings)
+            // A robust way without a library: split by /,(?=s*[a-zA-Z0-9_-]+s*=)/
+            const parsedCookies = String(setCookieHeader).split(/,(?=\s*[a-zA-Z0-9_-]+\s*=)/).map((cookieStr: string) => { const p = cookieStr.split(';'); return p[0] ? p[0].trim() : ''; });
+            const finalCookieString = parsedCookies.join('; ');
+
+            logger.info("[ProsasScraper] Authentication successful. Session token acquired in-memory.");
+
+            return finalCookieString;
         } catch (error) {
-            logger.error(`[ProsasScraper] Failed to retrieve or parse session cookies:`, error);
+            logger.error("[ProsasScraper] Native authentication failed:", error);
             throw error;
         }
     }
@@ -54,7 +121,7 @@ export class ProsasScraper implements IScraperStrategy {
         }
 
         // Fetch authenticated session cookies once before the loop
-        const cookieString = await this.getSessionCookies();
+        const cookieString = await this.authenticate();
 
         let page = 1;
         const allItems: any[] = [];
