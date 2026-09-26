@@ -4,6 +4,10 @@ import { BraveScraper } from '../../src/scrapers/BraveScraper.js';
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { GoogleAuth } from 'google-auth-library';
 
+// Inject mock environment variables for CI dry-run
+process.env.PROSAS_USERNAME = process.env.PROSAS_USERNAME || 'ci_dummy_user';
+process.env.PROSAS_PASSWORD = process.env.PROSAS_PASSWORD || 'ci_dummy_pass';
+
 // Initialize Firebase Admin for local/CI testing
 if (!getApps().length) {
     initializeApp({
