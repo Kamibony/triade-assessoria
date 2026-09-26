@@ -2,6 +2,7 @@ import { ProsasScraper } from '../../src/scrapers/ProsasScraper.js';
 import { VertexAIScraper } from '../../src/scrapers/VertexAIScraper.js';
 import { BraveScraper } from '../../src/scrapers/BraveScraper.js';
 import { getApps, initializeApp } from 'firebase-admin/app';
+import { GoogleAuth } from 'google-auth-library';
 
 // Initialize Firebase Admin for local/CI testing
 if (!getApps().length) {
@@ -10,25 +11,91 @@ if (!getApps().length) {
     });
 }
 
-// Intercept global fetch to restrict pagination / data amount
+// Intercept global fetch to restrict pagination / data amount and mock external APIs in CI
 const originalFetch = global.fetch;
 global.fetch = async (url: RequestInfo | URL, options?: RequestInit) => {
     const urlString = typeof url === 'string' ? url : url.toString();
 
-    // For Prosas: limit to 1 page to avoid 50 page fetch on dry run
-    if (urlString.includes('prosas.com.br/selecao/api/v2') && urlString.includes('page%5Bpage%5D=')) {
-        const pageMatch = urlString.match(/page%5Bpage%5D=(\d+)/);
-        if (pageMatch && parseInt(pageMatch[1]) > 1) {
-            // Return empty data to simulate end of pagination
-            return new Response(JSON.stringify({ data: [] }), {
+    if (process.env.CI) {
+        // Mock Prosas API response in CI to avoid WAF/IP blocks
+        if (urlString.includes('prosas.com.br/selecao/api/v2')) {
+            const pageMatch = urlString.match(/page%5Bpage%5D=(\d+)/);
+            if (pageMatch && parseInt(pageMatch[1]) > 1) {
+                return new Response(JSON.stringify({ data: [] }), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            }
+            return new Response(JSON.stringify({
+                data: [
+                    {
+                        id: 999999,
+                        attributes: {
+                            name: "Mock Edital Prosas CI",
+                            created_at: new Date(Date.now() + 10000).toISOString() // Ensure it's newer than watermark
+                        }
+                    }
+                ]
+            }), {
                 status: 200,
                 headers: { 'Content-Type': 'application/json' }
             });
+        }
+
+        // Mock Vertex AI API response in CI to avoid IAM 403s with GitHub Service Account
+        if (urlString.includes('discoveryengine.googleapis.com/v1/projects')) {
+            return new Response(JSON.stringify({
+                results: [
+                    {
+                        document: {
+                            derivedStructData: {
+                                link: "https://mock-vertex.com/edital",
+                                title: "Mock Edital Vertex CI",
+                                snippets: [{ snippet: "Mock Snippet" }],
+                                pagemap: {
+                                    metatags: [{
+                                        'article:published_time': new Date(Date.now() + 10000).toISOString()
+                                    }]
+                                }
+                            }
+                        }
+                    }
+                ]
+            }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+    } else {
+        // Local Dry-Run: Limit to 1 page to avoid 50 page fetch on dry run
+        if (urlString.includes('prosas.com.br/selecao/api/v2') && urlString.includes('page%5Bpage%5D=')) {
+            const pageMatch = urlString.match(/page%5Bpage%5D=(\d+)/);
+            if (pageMatch && parseInt(pageMatch[1]) > 1) {
+                // Return empty data to simulate end of pagination
+                return new Response(JSON.stringify({ data: [] }), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            }
         }
     }
 
     return originalFetch(url, options);
 };
+
+// Mock ProsasScraper session cookies in CI to avoid fetching from GCP Storage
+// Also mock GoogleAuth so VertexAIScraper doesn't need real credentials in CI dry-run
+if (process.env.CI) {
+    (ProsasScraper.prototype as any).getSessionCookies = async function() {
+        return "mock_cookie=123";
+    };
+
+    GoogleAuth.prototype.getClient = async function() {
+        return {
+            getAccessToken: async () => ({ token: "mock_ci_token" })
+        } as any;
+    };
+}
 
 async function main() {
     console.log("[Dry-Run] Starting scraper validation tests...");
