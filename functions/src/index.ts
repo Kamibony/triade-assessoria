@@ -22,6 +22,9 @@ import * as admin from 'firebase-admin';
 import { defineString, defineSecret } from 'firebase-functions/params';
 import { GoogleAuth } from 'google-auth-library';
 import { genkit } from 'genkit';
+
+const prosasUsernameSecret = defineSecret('PROSAS_USERNAME');
+const prosasPasswordSecret = defineSecret('PROSAS_PASSWORD');
 export function formatGenkitError(error: unknown, defaultMessage: string = "Erro interno desconhecido.") {
     let message = defaultMessage;
     if (error instanceof Error) {
@@ -4066,7 +4069,8 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
     retryConfig: { maxAttempts: 1, minBackoffSeconds: 30 },
     rateLimits: { maxConcurrentDispatches: 2 },
     timeoutSeconds: 1800,
-    memory: '4GiB'
+    memory: '4GiB',
+    secrets: [prosasUsernameSecret, prosasPasswordSecret]
 }, async (request) => {
     const { url, searchId } = request.data as { url: string, searchId?: string };
 
@@ -4796,8 +4800,8 @@ export const onSearchCreated = onDocumentCreated({ document: 'searches/{searchId
 
 async function renewProsasSessionInternal() {
     logger.info('[Prosas Session Internal] Starting session renewal...');
-    const username = process.env.PROSAS_USERNAME;
-    const password = process.env.PROSAS_PASSWORD;
+    const username = prosasUsernameSecret.value();
+    const password = prosasPasswordSecret.value();
 
     if (!username || !password) {
         logger.error('[Prosas Session Internal] Missing PROSAS_USERNAME or PROSAS_PASSWORD.');
@@ -4857,7 +4861,8 @@ async function renewProsasSessionInternal() {
 export const renewProsasSessionCron = onSchedule({
     schedule: '0 3 * * *',
     timeoutSeconds: 300,
-    memory: '2GiB'
+    memory: '2GiB',
+    secrets: [prosasUsernameSecret, prosasPasswordSecret]
 }, async (event) => {
     try {
         await renewProsasSessionInternal();
@@ -4942,7 +4947,8 @@ export const triggerGlobalIngestion = onCall({
 export const globalIngestionOrchestratorWorker = onDocumentCreated({
     document: 'ingestion_runs/{runId}',
     timeoutSeconds: 540,
-    memory: '2GiB'
+    memory: '2GiB',
+    secrets: [prosasUsernameSecret, prosasPasswordSecret]
 }, async (event) => {
     const snapshot = event.data;
     if (!snapshot) {
