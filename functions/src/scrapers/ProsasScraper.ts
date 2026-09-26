@@ -26,7 +26,13 @@ private async authenticate(): Promise<string> {
             const getResponse = await fetch('https://prosas.com.br/users/sign_in', {
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                    'Sec-Fetch-User': '?1',
+                    'Upgrade-Insecure-Requests': '1',
                 }
             });
 
@@ -46,20 +52,25 @@ private async authenticate(): Promise<string> {
 
             const html = await getResponse.text();
 
-            // Extract authenticity_token using regex
-            const csrfMatch = html.match(/<meta name="csrf-token" content="([^"]+)"/);
-            const authenticityToken = csrfMatch ? csrfMatch[1] : null;
+            // Extract authenticity_token using regex for both meta and input tags
+            const metaMatch1 = html.match(/<meta[^>]+name="csrf-token"[^>]+content="([^"]+)"/i);
+            const metaMatch2 = html.match(/<meta[^>]+content="([^"]+)"[^>]+name="csrf-token"/i);
+            const inputMatch1 = html.match(/<input[^>]+name="authenticity_token"[^>]+value="([^"]+)"/i);
+            const inputMatch2 = html.match(/<input[^>]+value="([^"]+)"[^>]+name="authenticity_token"/i);
+
+            const authenticityToken = (metaMatch1 && metaMatch1[1]) ||
+                                      (metaMatch2 && metaMatch2[1]) ||
+                                      (inputMatch1 && inputMatch1[1]) ||
+                                      (inputMatch2 && inputMatch2[1]);
 
             if (!authenticityToken) {
-                logger.warn("[ProsasScraper] Could not find CSRF token on login page, attempting to proceed without it...");
+                throw new Error("[ProsasScraper] Could not find CSRF token on login page. Aborting to prevent WAF block.");
             } else {
                 logger.info("[ProsasScraper] Successfully extracted CSRF token.");
             }
 
             const formData = new URLSearchParams();
-            if (authenticityToken) {
-                formData.append('authenticity_token', authenticityToken);
-            }
+            formData.append('authenticity_token', authenticityToken);
             formData.append('user[email]', username);
             formData.append('user[password]', password);
             formData.append('commit', 'Entrar');
@@ -71,10 +82,18 @@ private async authenticate(): Promise<string> {
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
                     'Cookie': initialCookies,
+                    'Origin': 'https://prosas.com.br',
+                    'Referer': 'https://prosas.com.br/users/sign_in',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'same-origin',
+                    'Sec-Fetch-User': '?1',
+                    'Upgrade-Insecure-Requests': '1',
                     // Typically needed for rails CSRF protection on form submissions if not standard HTML navigation
-                    'X-CSRF-Token': authenticityToken || ''
+                    'X-CSRF-Token': authenticityToken
                 },
                 redirect: 'manual', // Prevent automatic following to capture cookies from 302
                 body: formData.toString()
@@ -96,7 +115,19 @@ private async authenticate(): Promise<string> {
             // We split by comma (taking care not to split on commas inside date strings)
             // A robust way without a library: split by /,(?=s*[a-zA-Z0-9_-]+s*=)/
             const parsedCookies = String(setCookieHeader).split(/,(?=\s*[a-zA-Z0-9_-]+\s*=)/).map((cookieStr: string) => { const p = cookieStr.split(';'); return p[0] ? p[0].trim() : ''; });
-            const finalCookieString = parsedCookies.join('; ');
+
+            // Merge initial cookies with new session cookies
+            const cookieMap = new Map();
+            initialCookies.split(';').forEach(c => {
+                const parts = c.split('=');
+                if(parts[0]) cookieMap.set(parts[0].trim(), parts.slice(1).join('='));
+            });
+            parsedCookies.forEach(c => {
+                const parts = c.split('=');
+                if(parts[0]) cookieMap.set(parts[0].trim(), parts.slice(1).join('='));
+            });
+
+            const finalCookieString = Array.from(cookieMap.entries()).map(([k, v]) => `${k}=${v}`).join('; ');
 
             logger.info("[ProsasScraper] Authentication successful. Session token acquired in-memory.");
 
@@ -141,7 +172,12 @@ private async authenticate(): Promise<string> {
                     headers: {
                         'Cookie': cookieString,
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        'Accept': 'application/json, text/plain, */*'
+                        'Accept': 'application/json, text/plain, */*',
+                        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+                        'Sec-Fetch-Dest': 'empty',
+                        'Sec-Fetch-Mode': 'cors',
+                        'Sec-Fetch-Site': 'same-origin',
+                        'Referer': 'https://prosas.com.br/users/sign_in'
                     }
                 });
 

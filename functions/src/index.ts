@@ -115,7 +115,7 @@ const parsePdfToProfile = ai.defineFlow(
         }),
         outputSchema: ngoProfileSchema,
     },
-    async (input) => {
+    async (input: any) => {
         const prompt = `Você é um especialista em análise de documentos legais de ONGs no Brasil.
 Eu enviarei o Estatuto Social, Cartão CNPJ e/ou ATA de uma ONG.
 Extraia as informações necessárias e preencha o perfil da ONG (ngoProfileSchema) com precisão.
@@ -204,7 +204,7 @@ export const bureaucracyAgentFlow = ai.defineFlow(
         }),
         outputSchema: bureaucracySchema,
     },
-    async (input) => {
+    async (input: any) => {
         const currentDate = new Date().toISOString().split('T')[0];
         const prompt = `Você é um Agente de Burocracia estrito avaliando a elegibilidade de uma ONG para um Edital.
 Seu trabalho é APENAS olhar para restrições e regras rígidas. Você não avalia alinhamento de projeto, missão ou tema.
@@ -246,7 +246,7 @@ export const thematicAgentFlow = ai.defineFlow(
         }),
         outputSchema: matchSchema,
     },
-    async (input) => {
+    async (input: any) => {
         const prompt = `Você é um Analista de Alinhamento Temático e Semântico, atuando pela Tríade Assessoria.
 Esta ONG já passou pela triagem burocrática e é elegível em termos de localização, tempo e prazo.
 Sua tarefa agora é cruzar o perfil da ONG com as regras temáticas e o objetivo do Edital para determinar o grau de alinhamento (Match Score).
@@ -299,7 +299,7 @@ export const verificationAgentFlow = ai.defineFlow(
         }),
         outputSchema: verificationResultSchema,
     },
-    async (input) => {
+    async (input: any) => {
         const currentDate = new Date().toISOString().split('T')[0];
         const prompt = `Você é um auditor estrito atuando como "Advogado do Diabo". Sua tarefa é encontrar motivos para DESCLASSIFICAR esta ONG deste edital.
 Você deve analisar as regras presentes no texto completo do edital e compará-las com o perfil da ONG.
@@ -692,7 +692,7 @@ const selectEditalLinksFlow = ai.defineFlow(
             selectedLinks: z.array(z.string()).describe("Apenas os links que parecem apontar para detalhes de editais ou chamadas.")
         }),
     },
-    async (input) => {
+    async (input: any) => {
         const prompt = `Analise a seguinte lista de URLs.
 Identifique e retorne APENAS os links que são altamente prováveis de apontar para a página de detalhes de um edital (grant, chamada pública, financiamento, edital).
 Ignore links genéricos de navegação.
@@ -718,7 +718,7 @@ export const extractEditalRules = ai.defineFlow(
         }),
         outputSchema: editalSchema,
     },
-    async (input) => {
+    async (input: any) => {
         if (!input.text && !input.pdfBase64) {
             throw new Error("É necessário fornecer 'text' ou 'pdfBase64' do edital.");
         }
@@ -777,7 +777,7 @@ const triageEditalWebpage = ai.defineFlow(
         }),
         outputSchema: triageSchema,
     },
-    async (input) => {
+    async (input: any) => {
         let prompt = `Você é um assistente que filtra páginas web para encontrar editais reais de financiamento, grants ou chamadas públicas para ONGs no Brasil.
 Vou te passar o texto extraído de uma página web.
 Determine se o texto representa uma oportunidade real e ativa de financiamento.
@@ -1033,7 +1033,7 @@ const generateSearchQueries = ai.defineFlow(
             queries: z.array(z.string()).describe("Lista de queries de busca"),
         }),
     },
-    async (input) => {
+    async (input: any) => {
         const currentYear = new Date().getFullYear();
         const nextYear = currentYear + 1;
         const prompt = `Você é um agente especialista em captação de recursos para ONGs no Brasil.
@@ -3233,7 +3233,7 @@ const searchDatabaseTool = ai.defineTool(
             editais: z.array(editalSchema.extend({ editalId: z.string() })),
         })
     },
-    async (input) => {
+    async (input: any) => {
         const db = getFirestore();
 
         // Fetch up to 5 editais for context
@@ -3294,7 +3294,7 @@ const copilotFlow = ai.defineFlow(
         }),
         outputSchema: copilotResponseSchema,
     },
-    async (input) => {
+    async (input: any) => {
         const systemPrompt = `Você é um assistente de IA (Co-pilot) para a plataforma Tríade Assessoria.
 Sua tarefa é ajudar operadores a encontrar ONGs (OSCs) adequadas para Editais (Grants) com base no prompt natural do usuário.
 Você deve usar a ferramenta 'searchDatabaseTool' para buscar dados reais do banco de dados (ONGs e Editais disponíveis).
