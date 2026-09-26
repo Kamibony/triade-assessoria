@@ -6,7 +6,7 @@ const path = require('path');
 let allFunctions = [];
 try {
   const indexFileContent = fs.readFileSync(path.join(__dirname, '../src/index.ts'), 'utf8');
-  const exportRegex = /^export\s+(?:const|let|var)\s+([a-zA-Z0-9_]+)\s*=/gm;
+  const exportRegex = /^export\s+(?:const|let|var)\s+([a-zA-Z0-9_]+)\s*=\s*(?:onCall|onRequest|onTaskDispatched|onSchedule|onDocumentCreated|onDocumentUpdated|onDocumentWritten|onDocumentDeleted)\b/gm;
   let match;
   while ((match = exportRegex.exec(indexFileContent)) !== null) {
     allFunctions.push(match[1]);
