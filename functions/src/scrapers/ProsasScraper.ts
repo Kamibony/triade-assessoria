@@ -2,14 +2,18 @@ import { IScraperStrategy } from './interfaces';
 import { getFirestore } from 'firebase-admin/firestore';
 import * as crypto from 'crypto';
 import { logger } from 'firebase-functions/logger';
+import { defineString } from 'firebase-functions/params';
+
+const prosasUsername = defineString('PROSAS_USERNAME');
+const prosasPassword = defineString('PROSAS_PASSWORD');
 
 export class ProsasScraper implements IScraperStrategy {
     public readonly stateDocId = 'prosas';
 
 
 private async authenticate(): Promise<string> {
-        const username = process.env.PROSAS_USERNAME;
-        const password = process.env.PROSAS_PASSWORD;
+        const username = prosasUsername.value();
+        const password = prosasPassword.value();
 
         if (!username || !password) {
             throw new Error("[ProsasScraper] PROSAS_USERNAME or PROSAS_PASSWORD environment variables are not set.");
