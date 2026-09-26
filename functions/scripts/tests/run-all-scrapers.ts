@@ -22,6 +22,13 @@ global.fetch = async (url: RequestInfo | URL, options?: RequestInit) => {
 
     if (process.env.CI) {
         // Mock Prosas API response in CI to avoid WAF/IP blocks
+        if (urlString.includes('prosas.com.br/users/sign_in')) {
+            return new Response('<meta name="csrf-token" content="mock-token-ci-123" />', {
+                status: 200,
+                headers: { 'Content-Type': 'text/html', 'Set-Cookie': '_proses_session_all_domain=mock-session-ci;' }
+            });
+        }
+
         if (urlString.includes('prosas.com.br/selecao/api/v2')) {
             const pageMatch = urlString.match(/page%5Bpage%5D=(\d+)/);
             if (pageMatch && parseInt(pageMatch[1]) > 1) {
