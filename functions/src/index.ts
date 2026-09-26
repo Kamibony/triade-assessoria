@@ -4081,199 +4081,166 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
 
     logger.info(`[Prosas Auth Worker] Starting processing for URL: ${url}`);
 
+    const username = prosasUsernameSecret.value();
+    const password = prosasPasswordSecret.value();
+
+    if (!username || !password) {
+        logger.error("[Prosas Auth Worker] Missing PROSAS_USERNAME or PROSAS_PASSWORD.");
+        return;
+    }
+
+    chromium.use(stealth());
+    let combinedText = '';
+    const downloadedPdfPaths: string[] = [];
+
+    let browser: any;
+    let context: any;
+
     try {
-        // 1. Fetch Session State from GCS
-        const storage = getStorage();
-        const sessionBucketName = 'triade-prosas-session-state';
-        const sessionFileName = 'prosas_session.json';
-        const sessionFilePath = `/tmp/${sessionFileName}`;
+        browser = await chromium.launch({
+            args: chromiumSparticuz.args,
+            executablePath: await chromiumSparticuz.executablePath(),
+            headless: true,
+        });
+        context = await browser.newContext();
+        const page = await context.newPage();
 
-        logger.info(`[Prosas Auth Worker] Downloading session state from gs://${sessionBucketName}/${sessionFileName}`);
-        await storage.bucket(sessionBucketName).file(sessionFileName).download({ destination: sessionFilePath });
-        logger.info(`[Prosas Auth Worker] Session state downloaded to ${sessionFilePath}`);
+        logger.info('[Prosas Auth Worker] Navigating to login page...');
+        await page.goto('https://prosas.com.br/users/sign_in', { waitUntil: 'networkidle', timeout: 60000 });
 
-        // 1.5 Session Health Check
-        try {
-            const sessionDataRaw = fs.readFileSync(sessionFilePath, 'utf8');
-            const sessionData = JSON.parse(sessionDataRaw);
-            if (!sessionData.cookies || sessionData.cookies.length === 0) {
-                logger.warn('[Prosas Auth Worker] Downloaded session appears invalid (no cookies). Triggering inline renewal...');
-                await renewProsasSessionInternal();
-                await storage.bucket(sessionBucketName).file(sessionFileName).download({ destination: sessionFilePath });
-            }
-        } catch (e) {
-            logger.warn('[Prosas Auth Worker] Failed to read or parse session state. Triggering inline renewal...', e);
-            await renewProsasSessionInternal();
-            await storage.bucket(sessionBucketName).file(sessionFileName).download({ destination: sessionFilePath });
+        logger.info('[Prosas Auth Worker] Filling credentials...');
+        await page.locator('#user_email').last().waitFor({ state: 'visible', timeout: 30000 });
+        await page.locator('#user_email').last().fill(username);
+        await page.locator('#user_password').last().fill(password);
+
+        logger.info('[Prosas Auth Worker] Submitting form...');
+        await page.locator('input[type="submit"][name="commit"]').last().click();
+
+        await page.waitForLoadState('networkidle');
+        await page.waitForTimeout(5000);
+
+        if (page.url().includes('/users/sign_in')) {
+            throw new Error('[Prosas Auth Worker] Failed to navigate past login page. Authentication likely failed.');
         }
 
-        // 2. Playwright Scraping
-        chromium.use(stealth());
-        let combinedText = '';
-        const downloadedPdfPaths: string[] = [];
+        logger.info(`[Prosas Auth Worker] Navigating to target URL: ${url}...`);
+        await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
 
-        let browser: any;
-        let context: any;
+        await page.waitForTimeout(5000);
 
-        try {
-            browser = await chromium.launch({
-                args: chromiumSparticuz.args,
-                executablePath: await chromiumSparticuz.executablePath(),
-                headless: true,
-            });
-            context = await browser.newContext({ storageState: sessionFilePath });
-            const page = await context.newPage();
+        const currentUrl = page.url();
+        if (currentUrl.includes('/users/sign_in')) {
+            throw new Error('Prosas session expired or target URL requires different access.');
+        }
 
-            logger.info(`[Prosas Auth Worker] Navigating to ${url}...`);
-            await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
+        // Extract the main content text
+        const pageText = await page.evaluate(() => {
+            return document.body.innerText;
+        });
+        combinedText = pageText;
 
-            // Wait an additional moment for dynamic content
-            await page.waitForTimeout(5000);
+        const rawLinks = await page.evaluate(() => {
+            return Array.from(document.querySelectorAll('a')).map((a: HTMLAnchorElement) => ({ href: a.href, text: a.innerText }));
+        });
 
-            // Check for session expiration
-            const currentUrl = page.url();
-            if (currentUrl.includes('/users/sign_in')) {
-                logger.warn(`[Prosas Auth Worker] Session expired in-flight. Redirected to ${currentUrl}. Triggering inline renewal and throwing retryable error.`);
-                await renewProsasSessionInternal();
-                throw new Error('Prosas session expired. Need to renew session.');
-            }
-
-            // Extract the main content text
-            const pageText = await page.evaluate(() => {
-                return document.body.innerText;
-            });
-            combinedText = pageText;
-
-            logger.info(`[Prosas Auth Worker] Extracted ${combinedText.length} characters of text from page.`);
-
-            // 3. PDF link discovery and upload
-            const pdfLinks = await page.evaluate(() => {
-                const links = Array.from(document.querySelectorAll('a'));
-                return links
-                    .map(a => a.href)
-                    .filter(href => href.toLowerCase().endsWith('.pdf'));
-            });
-
-            if (pdfLinks.length > 0) {
-                logger.info(`[Prosas Auth Worker] Found ${pdfLinks.length} PDF links.`);
-                const storage = getStorage();
-                const bucket = storage.bucket(); // Default bucket
-
-                for (const pdfUrl of pdfLinks) {
-                    try {
-                        logger.info(`[Prosas Auth Worker] Processing PDF: ${pdfUrl}`);
-
-                        // Use page to navigate to PDF and save it. Wait for download event.
-                        // However, directly downloading via fetch might be easier since we have the URL and the session.
-                        // Or we can use page.request for authenticated fetch.
-                        const response = await page.request.get(pdfUrl);
-                        if (!response.ok()) {
-                            logger.error(`[Prosas Auth Worker] Failed to fetch PDF ${pdfUrl}, status: ${response.status()}`);
-                            continue;
-                        }
-
-                        const buffer = await response.body();
-                        const fileName = `prosas_pdfs/${Date.now()}_${path.basename(new URL(pdfUrl).pathname)}`;
-                        const file = bucket.file(fileName);
-
-                        await file.save(buffer, {
-                            metadata: { contentType: 'application/pdf' }
-                        });
-                        await file.makePublic();
-
-                        const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
-                        downloadedPdfPaths.push(publicUrl);
-                        logger.info(`[Prosas Auth Worker] Uploaded PDF to ${publicUrl}`);
-
-                        let parsedText = '';
-                        try {
-                            const uint8Array = new Uint8Array(buffer);
-                            const parser = new (PDFParse as any)(uint8Array, { max: 5 });
-                            const pdfData = await parser.getText();
-                            parsedText = pdfData.text;
-                        } catch (parseErr) {
-                            logger.error(`[Prosas Auth Worker] Error parsing PDF text for ${pdfUrl}:`, parseErr);
-                        }
-
-                        combinedText += `\n[Anexo PDF: ${publicUrl}]\nConteúdo Extraído (Max 5 pags): ${parsedText.substring(0, 10000)}`;
-
-                    } catch (pdfErr) {
-                        logger.error(`[Prosas Auth Worker] Error processing PDF ${pdfUrl}:`, pdfErr);
+        for (const link of rawLinks) {
+            const lowerHref = link.href.toLowerCase();
+            if (lowerHref.endsWith('.pdf')) {
+                logger.info(`[Prosas Auth Worker] Found PDF link: ${link.href}`);
+                try {
+                    const response = await page.goto(link.href, { waitUntil: 'networkidle', timeout: 30000 });
+                    if (response && response.status() === 200) {
+                         const buffer = await response.body();
+                         const tempPdfPath = `/tmp/prosas_pdf_${Date.now()}.pdf`;
+                         fs.writeFileSync(tempPdfPath, buffer);
+                         downloadedPdfPaths.push(tempPdfPath);
                     }
+                } catch (pdfErr) {
+                     logger.warn(`[Prosas Auth Worker] Failed to download PDF ${link.href}`, pdfErr);
                 }
-            } else {
-                logger.info(`[Prosas Auth Worker] No PDF links found on page.`);
-            }
-
-            // 4. Push to Claim Check (Lake of Editais)
-            await enqueueEditalExtraction(url, combinedText, "Authenticated Prosas Scraping", searchId, "PROSAS_AUTH");
-            logger.info(`[Prosas Auth Worker] Enqueued extraction for ${url}`);
-
-        } finally {
-            if (context) {
-                await context.close();
-            }
-            if (browser) {
-                await browser.close();
-            }
-            // Clean up session file
-            if (fs.existsSync(sessionFilePath)) {
-                fs.unlinkSync(sessionFilePath);
             }
         }
 
-    } catch (error) {
-        logger.error(`[Prosas Auth Worker] Fatal error processing ${url}`, error);
+        logger.info(`[Prosas Auth Worker] Extracted ${combinedText.length} characters and ${downloadedPdfPaths.length} PDFs.`);
+
+        // Read PDFs locally
+        for (const pdfPath of downloadedPdfPaths) {
+            logger.info(`[Prosas Auth Worker] Parsing PDF: ${pdfPath}`);
+            try {
+                const pdfBuffer = fs.readFileSync(pdfPath);
+                // Convert to Uint8Array for pdf-parse if necessary or use directly
+                const uint8Array = new Uint8Array(pdfBuffer);
+                // Keep the max page limit!
+                const pdfData = await new (PDFParse as any)(uint8Array, { max: 5 });
+                logger.info(`[Prosas Auth Worker] Extracted ${pdfData.text.length} characters from ${pdfPath}`);
+                combinedText += `\n\n--- START OF PDF CONTEXT ---\n${pdfData.text}\n--- END OF PDF CONTEXT ---\n\n`;
+            } catch (e) {
+                logger.error(`[Prosas Auth Worker] Failed to read/parse PDF ${pdfPath}`, e);
+            } finally {
+                if (fs.existsSync(pdfPath)) {
+                    fs.unlinkSync(pdfPath);
+                }
+            }
+        }
+
+        const searchIdVal = searchId || `PROSAS_${Date.now()}`;
+
+        if (combinedText.length < 200) {
+             logger.warn(`[Prosas Auth Worker] Scraped content for ${url} is too short (${combinedText.length} chars). Saving as failure.`);
+             const db = getFirestore();
+             const docId = `prosas_err_${require('crypto').createHash('md5').update(url).digest('hex')}`;
+             await db.collection('failed_ingestions').doc(docId).set({
+                 url: url,
+                 reason: `Text too short: ${combinedText.length} chars`,
+                 timestamp: FieldValue.serverTimestamp(),
+                 searchId: searchIdVal,
+                 strategy: 'PROSAS'
+             });
+             return;
+        }
 
         const db = getFirestore();
-        // Use a base64 encoded URL or a safe hash as document ID, but querying is simpler.
-        // We'll use a hash or just URL string if it's short, but Firestore doc IDs can't contain slashes.
-        // Safer to just query for the document to update it.
-        const failuresRef = db.collection('failed_ingestions');
-        const querySnapshot = await failuresRef.where('url', '==', url).limit(1).get();
+        const contentRef = db.collection('raw_extracted_contents').doc();
+        await contentRef.set({
+             url,
+             sourceContext: searchIdVal,
+             textContent: combinedText,
+             extractedAt: FieldValue.serverTimestamp()
+        });
 
-        const retryCount = (request as any).retryCount || 0;
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        logger.info(`[Prosas Auth Worker] Content saved to raw_extracted_contents/${contentRef.id}`);
 
-        if (errorMessage === 'Prosas session expired. Need to renew session.') {
-             logger.warn(`[Prosas Auth Worker] Handling session expiry. Skipping permanent circuit breaker.`);
-             // Throw error so it can be retried eventually (possibly after cron runs again), but avoid permanent block
-             throw error;
-        }
+        const extractionQueue = getFunctions().taskQueue('locations/us-central1/functions/extractionWorker');
+        await extractionQueue.enqueue({
+            searchId: searchIdVal,
+            link: url,
+            contentId: contentRef.id,
+            reason: 'Prosas Authenticated Direct Extraction',
+            discoverySource: 'PROSAS_WEBHOOK'
+        });
 
-        if (retryCount >= 2) {
-            logger.error(`[Prosas Auth Worker] Circuit Breaker triggered for ${url} after ${retryCount + 1} attempts.`);
-            if (querySnapshot.empty) {
-                await failuresRef.add({
-                    url: url,
-                    reason: errorMessage,
-                    failedAt: FieldValue.serverTimestamp(),
-                    isPermanent: true
-                });
-            } else {
-                await querySnapshot.docs[0]!.ref.update({
-                    failedAt: FieldValue.serverTimestamp(),
-                    isPermanent: true,
-                    reason: errorMessage
-                });
-            }
-            // Don't throw to stop retrying
-        } else {
-            if (querySnapshot.empty) {
-                await failuresRef.add({
-                    url: url,
-                    attempts: retryCount + 1,
-                    lastFailedAt: FieldValue.serverTimestamp(),
-                    isPermanent: false
-                });
-            } else {
-                await querySnapshot.docs[0]!.ref.update({
-                    attempts: retryCount + 1,
-                    lastFailedAt: FieldValue.serverTimestamp()
-                });
-            }
-            throw error;
-        }
+        logger.info(`[Prosas Auth Worker] Successfully enqueued for extraction: ${url}`);
+
+    } catch (error: any) {
+        logger.error(`[Prosas Auth Worker] Execution failed for ${url}`, error);
+
+        const searchIdVal = searchId || `PROSAS_${Date.now()}`;
+        const db = getFirestore();
+        const docId = `prosas_err_${require('crypto').createHash('md5').update(url).digest('hex')}`;
+
+        await db.collection('failed_ingestions').doc(docId).set({
+            url: url,
+            reason: `Unhandled Exception: ${error.message}`,
+            timestamp: FieldValue.serverTimestamp(),
+            searchId: searchIdVal,
+            strategy: 'PROSAS'
+        });
+
+        throw error;
+    } finally {
+        if (context) await context.close();
+        if (browser) await browser.close();
+        logger.info("[Prosas Auth Worker] Browser and context closed safely.");
     }
 });
 
@@ -4798,80 +4765,6 @@ export const onSearchCreated = onDocumentCreated({ document: 'searches/{searchId
 });
 
 
-async function renewProsasSessionInternal() {
-    logger.info('[Prosas Session Internal] Starting session renewal...');
-    const username = prosasUsernameSecret.value();
-    const password = prosasPasswordSecret.value();
-
-    if (!username || !password) {
-        logger.error('[Prosas Session Internal] Missing PROSAS_USERNAME or PROSAS_PASSWORD.');
-        throw new Error('Missing PROSAS_USERNAME or PROSAS_PASSWORD.');
-    }
-
-    chromium.use(stealth());
-    const browser = await chromium.launch({
-        args: chromiumSparticuz.args,
-        executablePath: await chromiumSparticuz.executablePath(),
-        headless: true,
-    });
-
-    try {
-        const context = await browser.newContext();
-        const page = await context.newPage();
-
-        logger.info('[Prosas Session Internal] Navigating to login page...');
-        await page.goto('https://prosas.com.br/users/sign_in', { waitUntil: 'networkidle' });
-
-        logger.info('[Prosas Session Internal] Filling credentials...');
-        await page.locator('#user_email').last().waitFor({ state: 'visible', timeout: 30000 });
-        await page.locator('#user_email').last().fill(username);
-        await page.locator('#user_password').last().fill(password);
-
-        logger.info('[Prosas Session Internal] Submitting form...');
-        await page.locator('input[type="submit"][name="commit"]').last().click();
-
-        await page.waitForLoadState('networkidle');
-        await page.waitForTimeout(5000);
-
-        const outputFile = '/tmp/prosas_session.json';
-        await context.storageState({ path: outputFile });
-
-        logger.info('[Prosas Session Internal] Session extracted. Uploading to GCS...');
-
-        const storage = getStorage();
-        const bucket = storage.bucket('triade-prosas-session-state');
-        await bucket.upload(outputFile, {
-            destination: 'prosas_session.json',
-            metadata: { contentType: 'application/json' }
-        });
-
-        logger.info('[Prosas Session Internal] Successfully uploaded session state to GCS.');
-
-        if (fs.existsSync(outputFile)) {
-            fs.unlinkSync(outputFile);
-        }
-    } catch (error) {
-        logger.error('[Prosas Session Internal] Failed to renew session:', error);
-        throw error;
-    } finally {
-        await browser.close();
-    }
-}
-
-export const renewProsasSessionCron = onSchedule({
-    schedule: '0 3 * * *',
-    timeoutSeconds: 300,
-    memory: '2GiB',
-    secrets: [prosasUsernameSecret, prosasPasswordSecret]
-}, async (event) => {
-    try {
-        await renewProsasSessionInternal();
-    } catch (error) {
-        logger.error('[Prosas Session Cron] Cron execution failed:', error);
-    }
-});
-
-
 export const scheduledGlobalIngestionTrigger = onSchedule({
     schedule: '0 2 * * *',
     memory: '512MiB'
@@ -4947,7 +4840,7 @@ export const triggerGlobalIngestion = onCall({
 export const globalIngestionOrchestratorWorker = onDocumentCreated({
     document: 'ingestion_runs/{runId}',
     timeoutSeconds: 540,
-    memory: '2GiB',
+    memory: '4GiB',
     secrets: [prosasUsernameSecret, prosasPasswordSecret]
 }, async (event) => {
     const snapshot = event.data;

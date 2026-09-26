@@ -96,10 +96,23 @@ global.fetch = async (url: RequestInfo | URL, options?: RequestInit) => {
 
 // Mock ProsasScraper session cookies in CI to avoid fetching from GCP Storage
 // Also mock GoogleAuth so VertexAIScraper doesn't need real credentials in CI dry-run
+
+// Mock fetchDelta entirely for ProsasScraper in CI since it uses Playwright which requires browser binaries
 if (process.env.CI) {
-    (ProsasScraper.prototype as any).getSessionCookies = async function() {
-        return "mock_cookie=123";
+    (ProsasScraper.prototype as any).fetchDelta = async function() {
+        return [
+            {
+                id: 999999,
+                attributes: {
+                    name: "Mock Edital Prosas CI via Playwright Bypass",
+                    created_at: new Date(Date.now() + 10000).toISOString()
+                }
+            }
+        ];
     };
+}
+
+if (process.env.CI) {
 
     GoogleAuth.prototype.getClient = async function() {
         return {
