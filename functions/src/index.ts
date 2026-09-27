@@ -427,7 +427,7 @@ export const verifyMatchConstraints = onCall({
         });
 
         // Check if there are any explicit rejections
-        const hasRejections = verificationResult.some(r => r.status === 'Reprovado');
+        const hasRejections = verificationResult.some((r: any) => r.status === 'Reprovado');
 
         // Update the match document with the result
         const updatePayload: any = {
@@ -522,7 +522,7 @@ export const verifyMatchConstraintWorker = onTaskDispatched({
                  editalText: rawText
             });
 
-            const hasRejections = verificationResult.some(r => r.status === 'Reprovado');
+            const hasRejections = verificationResult.some((r: any) => r.status === 'Reprovado');
 
             const updatePayload: any = {
                  verificationResult: verificationResult,
@@ -2440,7 +2440,7 @@ export const ingestOscDataFunction = onCall({
 async function routeEditalUrl(url: string, sourceContext: string, searchId?: string, options?: { searchQuery?: string | undefined }, discoverySource?: string): Promise<{ success: boolean, message: string, outcome: 'PROSAS' | 'HEURISTIC_REJECT' | 'AI_REJECT' | 'AI_APPROVE' | 'ERROR' }> {
     if (url.toLowerCase().includes('prosas.com.br')) {
         logger.info(`[Smart Router] Routing Prosas link to authenticated worker: ${url}`);
-        await getFunctions().taskQueue('locations/us-central1/functions/prosasAuthenticatedWorker').enqueue({ url, searchId: searchId || sourceContext });
+        await getFunctions().taskQueue('locations/us-central1/functions/prosasAuthenticatedWorker').enqueue({ urls: [url], searchId: searchId || sourceContext });
         return { success: true, message: "Edital encaminhado para o raspador autenticado (Prosas).", outcome: 'PROSAS' };
     }
 
@@ -4072,14 +4072,16 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
     memory: '4GiB',
     secrets: [prosasUsernameSecret, prosasPasswordSecret]
 }, async (request) => {
-    const { url, searchId } = request.data as { url: string, searchId?: string };
+    const { url, urls, searchId } = request.data as { url?: string, urls?: string[], searchId?: string };
 
-    if (!url) {
-        logger.error("Invalid task payload: missing url.");
+    const targetUrls = urls || (url ? [url] : []);
+
+    if (targetUrls.length === 0) {
+        logger.error("Invalid task payload: missing urls.");
         return;
     }
 
-    logger.info(`[Prosas Auth Worker] Starting processing for URL: ${url}`);
+    logger.info(`[Prosas Auth Worker] Starting processing for batch of ${targetUrls.length} URLs.`);
 
     const username = prosasUsernameSecret.value();
     const password = prosasPasswordSecret.value();
@@ -4097,145 +4099,193 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
     let context: any;
 
     try {
+        const bucket = getStorage().bucket();
+        const sessionFile = bucket.file('system/prosas_session.json');
+
+        let sessionState = null;
+        try {
+            const [exists] = await sessionFile.exists();
+            if (exists) {
+                const [content] = await sessionFile.download();
+                sessionState = JSON.parse(content.toString('utf-8'));
+                logger.info('[Prosas Auth Worker] Loaded existing session from GCS.');
+            }
+        } catch (e) {
+            logger.warn('[Prosas Auth Worker] Failed to load session from GCS. Will login freshly.', e);
+        }
+
         browser = await chromium.launch({
             args: chromiumSparticuz.args,
             executablePath: await chromiumSparticuz.executablePath(),
             headless: true,
         });
-        context = await browser.newContext();
+
+        if (sessionState) {
+            context = await browser.newContext({ storageState: sessionState });
+        } else {
+            context = await browser.newContext();
+        }
+
         const page = await context.newPage();
 
-        logger.info('[Prosas Auth Worker] Navigating to login page...');
-        await page.goto('https://prosas.com.br/users/sign_in', { waitUntil: 'networkidle', timeout: 60000 });
+        // Verify session by visiting a dashboard/profile page
+        logger.info('[Prosas Auth Worker] Verifying session state...');
+        await page.goto('https://prosas.com.br/painel', { waitUntil: 'networkidle', timeout: 60000 });
 
-        logger.info('[Prosas Auth Worker] Filling credentials...');
-        await page.locator('#user_email').last().waitFor({ state: 'visible', timeout: 30000 });
-        await page.locator('#user_email').last().fill(username);
-        await page.locator('#user_password').last().fill(password);
-
-        logger.info('[Prosas Auth Worker] Submitting form...');
-        await page.locator('input[type="submit"][name="commit"]').last().click();
-
-        await page.waitForLoadState('networkidle');
-        await page.waitForTimeout(5000);
-
+        let needsLogin = false;
         if (page.url().includes('/users/sign_in')) {
-            throw new Error('[Prosas Auth Worker] Failed to navigate past login page. Authentication likely failed.');
+             logger.info('[Prosas Auth Worker] Session invalid or missing. Proceeding with fresh login...');
+             needsLogin = true;
         }
 
-        logger.info(`[Prosas Auth Worker] Navigating to target URL: ${url}...`);
-        await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
+        if (needsLogin) {
+            logger.info('[Prosas Auth Worker] Filling credentials...');
+            await page.locator('#user_email').last().waitFor({ state: 'visible', timeout: 30000 });
+            await page.locator('#user_email').last().fill(username);
+            await page.locator('#user_password').last().fill(password);
 
-        await page.waitForTimeout(5000);
+            logger.info('[Prosas Auth Worker] Submitting form...');
+            await page.locator('input[type="submit"][name="commit"]').last().click();
 
-        const currentUrl = page.url();
-        if (currentUrl.includes('/users/sign_in')) {
-            throw new Error('Prosas session expired or target URL requires different access.');
-        }
+            await page.waitForLoadState('networkidle');
+            await page.waitForTimeout(5000);
 
-        // Extract the main content text
-        const pageText = await page.evaluate(() => {
-            return document.body.innerText;
-        });
-        combinedText = pageText;
-
-        const rawLinks = await page.evaluate(() => {
-            return Array.from(document.querySelectorAll('a')).map((a: HTMLAnchorElement) => ({ href: a.href, text: a.innerText }));
-        });
-
-        for (const link of rawLinks) {
-            const lowerHref = link.href.toLowerCase();
-            if (lowerHref.endsWith('.pdf')) {
-                logger.info(`[Prosas Auth Worker] Found PDF link: ${link.href}`);
-                try {
-                    const response = await page.goto(link.href, { waitUntil: 'networkidle', timeout: 30000 });
-                    if (response && response.status() === 200) {
-                         const buffer = await response.body();
-                         const tempPdfPath = `/tmp/prosas_pdf_${Date.now()}.pdf`;
-                         fs.writeFileSync(tempPdfPath, buffer);
-                         downloadedPdfPaths.push(tempPdfPath);
-                    }
-                } catch (pdfErr) {
-                     logger.warn(`[Prosas Auth Worker] Failed to download PDF ${link.href}`, pdfErr);
-                }
+            if (page.url().includes('/users/sign_in')) {
+                throw new Error('[Prosas Auth Worker] Failed to navigate past login page. Authentication likely failed.');
             }
-        }
 
-        logger.info(`[Prosas Auth Worker] Extracted ${combinedText.length} characters and ${downloadedPdfPaths.length} PDFs.`);
-
-        // Read PDFs locally
-        for (const pdfPath of downloadedPdfPaths) {
-            logger.info(`[Prosas Auth Worker] Parsing PDF: ${pdfPath}`);
-            try {
-                const pdfBuffer = fs.readFileSync(pdfPath);
-                // Convert to Uint8Array for pdf-parse if necessary or use directly
-                const uint8Array = new Uint8Array(pdfBuffer);
-                // Keep the max page limit!
-                const pdfData = await new (PDFParse as any)(uint8Array, { max: 5 });
-                logger.info(`[Prosas Auth Worker] Extracted ${pdfData.text.length} characters from ${pdfPath}`);
-                combinedText += `\n\n--- START OF PDF CONTEXT ---\n${pdfData.text}\n--- END OF PDF CONTEXT ---\n\n`;
-            } catch (e) {
-                logger.error(`[Prosas Auth Worker] Failed to read/parse PDF ${pdfPath}`, e);
-            } finally {
-                if (fs.existsSync(pdfPath)) {
-                    fs.unlinkSync(pdfPath);
-                }
-            }
+            // Save fresh session state
+            const newSessionState = await context.storageState();
+            await sessionFile.save(JSON.stringify(newSessionState), { contentType: 'application/json' });
+            logger.info('[Prosas Auth Worker] Fresh session state saved to GCS.');
+        } else {
+            logger.info('[Prosas Auth Worker] Session is valid.');
         }
 
         const searchIdVal = searchId || `PROSAS_${Date.now()}`;
-
-        if (combinedText.length < 200) {
-             logger.warn(`[Prosas Auth Worker] Scraped content for ${url} is too short (${combinedText.length} chars). Saving as failure.`);
-             const db = getFirestore();
-             const docId = `prosas_err_${require('crypto').createHash('md5').update(url).digest('hex')}`;
-             await db.collection('failed_ingestions').doc(docId).set({
-                 url: url,
-                 reason: `Text too short: ${combinedText.length} chars`,
-                 timestamp: FieldValue.serverTimestamp(),
-                 searchId: searchIdVal,
-                 strategy: 'PROSAS'
-             });
-             return;
-        }
-
         const db = getFirestore();
-        const contentRef = db.collection('raw_extracted_contents').doc();
-        await contentRef.set({
-             url,
-             sourceContext: searchIdVal,
-             textContent: combinedText,
-             extractedAt: FieldValue.serverTimestamp()
-        });
-
-        logger.info(`[Prosas Auth Worker] Content saved to raw_extracted_contents/${contentRef.id}`);
-
         const extractionQueue = getFunctions().taskQueue('locations/us-central1/functions/extractionWorker');
-        await extractionQueue.enqueue({
-            searchId: searchIdVal,
-            link: url,
-            contentId: contentRef.id,
-            reason: 'Prosas Authenticated Direct Extraction',
-            discoverySource: 'PROSAS_WEBHOOK'
-        });
 
-        logger.info(`[Prosas Auth Worker] Successfully enqueued for extraction: ${url}`);
+        // Iterate through batched URLs
+        for (let i = 0; i < targetUrls.length; i++) {
+            const targetUrl = targetUrls[i];
+            logger.info(`[Prosas Auth Worker] [${i+1}/${targetUrls.length}] Navigating to target URL: ${targetUrl}...`);
+
+            let combinedText = '';
+            const downloadedPdfPaths: string[] = [];
+
+            try {
+                // Human-like delay between page visits
+                if (i > 0) {
+                    const delay = Math.floor(Math.random() * 2000) + 2000; // 2-4 seconds
+                    await page.waitForTimeout(delay);
+                }
+
+                await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 60000 });
+                await page.waitForTimeout(3000); // Allow JS to settle
+
+                const currentUrl = page.url();
+                if (currentUrl.includes('/users/sign_in')) {
+                    throw new Error('Prosas session expired during batch iteration or target URL requires different access.');
+                }
+
+                // Extract the main content text
+                const pageText = await page.evaluate(() => {
+                    return document.body.innerText;
+                });
+                combinedText = pageText;
+
+                const rawLinks = await page.evaluate(() => {
+                    return Array.from(document.querySelectorAll('a')).map((a: HTMLAnchorElement) => ({ href: a.href, text: a.innerText }));
+                });
+
+                for (const link of rawLinks) {
+                    const lowerHref = link.href.toLowerCase();
+                    if (lowerHref.endsWith('.pdf')) {
+                        logger.info(`[Prosas Auth Worker] Found PDF link: ${link.href}`);
+                        try {
+                            const response = await page.goto(link.href, { waitUntil: 'networkidle', timeout: 30000 });
+                            if (response && response.status() === 200) {
+                                 const buffer = await response.body();
+                                 const tempPdfPath = `/tmp/prosas_pdf_${Date.now()}.pdf`;
+                                 fs.writeFileSync(tempPdfPath, buffer);
+                                 downloadedPdfPaths.push(tempPdfPath);
+                            }
+                        } catch (pdfErr) {
+                             logger.warn(`[Prosas Auth Worker] Failed to download PDF ${link.href}`, pdfErr);
+                        }
+                    }
+                }
+
+                logger.info(`[Prosas Auth Worker] Extracted ${combinedText.length} characters and ${downloadedPdfPaths.length} PDFs for ${targetUrl}.`);
+
+                // Read PDFs locally
+                for (const pdfPath of downloadedPdfPaths) {
+                    logger.info(`[Prosas Auth Worker] Parsing PDF: ${pdfPath}`);
+                    try {
+                        const pdfBuffer = fs.readFileSync(pdfPath);
+                        const uint8Array = new Uint8Array(pdfBuffer);
+                        const pdfData = await new (PDFParse as any)(uint8Array, { max: 5 });
+                        logger.info(`[Prosas Auth Worker] Extracted ${pdfData.text.length} characters from ${pdfPath}`);
+                        combinedText += `\n\n--- START OF PDF CONTEXT ---\n${pdfData.text}\n--- END OF PDF CONTEXT ---\n\n`;
+                    } catch (e) {
+                        logger.error(`[Prosas Auth Worker] Failed to read/parse PDF ${pdfPath}`, e);
+                    } finally {
+                        if (fs.existsSync(pdfPath)) {
+                            fs.unlinkSync(pdfPath);
+                        }
+                    }
+                }
+
+                if (combinedText.length < 200) {
+                     logger.warn(`[Prosas Auth Worker] Scraped content for ${targetUrl} is too short (${combinedText.length} chars). Saving as failure.`);
+                     const docId = `prosas_err_${require('crypto').createHash('md5').update(targetUrl).digest('hex')}`;
+                     await db.collection('failed_ingestions').doc(docId).set({
+                         url: targetUrl,
+                         reason: `Text too short: ${combinedText.length} chars`,
+                         timestamp: FieldValue.serverTimestamp(),
+                         searchId: searchIdVal,
+                         strategy: 'PROSAS'
+                     });
+                     continue; // Skip to next URL
+                }
+
+                const contentRef = db.collection('raw_extracted_contents').doc();
+                await contentRef.set({
+                     url: targetUrl,
+                     sourceContext: searchIdVal,
+                     textContent: combinedText,
+                     extractedAt: FieldValue.serverTimestamp()
+                });
+
+                logger.info(`[Prosas Auth Worker] Content saved to raw_extracted_contents/${contentRef.id}`);
+
+                await extractionQueue.enqueue({
+                    searchId: searchIdVal,
+                    link: targetUrl,
+                    contentId: contentRef.id,
+                    reason: 'Prosas Authenticated Direct Extraction',
+                    discoverySource: 'PROSAS_WEBHOOK'
+                });
+
+                logger.info(`[Prosas Auth Worker] Successfully enqueued for extraction: ${targetUrl}`);
+
+            } catch (err: any) {
+                logger.error(`[Prosas Auth Worker] Failed processing ${targetUrl} in batch:`, err);
+                const docId = `prosas_err_${require('crypto').createHash('md5').update(targetUrl).digest('hex')}`;
+                await db.collection('failed_ingestions').doc(docId).set({
+                    url: targetUrl,
+                    reason: `Unhandled Exception in batch: ${err.message}`,
+                    timestamp: FieldValue.serverTimestamp(),
+                    searchId: searchIdVal,
+                    strategy: 'PROSAS'
+                });
+                // Continue to next URL in batch instead of failing completely
+            }
+        } // End of batch loop
 
     } catch (error: any) {
-        logger.error(`[Prosas Auth Worker] Execution failed for ${url}`, error);
-
-        const searchIdVal = searchId || `PROSAS_${Date.now()}`;
-        const db = getFirestore();
-        const docId = `prosas_err_${require('crypto').createHash('md5').update(url).digest('hex')}`;
-
-        await db.collection('failed_ingestions').doc(docId).set({
-            url: url,
-            reason: `Unhandled Exception: ${error.message}`,
-            timestamp: FieldValue.serverTimestamp(),
-            searchId: searchIdVal,
-            strategy: 'PROSAS'
-        });
-
+        logger.error(`[Prosas Auth Worker] Execution failed for batch`, error);
         throw error;
     } finally {
         if (context) await context.close();
@@ -4952,6 +5002,8 @@ async function executeUnifiedIngestion(runId: string) {
             urlsDiscovered += rawItems.length;
             let enqueuedCount = 0;
 
+            const prosasUrlsToBatch: string[] = [];
+
             for (const item of rawItems) {
                 const extracted = await strategy.extractRaw(item);
 
@@ -4972,21 +5024,7 @@ async function executeUnifiedIngestion(runId: string) {
                 });
 
                 if (extracted.url.toLowerCase().includes('prosas.com.br')) {
-                    logger.info(`[Orchestrator] Routing Prosas link to authenticated worker: ${extracted.url}`);
-                    const queue = getFunctions().taskQueue('locations/us-central1/functions/prosasAuthenticatedWorker');
-                    const taskId = `prosas_${runId}_${extracted.url.replace(/[^a-zA-Z0-9]/g, '').substring(0, 50)}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
-                    try {
-                        await queue.enqueue({
-                            url: extracted.url,
-                            searchId: runId
-                        }, { id: taskId });
-                    } catch (error: any) {
-                        if (error.status === 'ALREADY_EXISTS' || error.status === 409 || error.code === 'functions/task-already-exists' || error.code === 'ALREADY_EXISTS' || (error.message && error.message.includes('ALREADY_EXISTS'))) {
-                            logger.warn(`[Orchestrator] Task ${taskId} already exists, skipping.`);
-                        } else {
-                            throw error;
-                        }
-                    }
+                    prosasUrlsToBatch.push(extracted.url);
                 } else {
                     const taskId = `extract_${runId}_${tempContentRef.id}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
                     try {
@@ -4997,6 +5035,8 @@ async function executeUnifiedIngestion(runId: string) {
                             reason: `Found by ${target.strategy}`,
                             discoverySource: target.strategy
                         }, { id: taskId });
+                        enqueuedCount++;
+                        enqueuedTotal++;
                     } catch (error: any) {
                         if (error.status === 'ALREADY_EXISTS' || error.status === 409 || error.code === 'functions/task-already-exists' || error.code === 'ALREADY_EXISTS' || (error.message && error.message.includes('ALREADY_EXISTS'))) {
                             logger.warn(`[Orchestrator] Task ${taskId} already exists, skipping.`);
@@ -5005,8 +5045,33 @@ async function executeUnifiedIngestion(runId: string) {
                         }
                     }
                 }
-                enqueuedCount++;
-                enqueuedTotal++;
+            }
+
+            // Batch and dispatch collected Prosas URLs
+            if (prosasUrlsToBatch.length > 0) {
+                logger.info(`[Orchestrator] Batching ${prosasUrlsToBatch.length} Prosas URLs for authenticated worker.`);
+                const prosasQueue = getFunctions().taskQueue('locations/us-central1/functions/prosasAuthenticatedWorker');
+                const BATCH_SIZE = 20;
+
+                for (let i = 0; i < prosasUrlsToBatch.length; i += BATCH_SIZE) {
+                    const batchUrls = prosasUrlsToBatch.slice(i, i + BATCH_SIZE);
+                    const taskId = `prosas_batch_${runId}_${i}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
+
+                    try {
+                        await prosasQueue.enqueue({
+                            urls: batchUrls,
+                            searchId: runId
+                        }, { id: taskId });
+                        enqueuedCount += batchUrls.length;
+                        enqueuedTotal += batchUrls.length;
+                    } catch (error: any) {
+                         if (error.status === 'ALREADY_EXISTS' || error.status === 409 || error.code === 'functions/task-already-exists' || error.code === 'ALREADY_EXISTS' || (error.message && error.message.includes('ALREADY_EXISTS'))) {
+                            logger.warn(`[Orchestrator] Task ${taskId} already exists, skipping.`);
+                        } else {
+                            throw error;
+                        }
+                    }
+                }
             }
 
             if (enqueuedCount > 0) {
@@ -5491,16 +5556,23 @@ export const ingestProsasNewsletterWebhook = onRequest({
 
         const results = [];
         const queue = getFunctions().taskQueue('locations/us-central1/functions/prosasAuthenticatedWorker');
+        const urlArray = Array.from(urls);
+        const BATCH_SIZE = 15;
 
-        for (const url of Array.from(urls)) {
-            logger.info(`[Prosas Webhook] Processing URL: ${url}`);
+        for (let i = 0; i < urlArray.length; i += BATCH_SIZE) {
+            const batchUrls = urlArray.slice(i, i + BATCH_SIZE);
+            logger.info(`[Prosas Webhook] Dispatching batch of ${batchUrls.length} URLs.`);
             try {
-                // Dispatch directly to prosasAuthenticatedWorker to bypass the login wall and avoid sending raw HTML/URLs to Gemini
-                await queue.enqueue({ url, searchId: "PROSAS_NEWSLETTER" });
-                results.push({ url, status: 'enqueued_to_prosas_worker' });
+                // Dispatch batch to prosasAuthenticatedWorker to bypass the login wall and avoid sending raw HTML/URLs to Gemini
+                await queue.enqueue({ urls: batchUrls, searchId: "PROSAS_NEWSLETTER" });
+                for(const u of batchUrls) {
+                    results.push({ url: u, status: 'enqueued_to_prosas_worker_batch' });
+                }
             } catch (error) {
-                logger.error(`[Prosas Webhook] Error enqueueing ${url}:`, error);
-                results.push({ url, status: 'error', error: error instanceof Error ? error.message : String(error) });
+                logger.error(`[Prosas Webhook] Error enqueueing batch:`, error);
+                for(const u of batchUrls) {
+                    results.push({ url: u, status: 'error', error: error instanceof Error ? error.message : String(error) });
+                }
             }
         }
 
