@@ -76,16 +76,22 @@ export class ProsasScraper implements IScraperStrategy {
                 try {
                     let data: any = {};
                     try {
-                        data = await page.evaluate(async (url: string) => {
-                            const response = await fetch(url);
-                            if (!response.ok) {
-                                if (response.status === 403) {
-                                    throw new Error("403_FORBIDDEN");
-                                }
-                                throw new Error(`HTTP error! status: ${response.status}`);
+                        // Use page.goto to fetch the JSON, avoiding XHR WAF blocks
+                        const response = await page.goto(fetchUrl, { waitUntil: 'domcontentloaded' });
+
+                        if (!response) {
+                            throw new Error(`No response received from page.goto for page ${pageNum}`);
+                        }
+
+                        if (!response.ok()) {
+                            if (response.status() === 403) {
+                                throw new Error("403_FORBIDDEN");
                             }
-                            return await response.json();
-                        }, fetchUrl);
+                            throw new Error(`HTTP error! status: ${response.status()}`);
+                        }
+
+                        // Parse JSON directly from the network buffer
+                        data = await response.json();
                     } catch (e: any) {
                         if (e.message && e.message.includes("403_FORBIDDEN")) {
                             throw new Error(`[ProsasScraper] 403 Forbidden: WAF block or session expired during API fetch on page ${pageNum}`);
