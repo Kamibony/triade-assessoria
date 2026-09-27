@@ -4975,19 +4975,35 @@ async function executeUnifiedIngestion(runId: string) {
                     logger.info(`[Orchestrator] Routing Prosas link to authenticated worker: ${extracted.url}`);
                     const queue = getFunctions().taskQueue('locations/us-central1/functions/prosasAuthenticatedWorker');
                     const taskId = `prosas_${runId}_${extracted.url.replace(/[^a-zA-Z0-9]/g, '').substring(0, 50)}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
-                    await queue.enqueue({
-                        url: extracted.url,
-                        searchId: runId
-                    }, { id: taskId });
+                    try {
+                        await queue.enqueue({
+                            url: extracted.url,
+                            searchId: runId
+                        }, { id: taskId });
+                    } catch (error: any) {
+                        if (error.status === 'ALREADY_EXISTS' || error.status === 409 || error.code === 'functions/task-already-exists' || error.code === 'ALREADY_EXISTS' || (error.message && error.message.includes('ALREADY_EXISTS'))) {
+                            logger.warn(`[Orchestrator] Task ${taskId} already exists, skipping.`);
+                        } else {
+                            throw error;
+                        }
+                    }
                 } else {
                     const taskId = `extract_${runId}_${tempContentRef.id}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
-                    await extractionQueue.enqueue({
-                        searchId: runId,
-                        link: extracted.url,
-                        contentId: tempContentRef.id,
-                        reason: `Found by ${target.strategy}`,
-                        discoverySource: target.strategy
-                    }, { id: taskId });
+                    try {
+                        await extractionQueue.enqueue({
+                            searchId: runId,
+                            link: extracted.url,
+                            contentId: tempContentRef.id,
+                            reason: `Found by ${target.strategy}`,
+                            discoverySource: target.strategy
+                        }, { id: taskId });
+                    } catch (error: any) {
+                        if (error.status === 'ALREADY_EXISTS' || error.status === 409 || error.code === 'functions/task-already-exists' || error.code === 'ALREADY_EXISTS' || (error.message && error.message.includes('ALREADY_EXISTS'))) {
+                            logger.warn(`[Orchestrator] Task ${taskId} already exists, skipping.`);
+                        } else {
+                            throw error;
+                        }
+                    }
                 }
                 enqueuedCount++;
                 enqueuedTotal++;
