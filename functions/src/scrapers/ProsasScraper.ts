@@ -21,15 +21,6 @@ export class ProsasScraper implements IScraperStrategy {
     }
 
     async fetchDelta(): Promise<any[]> {
-        const watermark = await this.getWatermark();
-        let watermarkDate = watermark ? new Date(watermark) : new Date(0);
-
-        // 7-day Lookback Window
-        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-        if (watermarkDate < sevenDaysAgo) {
-             watermarkDate = sevenDaysAgo;
-        }
-
         const username = prosasUsernameSecret.value();
         const password = prosasPasswordSecret.value();
 
@@ -78,25 +69,29 @@ export class ProsasScraper implements IScraperStrategy {
             let pageNum = 1;
             const allItems: any[] = [];
             const maxPages = 50;
-            let debugCounter = 0;
 
             while (pageNum <= maxPages) {
-                const fetchUrl = `https://prosas.com.br/selecao/api/v2/third_party/oportunidades/inscricoes_abertas?include=area_interesses%2Cincentivador&page%5Bpage%5D=${pageNum}&page%5Bsize%5D=20&&sort=`;
+                const fetchUrl = `https://prosas.com.br/selecao/api/v2/third_party/oportunidades/inscricoes_abertas?include=area_interesses%2Cincentivador&page%5Bpage%5D=${pageNum}&page%5Bsize%5D=20`;
 
                 try {
-                    await page.goto(fetchUrl, { waitUntil: 'networkidle', timeout: 60000 });
-
-                    const rawText = await page.evaluate(() => document.body.innerText);
-
                     let data: any = {};
                     try {
-                        data = JSON.parse(rawText);
-                    } catch (e) {
-                        if (rawText.includes("Forbidden") || rawText.includes("403")) {
-                             throw new Error(`[ProsasScraper] 403 Forbidden: WAF block or session expired during API fetch on page ${pageNum}`);
+                        data = await page.evaluate(async (url: string) => {
+                            const response = await fetch(url);
+                            if (!response.ok) {
+                                if (response.status === 403) {
+                                    throw new Error("403_FORBIDDEN");
+                                }
+                                throw new Error(`HTTP error! status: ${response.status}`);
+                            }
+                            return await response.json();
+                        }, fetchUrl);
+                    } catch (e: any) {
+                        if (e.message && e.message.includes("403_FORBIDDEN")) {
+                            throw new Error(`[ProsasScraper] 403 Forbidden: WAF block or session expired during API fetch on page ${pageNum}`);
                         }
-                        logger.error(`[ProsasScraper] Failed to parse JSON from Prosas API response: ${rawText.substring(0, 200)}...`, e);
-                        throw new Error("Failed to parse JSON from Prosas API response");
+                        logger.error(`[ProsasScraper] Failed to fetch or parse JSON from Prosas API on page ${pageNum}:`, e);
+                        throw new Error("Failed to fetch/parse JSON from Prosas API");
                     }
 
                     const items = data.data || [];
@@ -105,26 +100,7 @@ export class ProsasScraper implements IScraperStrategy {
                          break; // No more items
                     }
 
-                    for (const item of items) {
-                         const itemDateString = item.attributes?.created_at || item.created_at;
-
-                         if (itemDateString) {
-                             const itemDate = new Date(itemDateString);
-                             if (pageNum === 1 && debugCounter < 5) {
-                                 logger.info(`[ProsasScraper Debug] Raw: ${itemDateString} | Parsed: ${itemDate} | Watermark: ${watermarkDate} | Keep?: ${itemDate > watermarkDate}`);
-                                 debugCounter++;
-                             }
-                             if (itemDate > watermarkDate) {
-                                 allItems.push(item);
-                             }
-                         } else {
-                             if (pageNum === 1 && debugCounter < 5) {
-                                 logger.info(`[ProsasScraper Debug] Raw: null/undefined | Parsed: N/A | Watermark: ${watermarkDate} | Keep?: true (default)`);
-                                 debugCounter++;
-                             }
-                             allItems.push(item);
-                         }
-                    }
+                    allItems.push(...items);
                     pageNum++;
 
                     // Add a small delay to avoid hitting rate limits
