@@ -64,56 +64,73 @@ export class ProsasScraper implements IScraperStrategy {
                 throw new Error("[ProsasScraper] Failed to navigate past login page. Authentication likely failed.");
             }
 
-            logger.info("[ProsasScraper] Authentication successful. Proceeding to fetch data in-browser.");
+            logger.info("[ProsasScraper] Authentication successful. Proceeding to fetch data via UI network interception on /editais...");
 
-            let pageNum = 1;
             const allItems: any[] = [];
+            let currentPage = 1;
             const maxPages = 50;
+            let hasMore = true;
 
-            while (pageNum <= maxPages) {
-                const fetchUrl = `https://prosas.com.br/selecao/api/v2/third_party/oportunidades/inscricoes_abertas?include=area_interesses%2Cincentivador&page%5Bpage%5D=${pageNum}&page%5Bsize%5D=20`;
+            const waitNextApiResponse = () => page.waitForResponse(
+                (response: any) => response.url().includes('selecao/api/v2/third_party/oportunidades/inscricoes_abertas') && response.request().method() === 'GET',
+                { timeout: 30000 }
+            ).then(async (res: any) => {
+                if (!res.ok()) {
+                    if (res.status() === 403) throw new Error("403_FORBIDDEN");
+                    throw new Error(`API returned HTTP ${res.status()}`);
+                }
+                return res.json();
+            });
 
+            let apiPromise = waitNextApiResponse();
+            await page.goto('https://prosas.com.br/editais', { waitUntil: 'networkidle', timeout: 60000 });
+
+            while (currentPage <= maxPages && hasMore) {
                 try {
-                    let data: any = {};
-                    try {
-                        // Use page.goto to fetch the JSON, avoiding XHR WAF blocks
-                        const response = await page.goto(fetchUrl, { waitUntil: 'domcontentloaded' });
-
-                        if (!response) {
-                            throw new Error(`No response received from page.goto for page ${pageNum}`);
-                        }
-
-                        if (!response.ok()) {
-                            if (response.status() === 403) {
-                                throw new Error("403_FORBIDDEN");
-                            }
-                            throw new Error(`HTTP error! status: ${response.status()}`);
-                        }
-
-                        // Parse JSON directly from the network buffer
-                        data = await response.json();
-                    } catch (e: any) {
-                        if (e.message && e.message.includes("403_FORBIDDEN")) {
-                            throw new Error(`[ProsasScraper] 403 Forbidden: WAF block or session expired during API fetch on page ${pageNum}`);
-                        }
-                        logger.error(`[ProsasScraper] Failed to fetch or parse JSON from Prosas API on page ${pageNum}:`, e);
-                        throw new Error("Failed to fetch/parse JSON from Prosas API");
-                    }
-
+                    const data = await apiPromise;
                     const items = data.data || [];
-
                     if (items.length === 0) {
-                         break; // No more items
+                        hasMore = false;
+                        break;
                     }
-
                     allItems.push(...items);
-                    pageNum++;
+                    logger.info(`[ProsasScraper] Captured page ${currentPage} with ${items.length} items.`);
 
-                    // Add a small delay to avoid hitting rate limits
-                    await page.waitForTimeout(500);
-                } catch (e) {
-                    logger.error(`[ProsasScraper] Error fetching delta for page ${pageNum}:`, e);
-                    throw e; // re-throw to orchestrator
+                    // Set up the promise BEFORE clicking to avoid race conditions
+                    const nextApiPromise = waitNextApiResponse();
+
+                    const nextClicked = await page.evaluate(() => {
+                        const component = document.querySelector('prosas-listagem-editais');
+                        if (component && component.shadowRoot) {
+                            const buttons = component.shadowRoot.querySelectorAll('button');
+                            for (const btn of buttons) {
+                                if (btn.querySelector('svg') && btn.innerHTML.includes('M.29.71a.996.996 0 0 0 0 1.41L4.17 6 .29 9.88') && !btn.disabled) {
+                                    btn.click();
+                                    return true;
+                                }
+                            }
+                        }
+                        return false;
+                    });
+
+                    if (nextClicked) {
+                        apiPromise = nextApiPromise;
+                        currentPage++;
+                        await page.waitForTimeout(1000); // polite delay
+                    } else {
+                        // We didn't click next, so we don't need to await this promise. We can just ignore it.
+                        // Playwright will eventually timeout the promise, but we'll break out of the loop anyway.
+                        // To avoid unhandled rejection warnings from Playwright, we can catch it.
+                        nextApiPromise.catch(() => {});
+                        logger.info("[ProsasScraper] No active 'Next' button found. Ending pagination.");
+                        hasMore = false;
+                    }
+                } catch (e: any) {
+                    if (e.message && e.message.includes("403_FORBIDDEN")) {
+                        throw new Error(`[ProsasScraper] 403 Forbidden: WAF block or session expired during UI network interception on page ${currentPage}`);
+                    }
+                    logger.error(`[ProsasScraper] Failed to intercept or parse API for page ${currentPage}:`, e);
+                    throw new Error("Failed to intercept/parse JSON from Prosas API");
                 }
             }
 
