@@ -5027,24 +5027,24 @@ async function executeUnifiedIngestion(runId: string) {
                     globalProsasUrlsToBatch.push(extracted.url);
                     enqueuedCount++;
                     enqueuedTotal++;
-                } else {
-                    const taskId = `extract_${runId}_${tempContentRef.id}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
-                    try {
-                        await extractionQueue.enqueue({
-                            searchId: runId,
-                            link: extracted.url,
-                            contentId: tempContentRef.id,
-                            reason: `Found by ${target.strategy}`,
-                            discoverySource: target.strategy
-                        }, { id: taskId });
-                        enqueuedCount++;
-                        enqueuedTotal++;
-                    } catch (error: any) {
-                        if (error.status === 'ALREADY_EXISTS' || error.status === 409 || error.code === 'functions/task-already-exists' || error.code === 'ALREADY_EXISTS' || (error.message && error.message.includes('ALREADY_EXISTS'))) {
-                            logger.warn(`[Orchestrator] Task ${taskId} already exists, skipping.`);
-                        } else {
-                            throw error;
-                        }
+                    continue;
+                }
+                const taskId = `extract_${runId}_${tempContentRef.id}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
+                try {
+                    await extractionQueue.enqueue({
+                        searchId: runId,
+                        link: extracted.url,
+                        contentId: tempContentRef.id,
+                        reason: `Found by ${target.strategy}`,
+                        discoverySource: target.strategy
+                    }, { id: taskId });
+                    enqueuedCount++;
+                    enqueuedTotal++;
+                } catch (error: any) {
+                    if (error.status === 'ALREADY_EXISTS' || error.status === 409 || error.code === 'functions/task-already-exists' || error.code === 'ALREADY_EXISTS' || (error.message && error.message.includes('ALREADY_EXISTS'))) {
+                        logger.warn(`[Orchestrator] Task ${taskId} already exists, skipping.`);
+                    } else {
+                        throw error;
                     }
                 }
             }
@@ -5065,24 +5065,23 @@ async function executeUnifiedIngestion(runId: string) {
 
     // Batch and dispatch all collected Prosas URLs globally
     if (globalProsasUrlsToBatch.length > 0) {
-        logger.info(`[Orchestrator] Batching ${globalProsasUrlsToBatch.length} global Prosas URLs for authenticated worker.`);
+        const chunkSize = 20;
         const prosasQueue = getFunctions().taskQueue('locations/us-central1/functions/prosasAuthenticatedWorker');
-        const BATCH_SIZE = 20;
+        // Remove duplicates just in case
+        const uniqueProsasUrls = [...new Set(globalProsasUrlsToBatch)];
 
-        for (let i = 0; i < globalProsasUrlsToBatch.length; i += BATCH_SIZE) {
-            const batchUrls = globalProsasUrlsToBatch.slice(i, i + BATCH_SIZE);
-            const taskId = `prosas_batch_${runId}_${i}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
+        logger.info(`[Orchestrator] Batching ${uniqueProsasUrls.length} unique Prosas URLs into chunks of ${chunkSize}.`);
 
+        for (let i = 0; i < uniqueProsasUrls.length; i += chunkSize) {
+            const batch = uniqueProsasUrls.slice(i, i + chunkSize);
+            const taskId = `prosas_${runId}_batch_${i/chunkSize}`.substring(0, 500);
             try {
-                await prosasQueue.enqueue({
-                    urls: batchUrls,
-                    searchId: runId
-                }, { id: taskId });
-            } catch (error: any) {
-                if (error.status === 'ALREADY_EXISTS' || error.status === 409 || error.code === 'functions/task-already-exists' || error.code === 'ALREADY_EXISTS' || (error.message && error.message.includes('ALREADY_EXISTS'))) {
-                    logger.warn(`[Orchestrator] Task ${taskId} already exists, skipping.`);
+                await prosasQueue.enqueue({ urls: batch, searchId: runId }, { id: taskId });
+            } catch (err: any) {
+                if (err.code === 'functions/task-already-exists' || (err.response && err.response.status === 409)) {
+                    logger.warn(`[Orchestrator] Prosas batch ${taskId} already exists, skipping.`);
                 } else {
-                    throw error;
+                    logger.error(`[Orchestrator] Failed to enqueue Prosas batch.`, err);
                 }
             }
         }
