@@ -4250,15 +4250,15 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                      continue; // Skip to next URL
                 }
 
-                const contentRef = db.collection('raw_extracted_contents').doc();
+                const contentRef = db.collection('scraping_contents').doc();
                 await contentRef.set({
                      url: targetUrl,
                      sourceContext: searchIdVal,
-                     textContent: combinedText,
+                     text: combinedText,
                      extractedAt: FieldValue.serverTimestamp()
                 });
 
-                logger.info(`[Prosas Auth Worker] Content saved to raw_extracted_contents/${contentRef.id}`);
+                logger.info(`[Prosas Auth Worker] Content saved to scraping_contents/${contentRef.id}`);
 
                 await extractionQueue.enqueue({
                     searchId: searchIdVal,
