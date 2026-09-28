@@ -5007,6 +5007,13 @@ async function executeUnifiedIngestion(runId: string) {
             for (const item of rawItems) {
                 const extracted = await strategy.extractRaw(item);
 
+                if (extracted.url.toLowerCase().includes('prosas.com.br')) {
+                    globalProsasUrlsToBatch.push(extracted.url);
+                    enqueuedCount++;
+                    enqueuedTotal++;
+                    continue;
+                }
+
                 // Save raw payload to a temp collection to avoid task payload limits
                 const tempContentRef = db.collection('scraping_contents').doc();
                 const expireAt = new Date();
@@ -5023,12 +5030,6 @@ async function executeUnifiedIngestion(runId: string) {
                     expireAt: expireAt
                 });
 
-                if (extracted.url.toLowerCase().includes('prosas.com.br')) {
-                    globalProsasUrlsToBatch.push(extracted.url);
-                    enqueuedCount++;
-                    enqueuedTotal++;
-                    continue;
-                }
                 const taskId = `extract_${runId}_${tempContentRef.id}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
                 try {
                     await extractionQueue.enqueue({
@@ -5078,7 +5079,7 @@ async function executeUnifiedIngestion(runId: string) {
             try {
                 await prosasQueue.enqueue({ urls: batch, searchId: runId }, { id: taskId });
             } catch (err: any) {
-                if (err.code === 'functions/task-already-exists' || (err.response && err.response.status === 409)) {
+                if (err.status === 'ALREADY_EXISTS' || err.status === 409 || err.code === 'functions/task-already-exists' || err.code === 'ALREADY_EXISTS' || (err.message && (err.message.includes('ALREADY_EXISTS') || err.message.includes('already exists')))) {
                     logger.warn(`[Orchestrator] Prosas batch ${taskId} already exists, skipping.`);
                 } else {
                     logger.error(`[Orchestrator] Failed to enqueue Prosas batch.`, err);
