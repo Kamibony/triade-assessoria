@@ -4946,6 +4946,8 @@ async function executeUnifiedIngestion(runId: string) {
     let vertexTargetsCount = 0;
     let braveTargetsCount = 0;
 
+    const globalProsasUrlsToBatch: string[] = [];
+
     for (const doc of targetsSnap.docs) {
         const target = { id: doc.id, ...doc.data() } as any;
 
@@ -5002,8 +5004,6 @@ async function executeUnifiedIngestion(runId: string) {
             urlsDiscovered += rawItems.length;
             let enqueuedCount = 0;
 
-            const prosasUrlsToBatch: string[] = [];
-
             for (const item of rawItems) {
                 const extracted = await strategy.extractRaw(item);
 
@@ -5024,7 +5024,9 @@ async function executeUnifiedIngestion(runId: string) {
                 });
 
                 if (extracted.url.toLowerCase().includes('prosas.com.br')) {
-                    prosasUrlsToBatch.push(extracted.url);
+                    globalProsasUrlsToBatch.push(extracted.url);
+                    enqueuedCount++;
+                    enqueuedTotal++;
                 } else {
                     const taskId = `extract_${runId}_${tempContentRef.id}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
                     try {
@@ -5047,33 +5049,6 @@ async function executeUnifiedIngestion(runId: string) {
                 }
             }
 
-            // Batch and dispatch collected Prosas URLs
-            if (prosasUrlsToBatch.length > 0) {
-                logger.info(`[Orchestrator] Batching ${prosasUrlsToBatch.length} Prosas URLs for authenticated worker.`);
-                const prosasQueue = getFunctions().taskQueue('locations/us-central1/functions/prosasAuthenticatedWorker');
-                const BATCH_SIZE = 20;
-
-                for (let i = 0; i < prosasUrlsToBatch.length; i += BATCH_SIZE) {
-                    const batchUrls = prosasUrlsToBatch.slice(i, i + BATCH_SIZE);
-                    const taskId = `prosas_batch_${runId}_${i}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
-
-                    try {
-                        await prosasQueue.enqueue({
-                            urls: batchUrls,
-                            searchId: runId
-                        }, { id: taskId });
-                        enqueuedCount += batchUrls.length;
-                        enqueuedTotal += batchUrls.length;
-                    } catch (error: any) {
-                         if (error.status === 'ALREADY_EXISTS' || error.status === 409 || error.code === 'functions/task-already-exists' || error.code === 'ALREADY_EXISTS' || (error.message && error.message.includes('ALREADY_EXISTS'))) {
-                            logger.warn(`[Orchestrator] Task ${taskId} already exists, skipping.`);
-                        } else {
-                            throw error;
-                        }
-                    }
-                }
-            }
-
             if (enqueuedCount > 0) {
                 // Update watermark ONLY when tasks are successfully dispatched
                 await db.collection('scraper_state').doc((strategy as any).stateDocId).set({
@@ -5085,6 +5060,31 @@ async function executeUnifiedIngestion(runId: string) {
             await db.collection('ingestion_runs').doc(runId).update({
                 'phases.unified.errors': FieldValue.arrayUnion(`Target ${target.name} failed: ${error.message}`)
             });
+        }
+    }
+
+    // Batch and dispatch all collected Prosas URLs globally
+    if (globalProsasUrlsToBatch.length > 0) {
+        logger.info(`[Orchestrator] Batching ${globalProsasUrlsToBatch.length} global Prosas URLs for authenticated worker.`);
+        const prosasQueue = getFunctions().taskQueue('locations/us-central1/functions/prosasAuthenticatedWorker');
+        const BATCH_SIZE = 20;
+
+        for (let i = 0; i < globalProsasUrlsToBatch.length; i += BATCH_SIZE) {
+            const batchUrls = globalProsasUrlsToBatch.slice(i, i + BATCH_SIZE);
+            const taskId = `prosas_batch_${runId}_${i}`.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 500);
+
+            try {
+                await prosasQueue.enqueue({
+                    urls: batchUrls,
+                    searchId: runId
+                }, { id: taskId });
+            } catch (error: any) {
+                if (error.status === 'ALREADY_EXISTS' || error.status === 409 || error.code === 'functions/task-already-exists' || error.code === 'ALREADY_EXISTS' || (error.message && error.message.includes('ALREADY_EXISTS'))) {
+                    logger.warn(`[Orchestrator] Task ${taskId} already exists, skipping.`);
+                } else {
+                    throw error;
+                }
+            }
         }
     }
 
