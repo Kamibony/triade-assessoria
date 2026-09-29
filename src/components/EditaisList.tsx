@@ -14,6 +14,8 @@ interface Edital {
     discoverySource?: string;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     createdAt?: any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    updatedAt?: any;
 }
 
 export function EditaisList() {
@@ -33,10 +35,16 @@ export function EditaisList() {
                 const editaisSnap = await getDocs(collection(db, 'editais'));
                 const list = editaisSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Edital));
 
-                // Sort by createdAt descending
+                // Sort by updatedAt descending, fallback to createdAt
                 list.sort((a, b) => {
-                    const timeA = a.createdAt?.toMillis?.() || (typeof a.createdAt === 'number' ? a.createdAt : 0);
-                    const timeB = b.createdAt?.toMillis?.() || (typeof b.createdAt === 'number' ? b.createdAt : 0);
+                    const timeACreated = a.createdAt?.toMillis?.() || (typeof a.createdAt === 'number' ? a.createdAt : 0);
+                    const timeAUpdated = a.updatedAt?.toMillis?.() || (typeof a.updatedAt === 'number' ? a.updatedAt : 0);
+                    const timeA = Math.max(timeACreated, timeAUpdated);
+
+                    const timeBCreated = b.createdAt?.toMillis?.() || (typeof b.createdAt === 'number' ? b.createdAt : 0);
+                    const timeBUpdated = b.updatedAt?.toMillis?.() || (typeof b.updatedAt === 'number' ? b.updatedAt : 0);
+                    const timeB = Math.max(timeBCreated, timeBUpdated);
+
                     return timeB - timeA;
                 });
 
@@ -79,9 +87,10 @@ export function EditaisList() {
     );
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const isNewEdital = (createdAt: any) => {
-        if (!createdAt) return false;
-        const time = createdAt.toMillis?.() || (typeof createdAt === 'number' ? createdAt : 0);
+    const isNewEdital = (createdAt: any, updatedAt?: any) => {
+        const timeCreated = createdAt?.toMillis?.() || (typeof createdAt === 'number' ? createdAt : 0);
+        const timeUpdated = updatedAt?.toMillis?.() || (typeof updatedAt === 'number' ? updatedAt : 0);
+        const time = Math.max(timeCreated, timeUpdated);
         if (time === 0) return false;
         const oneDay = 24 * 60 * 60 * 1000;
         return (Date.now() - time) < oneDay;
@@ -187,7 +196,7 @@ export function EditaisList() {
                             <td className="px-6 py-4">
                               <div className="font-medium line-clamp-2 flex items-center gap-2" title={edital.title}>
                                 {edital.title}
-                                {isNewEdital(edital.createdAt) && (
+                                {isNewEdital(edital.createdAt, edital.updatedAt) && (
                                     <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded">NOVO</span>
                                 )}
                               </div>
