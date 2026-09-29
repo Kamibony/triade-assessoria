@@ -4204,12 +4204,35 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                     if (lowerHref.endsWith('.pdf')) {
                         logger.info(`[Prosas Auth Worker] Found PDF link: ${link.href}`);
                         try {
-                            const response = await page.goto(link.href, { waitUntil: 'networkidle', timeout: 30000 });
-                            if (response && response.status() === 200) {
-                                 const buffer = await response.body();
-                                 const tempPdfPath = `/tmp/prosas_pdf_${Date.now()}.pdf`;
-                                 fs.writeFileSync(tempPdfPath, buffer);
-                                 downloadedPdfPaths.push(tempPdfPath);
+                            const cookies = await context.cookies();
+                            const cookieString = cookies.map((c: any) => `${c.name}=${c.value}`).join('; ');
+
+                            const fetchOptions = {
+                                headers: {
+                                    'Cookie': cookieString,
+                                    'User-Agent': await page.evaluate(() => navigator.userAgent)
+                                }
+                            };
+
+                            const response = await fetch(link.href, fetchOptions);
+
+                            if (response.ok && response.body) {
+                                const tempPdfPath = `/tmp/prosas_pdf_${Date.now()}.pdf`;
+                                const dest = fs.createWriteStream(tempPdfPath);
+
+                                // Node 18+ Web Streams integration
+                                const reader = response.body.getReader();
+                                while (true) {
+                                    const { done, value } = await reader.read();
+                                    if (done) break;
+                                    if (value) dest.write(value);
+                                }
+                                dest.end();
+
+                                await new Promise((resolve) => dest.on('finish', resolve));
+                                downloadedPdfPaths.push(tempPdfPath);
+                            } else {
+                                logger.warn(`[Prosas Auth Worker] Failed to download PDF ${link.href}. Status: ${response.status}`);
                             }
                         } catch (pdfErr) {
                              logger.warn(`[Prosas Auth Worker] Failed to download PDF ${link.href}`, pdfErr);
