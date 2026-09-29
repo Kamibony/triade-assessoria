@@ -4248,7 +4248,8 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                     try {
                         const pdfBuffer = fs.readFileSync(pdfPath);
                         const uint8Array = new Uint8Array(pdfBuffer);
-                        const pdfData = await new (PDFParse as any)(uint8Array, { max: 5 });
+                        const parser = new (PDFParse as any)(uint8Array, { max: 5 });
+                        const pdfData = await parser.getText();
                         logger.info(`[Prosas Auth Worker] Extracted ${pdfData.text.length} characters from ${pdfPath}`);
                         combinedText += `\n\n--- START OF PDF CONTEXT ---\n${pdfData.text}\n--- END OF PDF CONTEXT ---\n\n`;
                     } catch (e) {
