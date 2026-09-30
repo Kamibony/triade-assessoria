@@ -146,8 +146,9 @@ CRÍTICO: Do NOT invent or generate example data. Se o texto fornecido for insuf
                 const uint8Array = new Uint8Array(buffer);
                 const parser = new (PDFParse as any)(uint8Array, { max: 10 });
             const pdfData = await parser.getText();
+            const rawPdfText = typeof pdfData === 'string' ? pdfData : (pdfData.text || '');
 
-                const extractedText = pdfData.text.substring(0, 15000);
+                const extractedText = rawPdfText.substring(0, 15000);
                 totalExtractedLength += extractedText.length;
                 console.log(`Extracted ${extractedText.length} characters from PDF ${i + 1}`);
                 content.push({ text: `Conteúdo do Documento ${i + 1}:\n\n${extractedText}` });
@@ -741,7 +742,8 @@ Sempre retorne os dados no formato estruturado solicitado em português do Brasi
                 const uint8Array = new Uint8Array(pdfBuffer);
                 const parser = new (PDFParse as any)(uint8Array, { max: 10 });
                 const pdfData = await parser.getText();
-                const extractedText = pdfData.text.substring(0, 15000);
+                const rawPdfText = typeof pdfData === 'string' ? pdfData : (pdfData.text || '');
+                const extractedText = rawPdfText.substring(0, 15000);
                 content.push({ text: `Texto extraído do PDF:\n\n${extractedText}` });
             } catch (error) {
                 console.error("Falha ao analisar o PDF base64:", error);
@@ -874,7 +876,8 @@ export async function fetchAndExtractText(url: string): Promise<string> {
             const uint8Array = new Uint8Array(Buffer.concat(chunks.map(c => Buffer.from(c))));
             const parser = new (PDFParse as any)(uint8Array, { max: 10 });
             const pdfData = await parser.getText();
-            return pdfData.text.replace(/\s+/g, ' ').trim();
+            const rawPdfText = typeof pdfData === 'string' ? pdfData : (pdfData.text || '');
+            return rawPdfText.replace(/\s+/g, ' ').trim();
         }
 
         const html = await response.text();
@@ -3812,7 +3815,31 @@ export const extractionWorker = onTaskDispatched({
             throw new Error(`Content document ${contentId} has no text.`);
         }
 
-        const editalResult = await extractEditalRules({ text });
+        let editalResult: any;
+        try {
+            editalResult = await extractEditalRules({ text });
+        } catch (genkitErr: any) {
+            console.error(`[Extraction Trace] AI generation failed for ${link} (e.g. 429 Quota). Routing to failed_ingestions.`, genkitErr);
+
+            await db.collection('failed_ingestions').add({
+                sourceUrl: link,
+                rawText: text.substring(0, 5000),
+                discoverySource: discoverySource || contentDoc.data()?.discoverySource || null,
+                createdAt: FieldValue.serverTimestamp(),
+                parseError: genkitErr.message,
+                originalExtractionData: null
+            });
+
+            if (searchRef) {
+                await searchRef.set({
+                    logs: FieldValue.arrayUnion({ link, status: 'Erro', reason: 'Salvo com erro: Limite de cota de IA (429) ou falha de geração.' }),
+                    savedCount: FieldValue.increment(1)
+                }, { merge: true });
+            }
+
+            // Return successfully to dead-letter the task and prevent endless retries
+            return;
+        }
 
         // Deduplication Enhancement: Generate ID from a normalized source URL
         let normalizedUrl = link;
@@ -3959,7 +3986,8 @@ export const extractionWorker = onTaskDispatched({
                 editalDocData.createdAt = FieldValue.serverTimestamp();
             }
 
-            await docRef.withConverter(editalConverter).set(editalDocData as Partial<z.infer<typeof editalSchema>>, { merge: true });
+            // Bypass withConverter to avoid Zod schema validation stripping FieldValue.serverTimestamp() or failing
+            await docRef.set(editalDocData, { merge: true });
 
             if (searchRef) {
                 const safeReason = reason ? reason.substring(0, 200) : '';
@@ -4070,6 +4098,8 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
     rateLimits: { maxConcurrentDispatches: 2 },
     timeoutSeconds: 1800,
     memory: '4GiB',
+    concurrency: 1,
+    maxInstances: 2,
     secrets: [prosasUsernameSecret, prosasPasswordSecret]
 }, async (request) => {
     const { url, urls, searchId } = request.data as { url?: string, urls?: string[], searchId?: string };
@@ -4250,8 +4280,9 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                         const uint8Array = new Uint8Array(pdfBuffer);
                         const parser = new (PDFParse as any)(uint8Array, { max: 5 });
                         const pdfData = await parser.getText();
-                        logger.info(`[Prosas Auth Worker] Extracted ${pdfData.text.length} characters from ${pdfPath}`);
-                        combinedText += `\n\n--- START OF PDF CONTEXT ---\n${pdfData.text}\n--- END OF PDF CONTEXT ---\n\n`;
+                        const rawPdfText = typeof pdfData === 'string' ? pdfData : (pdfData.text || '');
+                        logger.info(`[Prosas Auth Worker] Extracted ${rawPdfText.length} characters from ${pdfPath}`);
+                        combinedText += `\n\n--- START OF PDF CONTEXT ---\n${rawPdfText}\n--- END OF PDF CONTEXT ---\n\n`;
                     } catch (e) {
                         logger.error(`[Prosas Auth Worker] Failed to read/parse PDF ${pdfPath}`, e);
                     } finally {
