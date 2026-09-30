@@ -71,14 +71,22 @@ export class ProsasScraper implements IScraperStrategy {
             const maxPages = 50;
             let hasMore = true;
 
+            let lastInterceptedUrl = '';
+
             const waitNextApiResponse = () => page.waitForResponse(
-                (response: any) => response.url().includes('selecao/api/v2/third_party/oportunidades/inscricoes_abertas') && response.request().method() === 'GET',
+                (response: any) => {
+                    const url = response.url();
+                    return url.includes('selecao/api/v2/third_party/oportunidades/inscricoes_abertas') &&
+                           response.request().method() === 'GET' &&
+                           url !== lastInterceptedUrl;
+                },
                 { timeout: 30000 }
             ).then(async (res: any) => {
                 if (!res.ok()) {
                     if (res.status() === 403) throw new Error("403_FORBIDDEN");
                     throw new Error(`API returned HTTP ${res.status()}`);
                 }
+                lastInterceptedUrl = res.url();
                 return res.json();
             });
 
@@ -93,8 +101,18 @@ export class ProsasScraper implements IScraperStrategy {
                         hasMore = false;
                         break;
                     }
+
+                    // Prevent duplicate payloads from being pushed if the API returns the same data
+                    if (allItems.length > 0 && JSON.stringify(allItems.slice(-items.length)) === JSON.stringify(items)) {
+                        logger.warn(`[ProsasScraper] Page ${currentPage} returned duplicate items. Stopping pagination.`);
+                        hasMore = false;
+                        break;
+                    }
+
                     allItems.push(...items);
                     logger.info(`[ProsasScraper] Captured page ${currentPage} with ${items.length} items.`);
+
+                    await page.waitForTimeout(1000); // Allow DOM to settle before setting up next listener
 
                     // Set up the promise BEFORE clicking to avoid race conditions
                     const nextApiPromise = waitNextApiResponse();
