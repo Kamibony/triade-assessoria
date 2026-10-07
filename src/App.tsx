@@ -29,6 +29,7 @@ import { PortalLayout } from './components/portal/PortalLayout';
 import { PortalWelcome } from './components/portal/PortalWelcome';
 import { PortalDiscover } from './components/portal/PortalDiscover';
 import { CacadorClientView } from './components/portal/CacadorClientView';
+import { WelcomeHub } from './components/WelcomeHub';
 import { AuthProvider } from './contexts/AuthContext';
 import { Toaster } from 'react-hot-toast';
 
@@ -110,6 +111,7 @@ function App() {
 
           <Route path="/" element={<PublicLayout />}>
             <Route index element={<LandingPage />} />
+            <Route path="hub" element={<WelcomeHub />} />
             <Route path="match/:editalId" element={<NgoMatchView />} />
           </Route>
         </Routes>
