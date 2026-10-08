@@ -1,14 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, Outlet } from 'react-router-dom';
-import { Hero } from './components/sections/Hero';
-import { Problem } from './components/sections/Problem';
-import { Solution } from './components/sections/Solution';
-import { Comparison } from './components/sections/Comparison';
-import { Authority } from './components/sections/Authority';
-import { SocialProof } from './components/sections/SocialProof';
-import { FAQ } from './components/sections/FAQ';
 import { Footer } from './components/sections/Footer';
 import { FloatingWhatsApp } from './components/ui/FloatingWhatsApp';
-import { MagicEligibility } from './components/MagicEligibility';
 import { EditaisList } from './components/EditaisList';
 import { NgoMatchView } from './components/NgoMatchView';
 import { MatchesDashboard } from './components/MatchesDashboard';
@@ -24,7 +16,6 @@ import { IngestionRadar } from './components/IngestionRadar';
 import { ManualOscIngest } from './components/ManualOscIngest';
 import { PortalOnboarding } from './components/portal/PortalOnboarding';
 import { Login } from './components/Login';
-import { ProtectedRoute } from './components/ProtectedRoute';
 import { PortalLayout } from './components/portal/PortalLayout';
 import { PortalWelcome } from './components/portal/PortalWelcome';
 import { PortalDiscover } from './components/portal/PortalDiscover';
@@ -49,22 +40,6 @@ function Header() {
   );
 }
 
-function LandingPage() {
-  return (
-    <main>
-      <Hero />
-      <MagicEligibility />
-      <Problem />
-      <Solution />
-      <Comparison />
-      <Authority />
-      <SocialProof />
-      <FAQ />
-    </main>
-  );
-}
-
-
 function PublicLayout() {
   return (
     <div className="min-h-screen bg-background text-foreground selection:bg-primary/30 selection:text-primary-foreground font-sans flex flex-col">
@@ -86,32 +61,29 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
 
-          <Route element={<ProtectedRoute />}>
-            <Route path="/portal" element={<PortalLayout />}>
-              <Route index element={<PortalWelcome />} />
-              <Route path="discover" element={<PortalDiscover />} />
-              <Route path="onboarding" element={<PortalOnboarding />} />
-              <Route path="cacador" element={<CacadorClientView />} />
-            </Route>
+          <Route path="/portal" element={<PortalLayout />}>
+            <Route index element={<PortalWelcome />} />
+            <Route path="discover" element={<PortalDiscover />} />
+            <Route path="onboarding" element={<PortalOnboarding />} />
+            <Route path="cacador" element={<CacadorClientView />} />
+          </Route>
 
-            <Route path="/admin" element={<AdminLayout />}>
-              <Route index element={<AdminDashboard />} />
-              <Route path="cacador" element={<CacadorAdminDashboard />} />
-              <Route path="directory" element={<OscDirectoryView />} />
-              <Route path="import-oscs" element={<OscImporter />} />
-              <Route path="import-osc-manual" element={<ManualOscIngest />} />
-              <Route path="directory/:oscId" element={<OscProfileView />} />
-              <Route path="manual-ingest" element={<ManualIngest />} />
-              <Route path="matches" element={<MatchesDashboard />} />
-              <Route path="editais" element={<EditaisList />} />
-              <Route path="sources" element={<ScrapingTargetsManager />} />
-              <Route path="ingestion-radar" element={<IngestionRadar />} />
-            </Route>
+          <Route path="/admin" element={<AdminLayout />}>
+            <Route index element={<AdminDashboard />} />
+            <Route path="cacador" element={<CacadorAdminDashboard />} />
+            <Route path="directory" element={<OscDirectoryView />} />
+            <Route path="import-oscs" element={<OscImporter />} />
+            <Route path="import-osc-manual" element={<ManualOscIngest />} />
+            <Route path="directory/:oscId" element={<OscProfileView />} />
+            <Route path="manual-ingest" element={<ManualIngest />} />
+            <Route path="matches" element={<MatchesDashboard />} />
+            <Route path="editais" element={<EditaisList />} />
+            <Route path="sources" element={<ScrapingTargetsManager />} />
+            <Route path="ingestion-radar" element={<IngestionRadar />} />
           </Route>
 
           <Route path="/" element={<PublicLayout />}>
-            <Route index element={<LandingPage />} />
-            <Route path="hub" element={<WelcomeHub />} />
+            <Route index element={<WelcomeHub />} />
             <Route path="match/:editalId" element={<NgoMatchView />} />
           </Route>
         </Routes>
