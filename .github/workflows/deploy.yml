@@ -59,34 +59,34 @@ jobs:
           echo "VERTEX_AI_SEARCH_LOCATION=${{ secrets.VERTEX_AI_SEARCH_LOCATION }}" >> functions/.env
           echo "VERTEX_AI_SEARCH_ENGINE_ID=${{ secrets.VERTEX_AI_SEARCH_ENGINE_ID }}" >> functions/.env
 
-      - name: Provision Secrets
-        run: |
-          echo "${{ secrets.PROSAS_USERNAME }}" | npx firebase-tools functions:secrets:set PROSAS_USERNAME --project triade-assessoria --force --data-file -
-          echo "${{ secrets.PROSAS_PASSWORD }}" | npx firebase-tools functions:secrets:set PROSAS_PASSWORD --project triade-assessoria --force --data-file -
+#      - name: Provision Secrets
+#        run: |
+#          echo "${{ secrets.PROSAS_USERNAME }}" | npx firebase-tools functions:secrets:set PROSAS_USERNAME --project triade-assessoria --force --data-file -
+#          echo "${{ secrets.PROSAS_PASSWORD }}" | npx firebase-tools functions:secrets:set PROSAS_PASSWORD --project triade-assessoria --force --data-file -
+#        env:
+#          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+
+#      - name: Test Scrapers (Dry-Run)
+#        run: cd functions && npm run test:scrapers
+#        env:
+#          BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+#          VERTEX_AI_SEARCH_PROJECT_ID: ${{ secrets.VERTEX_AI_SEARCH_PROJECT_ID }}
+#          VERTEX_AI_SEARCH_LOCATION: ${{ secrets.VERTEX_AI_SEARCH_LOCATION }}
+#          VERTEX_AI_SEARCH_ENGINE_ID: ${{ secrets.VERTEX_AI_SEARCH_ENGINE_ID }}
+#          PROSAS_USERNAME: ${{ secrets.PROSAS_USERNAME }}
+#          PROSAS_PASSWORD: ${{ secrets.PROSAS_PASSWORD }}
+
+      - name: Deploy to Firebase (Hosting)
+        run: npx firebase-tools deploy --only hosting --project triade-assessoria --force
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
 
-      - name: Test Scrapers (Dry-Run)
-        run: cd functions && npm run test:scrapers
-        env:
-          BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
-          VERTEX_AI_SEARCH_PROJECT_ID: ${{ secrets.VERTEX_AI_SEARCH_PROJECT_ID }}
-          VERTEX_AI_SEARCH_LOCATION: ${{ secrets.VERTEX_AI_SEARCH_LOCATION }}
-          VERTEX_AI_SEARCH_ENGINE_ID: ${{ secrets.VERTEX_AI_SEARCH_ENGINE_ID }}
-          PROSAS_USERNAME: ${{ secrets.PROSAS_USERNAME }}
-          PROSAS_PASSWORD: ${{ secrets.PROSAS_PASSWORD }}
-
-      - name: Deploy to Firebase (Hosting, Storage Rules, and Firestore Indexes)
-        run: npx firebase-tools deploy --only hosting,storage,firestore:indexes --project triade-assessoria --force
-        env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-
-      - name: Deploy Functions
-        run: node functions/scripts/deploy-changed.js
-        env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-          COMMIT_BEFORE: ${{ github.event.before }}
-          COMMIT_SHA: ${{ github.sha }}
+#      - name: Deploy Functions
+#        run: node functions/scripts/deploy-changed.js
+#        env:
+#          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+#          COMMIT_BEFORE: ${{ github.event.before }}
+#          COMMIT_SHA: ${{ github.sha }}
 
       - name: Apply Storage CORS Policy
         run: npm run storage:cors
