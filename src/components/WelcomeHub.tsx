@@ -1,17 +1,32 @@
 import { Link } from 'react-router-dom';
-import { Heart, Briefcase, Shield, ArrowRight } from 'lucide-react';
+import { Heart, Briefcase, Shield, ArrowRight, AlertTriangle } from 'lucide-react';
 
 export function WelcomeHub() {
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col items-center py-16 px-4 sm:px-6 lg:px-8">
       {/* Hero Section */}
-      <div className="text-center max-w-3xl mx-auto mb-16">
+      <div className="text-center max-w-3xl mx-auto mb-12">
         <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight mb-6">
           Bem-vindo à Tríade-Assessoria
         </h1>
         <p className="text-xl text-muted-foreground">
           Escolha seu perfil para começar a explorar nossa plataforma de captação de recursos e inteligência de editais.
         </p>
+      </div>
+
+      {/* Demo Mode Banner */}
+      <div className="max-w-4xl w-full mb-12 bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-6 flex flex-col md:flex-row items-start md:items-center gap-4 text-yellow-800 dark:text-yellow-200">
+        <div className="flex-shrink-0 bg-yellow-500/20 p-3 rounded-full">
+          <AlertTriangle className="h-6 w-6 text-yellow-700 dark:text-yellow-400" />
+        </div>
+        <div>
+          <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
+            🚧 Modo de Demonstração Interativa
+          </h3>
+          <p className="text-sm opacity-90 leading-relaxed">
+            Bem-vindo! Para fins de auditoria de segurança e apresentação pública, a plataforma está operando temporariamente em modo de leitura (read-only). Você pode navegar livremente pelas interfaces, acessar os painéis e conhecer nosso design. No entanto, os processos reais de backend e integrações com Inteligência Artificial estão desativados. Sinta-se à vontade para explorar!
+          </p>
+        </div>
       </div>
 
       {/* Cards Grid */}
