@@ -90,8 +90,8 @@ export function AdminLayout() {
           </Link>
 
           <div className="flex flex-col gap-2 px-3 pt-2 border-t border-border/50">
-            <span className="text-sm font-medium text-muted-foreground truncate" title={user?.email || ''}>
-              {user?.email}
+            <span className="text-sm font-medium text-muted-foreground truncate" title={user?.email || 'Visitante (Modo Público)'}>
+              {user?.email || 'Visitante (Modo Público)'}
             </span>
             <button
               onClick={handleLogout}

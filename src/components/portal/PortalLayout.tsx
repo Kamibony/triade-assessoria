@@ -24,43 +24,47 @@ const PortalLayoutInner: React.FC = () => {
     let unsubscribeUser = () => {};
 
     try {
-      const userDocRef = doc(db, 'users', user.uid);
+      if (user?.uid) {
+        const userDocRef = doc(db, 'users', user.uid);
 
-      unsubscribeUser = onSnapshot(userDocRef, async (userDocSnap) => {
-        if (userDocSnap.exists()) {
-          const userData = userDocSnap.data();
-          let userOscIds: string[] = [];
-          if (userData.oscIds && Array.isArray(userData.oscIds)) {
-             userOscIds = userData.oscIds;
-          } else if (userData.oscId) {
-             userOscIds = [userData.oscId];
+        unsubscribeUser = onSnapshot(userDocRef, async (userDocSnap) => {
+          if (userDocSnap.exists()) {
+            const userData = userDocSnap.data();
+            let userOscIds: string[] = [];
+            if (userData.oscIds && Array.isArray(userData.oscIds)) {
+               userOscIds = userData.oscIds;
+            } else if (userData.oscId) {
+               userOscIds = [userData.oscId];
+            }
+
+            setOscIds(userOscIds);
+
+            if (userOscIds.length > 0) {
+               try {
+                  const oscsData: {id: string, name: string}[] = [];
+                  for (let i = 0; i < userOscIds.length; i += 10) {
+                    const chunk = userOscIds.slice(i, i + 10);
+                    const q = query(collection(db, 'oscs'), where(documentId(), 'in', chunk));
+                    const snapshot = await getDocs(q);
+                    snapshot.forEach(doc => {
+                      oscsData.push({ id: doc.id, name: doc.data().name || 'OSC sem nome' });
+                    });
+                  }
+                  setOscOptions(oscsData);
+
+               } catch (e) {
+                  console.error("Error fetching osc options:", e);
+               }
+            }
           }
-
-          setOscIds(userOscIds);
-
-          if (userOscIds.length > 0) {
-             try {
-                const oscsData: {id: string, name: string}[] = [];
-                for (let i = 0; i < userOscIds.length; i += 10) {
-                  const chunk = userOscIds.slice(i, i + 10);
-                  const q = query(collection(db, 'oscs'), where(documentId(), 'in', chunk));
-                  const snapshot = await getDocs(q);
-                  snapshot.forEach(doc => {
-                    oscsData.push({ id: doc.id, name: doc.data().name || 'OSC sem nome' });
-                  });
-                }
-                setOscOptions(oscsData);
-
-             } catch (e) {
-                console.error("Error fetching osc options:", e);
-             }
-          }
-        }
+          setIsChecking(false);
+        }, (error) => {
+          console.error("Error checking user oscIds:", error);
+          setIsChecking(false);
+        });
+      } else {
         setIsChecking(false);
-      }, (error) => {
-        console.error("Error checking user oscIds:", error);
-        setIsChecking(false);
-      });
+      }
     } catch (error) {
       console.error("Error setting up user listener:", error);
       setIsChecking(false);
@@ -132,8 +136,8 @@ const PortalLayoutInner: React.FC = () => {
 
         <div className="p-4 border-t">
           <div className="flex flex-col gap-2">
-            <span className="text-sm font-medium text-muted-foreground truncate" title={user?.email || ''}>
-              {user?.email}
+            <span className="text-sm font-medium text-muted-foreground truncate" title={user?.email || 'Visitante (Modo Público)'}>
+              {user?.email || 'Visitante (Modo Público)'}
             </span>
             <button
               onClick={handleLogout}
