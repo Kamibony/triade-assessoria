@@ -50,7 +50,7 @@ export function WelcomeHub() {
               <ArrowRight className="ml-2 h-4 w-4" />
             </Link>
             <p className="text-xs text-center text-muted-foreground">
-              Leia o <a href="https://github.com/SeuRepoAqui/blob/main/MANUAL_DO_CLIENTE.md" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">Manual do Cliente</a>
+              Leia o <a href="https://drive.google.com/file/d/1C4OQPDETrX10SWlRA0qC9X28JQ05Bflx/view?usp=sharing" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">Manual do Cliente</a>
             </p>
           </div>
         </div>
@@ -73,7 +73,7 @@ export function WelcomeHub() {
               <ArrowRight className="ml-2 h-4 w-4" />
             </Link>
             <p className="text-xs text-center text-muted-foreground">
-              Leia o <a href="https://github.com/SeuRepoAqui/blob/main/MANUAL_DO_CAPTADOR.md" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">Manual do Captador</a>
+              Leia o <a href="https://drive.google.com/file/d/1EfxsB0ZoWRvlWZFzEdRedun6i8mfA2yZ/view?usp=sharing" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">Manual do Captador</a>
             </p>
           </div>
         </div>
@@ -96,7 +96,7 @@ export function WelcomeHub() {
               <ArrowRight className="ml-2 h-4 w-4" />
             </Link>
             <p className="text-xs text-center text-muted-foreground">
-              Leia o <a href="https://github.com/SeuRepoAqui/blob/main/MANUAL_DO_ADMINISTRADOR.md" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">Manual do Administrador</a>
+              Leia o <a href="https://drive.google.com/file/d/1VIv59FHTDEh84AHvaSDveL_I5ffczWHi/view?usp=sharing" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">Manual do Administrador</a>
             </p>
           </div>
         </div>
