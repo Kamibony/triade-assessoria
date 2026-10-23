@@ -1,0 +1,40 @@
+name: Manual Prosas Scraper
+
+on:
+  workflow_dispatch:
+
+jobs:
+  scrape_prosas:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Dependencies
+        run: |
+          cd functions
+          npm ci
+          npx playwright install chromium --with-deps
+
+      - name: Run Standalone Scraper
+        env:
+          PROSAS_USERNAME: ${{ secrets.PROSAS_USERNAME }}
+          PROSAS_PASSWORD: ${{ secrets.PROSAS_PASSWORD }}
+        run: |
+          cd functions
+          npx tsx scripts/standalone-prosas-scraper.ts
+
+      - name: Upload Scraped JSON Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: editais_prosas
+          path: functions/editais_prosas.json

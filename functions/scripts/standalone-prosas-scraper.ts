@@ -1,0 +1,151 @@
+import * as fs from 'fs';
+import * as path from 'path';
+import { chromium } from 'playwright-extra';
+import stealth from 'puppeteer-extra-plugin-stealth';
+
+async function runStandaloneScraper() {
+    const username = process.env.PROSAS_USERNAME;
+    const password = process.env.PROSAS_PASSWORD;
+
+    if (!username || !password) {
+        throw new Error("[StandaloneProsasScraper] PROSAS_USERNAME or PROSAS_PASSWORD environment variables are not set.");
+    }
+
+    console.log("[StandaloneProsasScraper] Initiating standalone Playwright authentication...");
+
+    chromium.use(stealth());
+    let browser: any;
+    let context: any;
+
+    try {
+        browser = await chromium.launch({
+            headless: true,
+        });
+        context = await browser.newContext();
+        const page = await context.newPage();
+
+        console.log('[StandaloneProsasScraper] Navigating to login page...');
+        await page.goto('https://prosas.com.br/users/sign_in', { waitUntil: 'networkidle', timeout: 60000 });
+
+        console.log('[StandaloneProsasScraper] Filling credentials...');
+        await page.locator('#user_email').last().waitFor({ state: 'visible', timeout: 30000 });
+        await page.locator('#user_email').last().fill(username);
+        await page.locator('#user_password').last().fill(password);
+
+        console.log('[StandaloneProsasScraper] Submitting form...');
+        await page.locator('input[type="submit"][name="commit"]').last().click();
+
+        await page.waitForLoadState('networkidle');
+        // Give it a moment to complete any redirect/cookie setting
+        await page.waitForTimeout(5000);
+
+        // Wait until we are no longer on the login page or a logged-in indicator is present.
+        // If we are still on the login page after waiting, it likely failed.
+        if (page.url().includes('/users/sign_in')) {
+            throw new Error("[StandaloneProsasScraper] Failed to navigate past login page. Authentication likely failed.");
+        }
+
+        console.log("[StandaloneProsasScraper] Authentication successful. Proceeding to fetch data via UI network interception on /editais...");
+
+        const allItems: any[] = [];
+        let currentPage = 1;
+        const maxPages = 50;
+        let hasMore = true;
+
+        let lastInterceptedUrl = '';
+
+        const waitNextApiResponse = () => page.waitForResponse(
+            (response: any) => {
+                const url = response.url();
+                return url.includes('selecao/api/v2/third_party/oportunidades/inscricoes_abertas') &&
+                       response.request().method() === 'GET' &&
+                       url !== lastInterceptedUrl;
+            },
+            { timeout: 30000 }
+        ).then(async (res: any) => {
+            if (!res.ok()) {
+                if (res.status() === 403) throw new Error("403_FORBIDDEN");
+                throw new Error(`API returned HTTP ${res.status()}`);
+            }
+            lastInterceptedUrl = res.url();
+            return res.json();
+        });
+
+        let apiPromise = waitNextApiResponse();
+        await page.goto('https://prosas.com.br/editais', { waitUntil: 'networkidle', timeout: 60000 });
+
+        while (currentPage <= maxPages && hasMore) {
+            try {
+                const data = await apiPromise;
+                const items = data.data || [];
+                if (items.length === 0) {
+                    hasMore = false;
+                    break;
+                }
+
+                // Prevent duplicate payloads from being pushed if the API returns the same data
+                if (allItems.length > 0 && JSON.stringify(allItems.slice(-items.length)) === JSON.stringify(items)) {
+                    console.warn(`[StandaloneProsasScraper] Page ${currentPage} returned duplicate items. Stopping pagination.`);
+                    hasMore = false;
+                    break;
+                }
+
+                allItems.push(...items);
+                console.log(`[StandaloneProsasScraper] Captured page ${currentPage} with ${items.length} items.`);
+
+                await page.waitForTimeout(1000); // Allow DOM to settle before setting up next listener
+
+                // Set up the promise BEFORE clicking to avoid race conditions
+                const nextApiPromise = waitNextApiResponse();
+
+                const nextClicked = await page.evaluate(() => {
+                    const component = document.querySelector('prosas-listagem-editais');
+                    if (component && component.shadowRoot) {
+                        const buttons = component.shadowRoot.querySelectorAll('button');
+                        for (const btn of buttons) {
+                            if (btn.querySelector('svg') && btn.innerHTML.includes('M.29.71a.996.996 0 0 0 0 1.41L4.17 6 .29 9.88') && !btn.disabled) {
+                                btn.click();
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                });
+
+                if (nextClicked) {
+                    apiPromise = nextApiPromise;
+                    currentPage++;
+                    await page.waitForTimeout(1000); // polite delay
+                } else {
+                    // We didn't click next, so we don't need to await this promise. We can just ignore it.
+                    // Playwright will eventually timeout the promise, but we'll break out of the loop anyway.
+                    // To avoid unhandled rejection warnings from Playwright, we can catch it.
+                    nextApiPromise.catch(() => {});
+                    console.log("[StandaloneProsasScraper] No active 'Next' button found. Ending pagination.");
+                    hasMore = false;
+                }
+            } catch (e: any) {
+                if (e.message && e.message.includes("403_FORBIDDEN")) {
+                    throw new Error(`[StandaloneProsasScraper] 403 Forbidden: WAF block or session expired during UI network interception on page ${currentPage}`);
+                }
+                console.error(`[StandaloneProsasScraper] Failed to intercept or parse API for page ${currentPage}:`, e);
+                throw new Error("Failed to intercept/parse JSON from Prosas API");
+            }
+        }
+
+        console.log(`[StandaloneProsasScraper] Scraped total of ${allItems.length} items. Writing to editais_prosas.json...`);
+        const outPath = path.join(__dirname, '..', 'editais_prosas.json');
+        fs.writeFileSync(outPath, JSON.stringify(allItems, null, 2));
+        console.log(`[StandaloneProsasScraper] Done! Saved to ${outPath}`);
+
+    } finally {
+        if (context) await context.close();
+        if (browser) await browser.close();
+        console.log("[StandaloneProsasScraper] Playwright browser and context closed safely.");
+    }
+}
+
+runStandaloneScraper().catch((err) => {
+    console.error("[StandaloneProsasScraper] Fatal error:", err);
+    process.exit(1);
+});
