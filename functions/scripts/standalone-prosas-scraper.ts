@@ -133,7 +133,32 @@ async function runStandaloneScraper() {
             }
         }
 
-        console.log(`[StandaloneProsasScraper] Scraped total of ${allItems.length} items. Writing to editais_prosas.json...`);
+        console.log(`[StandaloneProsasScraper] Interception phase complete. Found ${allItems.length} items.`);
+
+        const maxDeepScrape = process.env.MAX_DEEP_SCRAPE ? parseInt(process.env.MAX_DEEP_SCRAPE, 10) : 100;
+        console.log(`[StandaloneProsasScraper] Starting deep scraping phase for up to ${maxDeepScrape} items...`);
+
+        const itemsToDeepScrape = allItems.slice(0, maxDeepScrape);
+
+        for (let i = 0; i < itemsToDeepScrape.length; i++) {
+            const item = itemsToDeepScrape[i];
+            const detailUrl = `https://prosas.com.br/editais/${item.id}`;
+            console.log(`[StandaloneProsasScraper] Deep scraping (${i + 1}/${itemsToDeepScrape.length}): ${detailUrl}`);
+
+            try {
+                await page.goto(detailUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                const fullText = await page.evaluate(() => document.body.innerText);
+                item.full_text = fullText;
+
+                // Be polite
+                await page.waitForTimeout(1000);
+            } catch (err: any) {
+                console.error(`[StandaloneProsasScraper] Failed to deep scrape ${detailUrl}: ${err.message}`);
+                // Continue to the next item instead of crashing
+            }
+        }
+
+        console.log(`[StandaloneProsasScraper] Deep scraping phase complete. Writing to editais_prosas.json...`);
         const outPath = path.join(__dirname, '..', 'editais_prosas.json');
         fs.writeFileSync(outPath, JSON.stringify(allItems, null, 2));
         console.log(`[StandaloneProsasScraper] Done! Saved to ${outPath}`);
