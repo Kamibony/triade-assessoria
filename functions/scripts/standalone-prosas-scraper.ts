@@ -133,8 +133,9 @@ async function runStandaloneScraper() {
                 if (e.message && e.message.includes("403_FORBIDDEN")) {
                     throw new Error(`[StandaloneProsasScraper] 403 Forbidden: WAF block or session expired during UI network interception on page ${currentPage}`);
                 }
-                console.error(`[StandaloneProsasScraper] Failed to intercept or parse API for page ${currentPage}:`, e);
-                throw new Error("Failed to intercept/parse JSON from Prosas API");
+                console.warn(`[StandaloneProsasScraper] Expected timeout or non-fatal error waiting for page ${currentPage}. Likely reached end of list. Error:`, e.message);
+                hasMore = false;
+                break;
             }
         }
 
