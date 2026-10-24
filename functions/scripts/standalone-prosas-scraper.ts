@@ -151,16 +151,16 @@ async function runStandaloneScraper() {
         console.log(`[StandaloneProsasScraper] Starting deep scraping phase for up to ${maxDeepScrape} items...`);
 
         const itemsToDeepScrape = deduplicatedItems.slice(0, maxDeepScrape);
-        const concurrency = 5;
+        const concurrency = 3;
         let processedCount = 0;
         const totalItems = itemsToDeepScrape.length;
+        const outPath = path.join(__dirname, '..', 'editais_prosas.json');
 
         // Clone the array to use as a queue
         const queue = [...itemsToDeepScrape];
 
         await Promise.all(
             Array.from({ length: concurrency }).map(async () => {
-                const workerPage = await context.newPage();
                 while (queue.length > 0) {
                     const item = queue.shift();
                     if (!item) break;
@@ -169,7 +169,9 @@ async function runStandaloneScraper() {
                     const detailUrl = `https://prosas.com.br/editais/${item.id}`;
                     console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl}`);
 
+                    let workerPage: any = null;
                     try {
+                        workerPage = await context.newPage();
                         await workerPage.goto(detailUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
                         const fullText = await workerPage.evaluate(() => document.body.innerText.substring(0, 15000));
                         item.full_text = fullText;
@@ -179,14 +181,20 @@ async function runStandaloneScraper() {
                     } catch (err: any) {
                         console.error(`[StandaloneProsasScraper] Failed to deep scrape ${detailUrl}: ${err.message}`);
                         // Continue to the next item instead of crashing
+                    } finally {
+                        if (workerPage) await workerPage.close();
+                    }
+
+                    // Checkpointing to prevent complete data loss on OOM
+                    if (currentIndex % 25 === 0) {
+                        fs.writeFileSync(outPath, JSON.stringify(deduplicatedItems, null, 2));
+                        console.log(`[StandaloneProsasScraper] Checkpoint saved at item ${currentIndex}`);
                     }
                 }
-                await workerPage.close();
             })
         );
 
-        console.log(`[StandaloneProsasScraper] Deep scraping phase complete. Writing to editais_prosas.json...`);
-        const outPath = path.join(__dirname, '..', 'editais_prosas.json');
+        console.log(`[StandaloneProsasScraper] Deep scraping phase complete. Writing final output to editais_prosas.json...`);
         fs.writeFileSync(outPath, JSON.stringify(deduplicatedItems, null, 2));
         console.log(`[StandaloneProsasScraper] Done! Saved to ${outPath}`);
 
