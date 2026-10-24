@@ -52,14 +52,14 @@ async function runStandaloneScraper() {
         const maxPages = 50;
         let hasMore = true;
 
-        let lastInterceptedUrl = '';
+        const seenUrls = new Set<string>();
 
         const waitNextApiResponse = () => page.waitForResponse(
             (response: any) => {
                 const url = response.url();
                 return url.includes('selecao/api/v2/third_party/oportunidades/inscricoes_abertas') &&
                        response.request().method() === 'GET' &&
-                       url !== lastInterceptedUrl;
+                       !seenUrls.has(url);
             },
             { timeout: 30000 }
         ).then(async (res: any) => {
@@ -67,7 +67,7 @@ async function runStandaloneScraper() {
                 if (res.status() === 403) throw new Error("403_FORBIDDEN");
                 throw new Error(`API returned HTTP ${res.status()}`);
             }
-            lastInterceptedUrl = res.url();
+            seenUrls.add(res.url());
             return res.json();
         });
 
@@ -102,11 +102,16 @@ async function runStandaloneScraper() {
                     const component = document.querySelector('prosas-listagem-editais');
                     if (component && component.shadowRoot) {
                         const buttons = component.shadowRoot.querySelectorAll('button');
-                        for (const btn of buttons) {
-                            if (btn.querySelector('svg') && btn.innerHTML.includes('M.29.71a.996.996 0 0 0 0 1.41L4.17 6 .29 9.88') && !btn.disabled) {
-                                btn.click();
-                                return true;
-                            }
+                        const matchingButtons = Array.from(buttons).filter((btn: any) => {
+                            return btn.querySelector('svg') &&
+                                   btn.innerHTML.includes('M.29.71a.996.996 0 0 0 0 1.41L4.17 6 .29 9.88') &&
+                                   !btn.disabled;
+                        });
+
+                        if (matchingButtons.length > 0) {
+                            const nextBtn = matchingButtons[matchingButtons.length - 1] as HTMLElement;
+                            nextBtn.click();
+                            return true;
                         }
                     }
                     return false;
@@ -128,39 +133,73 @@ async function runStandaloneScraper() {
                 if (e.message && e.message.includes("403_FORBIDDEN")) {
                     throw new Error(`[StandaloneProsasScraper] 403 Forbidden: WAF block or session expired during UI network interception on page ${currentPage}`);
                 }
-                console.error(`[StandaloneProsasScraper] Failed to intercept or parse API for page ${currentPage}:`, e);
-                throw new Error("Failed to intercept/parse JSON from Prosas API");
+                console.warn(`[StandaloneProsasScraper] Expected timeout or non-fatal error waiting for page ${currentPage}. Likely reached end of list. Error:`, e.message);
+                hasMore = false;
+                break;
             }
         }
 
         console.log(`[StandaloneProsasScraper] Interception phase complete. Found ${allItems.length} items.`);
 
-        const maxDeepScrape = process.env.MAX_DEEP_SCRAPE ? parseInt(process.env.MAX_DEEP_SCRAPE, 10) : 100;
+        // Deduplicate items
+        const uniqueMap = new Map<string, any>();
+        allItems.forEach(item => uniqueMap.set(String(item.id), item));
+        const deduplicatedItems = Array.from(uniqueMap.values());
+        console.log(`[StandaloneProsasScraper] Deduplication complete. Found ${deduplicatedItems.length} unique items.`);
+
+        const maxDeepScrape = process.env.MAX_DEEP_SCRAPE ? parseInt(process.env.MAX_DEEP_SCRAPE, 10) : 450;
         console.log(`[StandaloneProsasScraper] Starting deep scraping phase for up to ${maxDeepScrape} items...`);
 
-        const itemsToDeepScrape = allItems.slice(0, maxDeepScrape);
-
-        for (let i = 0; i < itemsToDeepScrape.length; i++) {
-            const item = itemsToDeepScrape[i];
-            const detailUrl = `https://prosas.com.br/editais/${item.id}`;
-            console.log(`[StandaloneProsasScraper] Deep scraping (${i + 1}/${itemsToDeepScrape.length}): ${detailUrl}`);
-
-            try {
-                await page.goto(detailUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                const fullText = await page.evaluate(() => document.body.innerText);
-                item.full_text = fullText;
-
-                // Be polite
-                await page.waitForTimeout(1000);
-            } catch (err: any) {
-                console.error(`[StandaloneProsasScraper] Failed to deep scrape ${detailUrl}: ${err.message}`);
-                // Continue to the next item instead of crashing
-            }
-        }
-
-        console.log(`[StandaloneProsasScraper] Deep scraping phase complete. Writing to editais_prosas.json...`);
+        const itemsToDeepScrape = deduplicatedItems.slice(0, maxDeepScrape);
+        const concurrency = 3;
+        let processedCount = 0;
+        const totalItems = itemsToDeepScrape.length;
         const outPath = path.join(__dirname, '..', 'editais_prosas.json');
-        fs.writeFileSync(outPath, JSON.stringify(allItems, null, 2));
+
+        // Clone the array to use as a queue
+        const queue = [...itemsToDeepScrape];
+
+        await Promise.all(
+            Array.from({ length: concurrency }).map(async () => {
+                while (queue.length > 0) {
+                    const item = queue.shift();
+                    if (!item) break;
+
+                    const currentIndex = ++processedCount;
+                    const detailUrl = `https://prosas.com.br/editais/${item.id}`;
+                    console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl}`);
+
+                    let workerPage: any = null;
+                    try {
+                        workerPage = await context.newPage();
+                        await workerPage.goto(detailUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+                        // Hard wait to allow the SPA to fetch and render the dynamic content
+                        await workerPage.waitForTimeout(3000);
+
+                        const fullText = await workerPage.evaluate(() => document.body.innerText.substring(0, 15000));
+                        item.full_text = fullText;
+
+                        // Be polite
+                        await workerPage.waitForTimeout(1000);
+                    } catch (err: any) {
+                        console.error(`[StandaloneProsasScraper] Failed to deep scrape ${detailUrl}: ${err.message}`);
+                        // Continue to the next item instead of crashing
+                    } finally {
+                        if (workerPage) await workerPage.close();
+                    }
+
+                    // Checkpointing to prevent complete data loss on OOM
+                    if (currentIndex % 25 === 0) {
+                        fs.writeFileSync(outPath, JSON.stringify(deduplicatedItems, null, 2));
+                        console.log(`[StandaloneProsasScraper] Checkpoint saved at item ${currentIndex}`);
+                    }
+                }
+            })
+        );
+
+        console.log(`[StandaloneProsasScraper] Deep scraping phase complete. Writing final output to editais_prosas.json...`);
+        fs.writeFileSync(outPath, JSON.stringify(deduplicatedItems, null, 2));
         console.log(`[StandaloneProsasScraper] Done! Saved to ${outPath}`);
 
     } finally {
