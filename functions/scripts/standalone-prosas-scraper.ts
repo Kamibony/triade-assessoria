@@ -172,8 +172,23 @@ async function runStandaloneScraper() {
                     let workerPage: any = null;
                     try {
                         workerPage = await context.newPage();
-                        await workerPage.goto(detailUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                        const fullText = await workerPage.evaluate(() => document.body.innerText.substring(0, 15000));
+                        await workerPage.goto(detailUrl, { waitUntil: 'networkidle', timeout: 30000 });
+
+                        // Wait for actual edital content container to render (Single Page App)
+                        await workerPage.waitForSelector('.layout-principal, prosas-detalhe-edital, prosas-oportunidade-detalhes, main', { timeout: 15000 }).catch(() => {});
+
+                        const fullText = await workerPage.evaluate(() => {
+                            const content: any = document.querySelector('prosas-detalhe-edital') ||
+                                            document.querySelector('prosas-oportunidade-detalhes') ||
+                                            document.querySelector('.layout-principal') ||
+                                            document.querySelector('main') ||
+                                            document.body;
+
+                            if (content && content.shadowRoot) {
+                                return (content.shadowRoot.textContent || '').substring(0, 15000);
+                            }
+                            return (content?.innerText || '').substring(0, 15000);
+                        });
                         item.full_text = fullText;
 
                         // Be polite
