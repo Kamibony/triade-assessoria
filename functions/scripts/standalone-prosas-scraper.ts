@@ -172,24 +172,31 @@ async function runStandaloneScraper() {
                     let workerPage: any = null;
                     try {
                         workerPage = await context.newPage();
-                        await workerPage.goto(detailUrl, { waitUntil: 'networkidle', timeout: 30000 });
+                        await workerPage.goto(detailUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-                        // Wait for actual edital content container to render (Single Page App)
-                        await workerPage.waitForSelector('.layout-principal, prosas-detalhe-edital, prosas-oportunidade-detalhes, main', { timeout: 15000 }).catch(() => {});
+                        let lastLength = 0;
+                        let stableCount = 0;
+                        let pageText = '';
 
-                        const fullText = await workerPage.evaluate(() => {
-                            const content: any = document.querySelector('prosas-detalhe-edital') ||
-                                            document.querySelector('prosas-oportunidade-detalhes') ||
-                                            document.querySelector('.layout-principal') ||
-                                            document.querySelector('main') ||
-                                            document.body;
-
-                            if (content && content.shadowRoot) {
-                                return (content.shadowRoot.textContent || '').substring(0, 15000);
+                        for (let poll = 0; poll < 20; poll++) {
+                            await workerPage.waitForTimeout(1000);
+                            pageText = await workerPage.evaluate(() => document.body.innerText);
+                            if (pageText.length > 400 && pageText.length === lastLength) {
+                                stableCount++;
+                                if (stableCount >= 2) {
+                                    break;
+                                }
+                            } else {
+                                stableCount = 0;
                             }
-                            return (content?.innerText || '').substring(0, 15000);
-                        });
-                        item.full_text = fullText;
+                            lastLength = pageText.length;
+                        }
+
+                        if (pageText.length > 15000) {
+                            pageText = pageText.substring(0, 15000);
+                        }
+
+                        item.full_text = pageText;
 
                         // Be polite
                         await workerPage.waitForTimeout(1000);
