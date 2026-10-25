@@ -172,10 +172,42 @@ async function runStandaloneScraper() {
                     let workerPage: any = null;
                     try {
                         workerPage = await context.newPage();
+
+                        // Intercept API responses containing edital content
+                        const interceptedData: any[] = [];
+                        workerPage.on('response', async (res: any) => {
+                            const url = res.url();
+                            if ((url.includes('api/public/') || url.includes('oportunidade')) && res.request().method() === 'GET') {
+                                try {
+                                    const json = await res.json();
+                                    interceptedData.push(json);
+                                } catch (e) {
+                                    // Ignore parsing errors
+                                }
+                            }
+                        });
+
                         await workerPage.goto(detailUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
                         // Simple grace period for SPA hydration
                         await workerPage.waitForTimeout(4000);
+
+                        // Extract text from intercepted API JSON payloads
+                        let apiText = '';
+                        function extractStringsFromJSON(obj: any) {
+                            if (typeof obj === 'string') {
+                                apiText += obj.replace(/<[^>]*>?/gm, ' ') + ' '; // Strip HTML tags
+                            } else if (Array.isArray(obj)) {
+                                obj.forEach(extractStringsFromJSON);
+                            } else if (typeof obj === 'object' && obj !== null) {
+                                for (const key in obj) {
+                                    if (!['id', 'created_at', 'updated_at', 'url', 'slug', 'image_url', 'logo_url', 'color'].includes(key)) {
+                                        extractStringsFromJSON(obj[key]);
+                                    }
+                                }
+                            }
+                        }
+                        interceptedData.forEach(extractStringsFromJSON);
 
                         let pageText = await workerPage.evaluate(() => {
                             let text = '';
@@ -209,6 +241,9 @@ async function runStandaloneScraper() {
                             }
                             return text.replace(/\n\s*\n/g, '\n').replace(/ {2,}/g, ' ').trim();
                         });
+
+                        // Combine DOM text with extracted API text
+                        pageText = pageText + '\n\n--- API DATA EXTRAPOLATION ---\n' + apiText.replace(/\s+/g, ' ').trim();
 
                         if (pageText.length > 15000) {
                             pageText = pageText.substring(0, 15000);
