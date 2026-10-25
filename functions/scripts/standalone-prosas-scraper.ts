@@ -174,7 +174,7 @@ async function runStandaloneScraper() {
                         workerPage = await context.newPage();
                         // Set up response interceptor to wait for the specific edital data API
                         const apiResponsePromise = workerPage.waitForResponse(
-                            (res: any) => res.url().includes('api/public/') || res.url().includes('oportunidade'),
+                            (res: any) => (res.url().includes('api/public/') || res.url().includes('oportunidade')) && res.request().method() === 'GET',
                             { timeout: 15000 }
                         ).catch(() => null);
 
@@ -203,18 +203,11 @@ async function runStandaloneScraper() {
                                 return content?.innerText || '';
                             });
 
-                            // 3500 threshold guarantees we are past the generic SPA boilerplate (usually ~2500 chars)
-                            // or fallback to stability if it happens to be a very short edital.
-                            if (pageText.length > 3500 && pageText.length === lastLength) {
+                            // 3000 threshold guarantees we are past the generic SPA boilerplate (usually ~2500 chars)
+                            if (pageText.length > 3000 && pageText.length === lastLength) {
                                 stableCount++;
                                 // Require 2 seconds of absolute DOM stability
                                 if (stableCount >= 2) {
-                                    break;
-                                }
-                            } else if (pageText.length > 400 && pageText.length === lastLength && poll > 5) {
-                                // Fallback for genuinely short editais after waiting a bit
-                                stableCount++;
-                                if (stableCount >= 3) {
                                     break;
                                 }
                             } else {
