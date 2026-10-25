@@ -4129,20 +4129,9 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
     let context: any;
 
     try {
-        const bucket = getStorage().bucket();
-        const sessionFile = bucket.file('system/prosas_session.json');
-
         let sessionState = null;
-        try {
-            const [exists] = await sessionFile.exists();
-            if (exists) {
-                const [content] = await sessionFile.download();
-                sessionState = JSON.parse(content.toString('utf-8'));
-                logger.info('[Prosas Auth Worker] Loaded existing session from GCS.');
-            }
-        } catch (e) {
-            logger.warn('[Prosas Auth Worker] Failed to load session from GCS. Will login freshly.', e);
-        }
+        // Session state loading from GCS has been disabled due to billing constraints.
+        // The scraper will authenticate freshly on each run.
 
         browser = await chromium.launch({
             args: chromiumSparticuz.args,
@@ -4150,47 +4139,31 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
             headless: true,
         });
 
-        if (sessionState) {
-            context = await browser.newContext({ storageState: sessionState });
-        } else {
-            context = await browser.newContext();
-        }
+        context = await browser.newContext();
 
-        // Verify session by visiting a dashboard/profile page
-        logger.info('[Prosas Auth Worker] Verifying session state...');
+        // Always authenticate freshly due to GCS billing constraints
+        logger.info('[Prosas Auth Worker] Proceeding with fresh login...');
         const authPage = await context.newPage();
         try {
-            await authPage.goto('https://prosas.com.br/painel', { waitUntil: 'networkidle', timeout: 60000 });
+            await authPage.goto('https://prosas.com.br/users/sign_in', { waitUntil: 'networkidle', timeout: 60000 });
 
-            let needsLogin = false;
+            logger.info('[Prosas Auth Worker] Filling credentials...');
+            await authPage.locator('#user_email').last().waitFor({ state: 'visible', timeout: 30000 });
+            await authPage.locator('#user_email').last().fill(username);
+            await authPage.locator('#user_password').last().fill(password);
+
+            logger.info('[Prosas Auth Worker] Submitting form...');
+            await authPage.locator('input[type="submit"][name="commit"]').last().click();
+
+            await authPage.waitForLoadState('networkidle');
+            await authPage.waitForTimeout(5000);
+
             if (authPage.url().includes('/users/sign_in')) {
-                 logger.info('[Prosas Auth Worker] Session invalid or missing. Proceeding with fresh login...');
-                 needsLogin = true;
+                throw new Error('[Prosas Auth Worker] Failed to navigate past login page. Authentication likely failed.');
             }
 
-            if (needsLogin) {
-                logger.info('[Prosas Auth Worker] Filling credentials...');
-                await authPage.locator('#user_email').last().waitFor({ state: 'visible', timeout: 30000 });
-                await authPage.locator('#user_email').last().fill(username);
-                await authPage.locator('#user_password').last().fill(password);
-
-                logger.info('[Prosas Auth Worker] Submitting form...');
-                await authPage.locator('input[type="submit"][name="commit"]').last().click();
-
-                await authPage.waitForLoadState('networkidle');
-                await authPage.waitForTimeout(5000);
-
-                if (authPage.url().includes('/users/sign_in')) {
-                    throw new Error('[Prosas Auth Worker] Failed to navigate past login page. Authentication likely failed.');
-                }
-
-                // Save fresh session state
-                const newSessionState = await context.storageState();
-                await sessionFile.save(JSON.stringify(newSessionState), { contentType: 'application/json' });
-                logger.info('[Prosas Auth Worker] Fresh session state saved to GCS.');
-            } else {
-                logger.info('[Prosas Auth Worker] Session is valid.');
-            }
+            logger.info('[Prosas Auth Worker] Fresh login successful.');
+            // Session state persistence to GCS is removed
         } finally {
             await authPage.close();
         }

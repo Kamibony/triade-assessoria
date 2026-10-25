@@ -33,21 +33,8 @@ jobs:
           cd functions
           node scripts/generate-prosas-session.js
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+      - name: Upload Session Artifact
+        uses: actions/upload-artifact@v4
         with:
-          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRIADE_ASSESSORIA }}
-
-      - name: Setup Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: triade-assessoria
-
-      - name: Push Session to Google Cloud Storage
-        run: |
-          cd functions
-          # Check if the bucket exists. If not, create it.
-          gcloud storage buckets create gs://triade-prosas-session-state || true
-
-          # Upload the generated JSON file to the bucket
-          gcloud storage cp prosas_session.json gs://triade-prosas-session-state/prosas_session.json
+          name: prosas_session
+          path: functions/prosas_session.json
