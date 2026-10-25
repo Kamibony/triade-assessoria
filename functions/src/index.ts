@@ -4129,20 +4129,9 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
     let context: any;
 
     try {
-        const bucket = getStorage().bucket();
-        const sessionFile = bucket.file('system/prosas_session.json');
-
         let sessionState = null;
-        try {
-            const [exists] = await sessionFile.exists();
-            if (exists) {
-                const [content] = await sessionFile.download();
-                sessionState = JSON.parse(content.toString('utf-8'));
-                logger.info('[Prosas Auth Worker] Loaded existing session from GCS.');
-            }
-        } catch (e) {
-            logger.warn('[Prosas Auth Worker] Failed to load session from GCS. Will login freshly.', e);
-        }
+        // Session state loading from GCS has been disabled due to billing constraints.
+        // The scraper will authenticate freshly on each run.
 
         browser = await chromium.launch({
             args: chromiumSparticuz.args,
@@ -4150,46 +4139,33 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
             headless: true,
         });
 
-        if (sessionState) {
-            context = await browser.newContext({ storageState: sessionState });
-        } else {
-            context = await browser.newContext();
-        }
+        context = await browser.newContext();
 
-        const page = await context.newPage();
+        // Always authenticate freshly due to GCS billing constraints
+        logger.info('[Prosas Auth Worker] Proceeding with fresh login...');
+        const authPage = await context.newPage();
+        try {
+            await authPage.goto('https://prosas.com.br/users/sign_in', { waitUntil: 'networkidle', timeout: 60000 });
 
-        // Verify session by visiting a dashboard/profile page
-        logger.info('[Prosas Auth Worker] Verifying session state...');
-        await page.goto('https://prosas.com.br/painel', { waitUntil: 'networkidle', timeout: 60000 });
-
-        let needsLogin = false;
-        if (page.url().includes('/users/sign_in')) {
-             logger.info('[Prosas Auth Worker] Session invalid or missing. Proceeding with fresh login...');
-             needsLogin = true;
-        }
-
-        if (needsLogin) {
             logger.info('[Prosas Auth Worker] Filling credentials...');
-            await page.locator('#user_email').last().waitFor({ state: 'visible', timeout: 30000 });
-            await page.locator('#user_email').last().fill(username);
-            await page.locator('#user_password').last().fill(password);
+            await authPage.locator('#user_email').last().waitFor({ state: 'visible', timeout: 30000 });
+            await authPage.locator('#user_email').last().fill(username);
+            await authPage.locator('#user_password').last().fill(password);
 
             logger.info('[Prosas Auth Worker] Submitting form...');
-            await page.locator('input[type="submit"][name="commit"]').last().click();
+            await authPage.locator('input[type="submit"][name="commit"]').last().click();
 
-            await page.waitForLoadState('networkidle');
-            await page.waitForTimeout(5000);
+            await authPage.waitForLoadState('networkidle');
+            await authPage.waitForTimeout(5000);
 
-            if (page.url().includes('/users/sign_in')) {
+            if (authPage.url().includes('/users/sign_in')) {
                 throw new Error('[Prosas Auth Worker] Failed to navigate past login page. Authentication likely failed.');
             }
 
-            // Save fresh session state
-            const newSessionState = await context.storageState();
-            await sessionFile.save(JSON.stringify(newSessionState), { contentType: 'application/json' });
-            logger.info('[Prosas Auth Worker] Fresh session state saved to GCS.');
-        } else {
-            logger.info('[Prosas Auth Worker] Session is valid.');
+            logger.info('[Prosas Auth Worker] Fresh login successful.');
+            // Session state persistence to GCS is removed
+        } finally {
+            await authPage.close();
         }
 
         const searchIdVal = searchId || `PROSAS_${Date.now()}`;
@@ -4204,6 +4180,8 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
             let combinedText = '';
             const downloadedPdfPaths: string[] = [];
 
+            const page = await context.newPage();
+
             try {
                 // Human-like delay between page visits
                 if (i > 0) {
@@ -4211,18 +4189,47 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                     await page.waitForTimeout(delay);
                 }
 
-                await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 60000 });
-                await page.waitForTimeout(3000); // Allow JS to settle
+                // Set up response interceptor to wait for the specific edital data API
+                const apiResponsePromise = page.waitForResponse(
+                    (res: any) => res.url().includes('api/public/') || res.url().includes('oportunidade'),
+                    { timeout: 15000 }
+                ).catch(() => null);
+
+                await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+
+                // Wait for the dynamic data to arrive
+                await apiResponsePromise;
 
                 const currentUrl = page.url();
                 if (currentUrl.includes('/users/sign_in')) {
                     throw new Error('Prosas session expired during batch iteration or target URL requires different access.');
                 }
 
-                // Extract the main content text
-                const pageText = await page.evaluate(() => {
-                    return document.body.innerText;
-                });
+                // Smart waits for SPA
+                let lastLength = 0;
+                let stableCount = 0;
+                let pageText = '';
+
+                for (let poll = 0; poll < 20; poll++) {
+                    await page.waitForTimeout(1000);
+                    pageText = await page.evaluate(() => document.body.innerText);
+
+                    if (pageText.length > 3500 && pageText.length === lastLength) {
+                        stableCount++;
+                        if (stableCount >= 2) {
+                            break;
+                        }
+                    } else if (pageText.length > 400 && pageText.length === lastLength && poll > 5) {
+                        stableCount++;
+                        if (stableCount >= 3) {
+                            break;
+                        }
+                    } else {
+                        stableCount = 0;
+                    }
+                    lastLength = pageText.length;
+                }
+
                 combinedText = pageText;
 
                 const rawLinks = await page.evaluate(() => {
@@ -4305,6 +4312,10 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                      continue; // Skip to next URL
                 }
 
+                if (combinedText.length > 15000) {
+                    combinedText = combinedText.substring(0, 15000);
+                }
+
                 const contentRef = db.collection('scraping_contents').doc();
                 await contentRef.set({
                      url: targetUrl,
@@ -4336,6 +4347,8 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                     strategy: 'PROSAS'
                 });
                 // Continue to next URL in batch instead of failing completely
+            } finally {
+                await page.close();
             }
         } // End of batch loop
 
