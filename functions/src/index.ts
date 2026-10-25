@@ -4216,7 +4216,16 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                     await page.waitForTimeout(delay);
                 }
 
+                // Set up response interceptor to wait for the specific edital data API
+                const apiResponsePromise = page.waitForResponse(
+                    (res: any) => res.url().includes('api/public/') || res.url().includes('oportunidade'),
+                    { timeout: 15000 }
+                ).catch(() => null);
+
                 await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+
+                // Wait for the dynamic data to arrive
+                await apiResponsePromise;
 
                 const currentUrl = page.url();
                 if (currentUrl.includes('/users/sign_in')) {
@@ -4231,9 +4240,15 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                 for (let poll = 0; poll < 20; poll++) {
                     await page.waitForTimeout(1000);
                     pageText = await page.evaluate(() => document.body.innerText);
-                    if (pageText.length > 400 && pageText.length === lastLength) {
+
+                    if (pageText.length > 3500 && pageText.length === lastLength) {
                         stableCount++;
                         if (stableCount >= 2) {
+                            break;
+                        }
+                    } else if (pageText.length > 400 && pageText.length === lastLength && poll > 5) {
+                        stableCount++;
+                        if (stableCount >= 3) {
                             break;
                         }
                     } else {
