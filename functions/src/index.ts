@@ -4199,6 +4199,40 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                 // Simple grace period for SPA hydration
                 await page.waitForTimeout(4000);
 
+                const pageText = await page.evaluate(() => {
+                    let text = '';
+                    function walk(node: Node) {
+                        if (node.nodeType === Node.TEXT_NODE) {
+                            text += (node.textContent || '') + ' ';
+                        } else if (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+                            const el = node as Element;
+                            const tagName = el.tagName ? el.tagName.toLowerCase() : '';
+
+                            if (tagName !== 'script' && tagName !== 'style') {
+                                // Add spacing for block elements
+                                const isBlock = ['p', 'div', 'br', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'tr', 'td', 'article', 'section'].includes(tagName);
+                                if (isBlock) text += '\n';
+
+                                if (el.shadowRoot) {
+                                    walk(el.shadowRoot);
+                                }
+                                for (let i = 0; i < node.childNodes.length; i++) {
+                                    const child = node.childNodes[i];
+                                    if (child) {
+                                        walk(child);
+                                    }
+                                }
+
+                                if (isBlock) text += '\n';
+                            }
+                        }
+                    }
+                    if (document.body) {
+                        walk(document.body);
+                    }
+                    return text.replace(/\n\s*\n/g, '\n').replace(/ {2,}/g, ' ').trim();
+                });
+
                 const pageText = await page.evaluate(() => document.body.innerText);
                 combinedText = pageText;
 

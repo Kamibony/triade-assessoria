@@ -178,16 +178,36 @@ async function runStandaloneScraper() {
                         await workerPage.waitForTimeout(4000);
 
                         let pageText = await workerPage.evaluate(() => {
-                            const content: any = document.querySelector('prosas-detalhe-edital') ||
-                                            document.querySelector('prosas-oportunidade-detalhes') ||
-                                            document.querySelector('.layout-principal') ||
-                                            document.querySelector('main') ||
-                                            document.body;
+                            let text = '';
+                            function walk(node: Node) {
+                                if (node.nodeType === Node.TEXT_NODE) {
+                                    text += (node.textContent || '') + ' ';
+                                } else if (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+                                    const el = node as Element;
+                                    const tagName = el.tagName ? el.tagName.toLowerCase() : '';
 
-                            if (content && content.shadowRoot) {
-                                return content.shadowRoot.textContent || '';
+                                    if (tagName !== 'script' && tagName !== 'style') {
+                                        const isBlock = ['p', 'div', 'br', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'tr', 'td', 'article', 'section'].includes(tagName);
+                                        if (isBlock) text += '\n';
+
+                                        if (el.shadowRoot) {
+                                            walk(el.shadowRoot);
+                                        }
+                                        for (let i = 0; i < node.childNodes.length; i++) {
+                                            const child = node.childNodes[i];
+                                            if (child) {
+                                                walk(child);
+                                            }
+                                        }
+
+                                        if (isBlock) text += '\n';
+                                    }
+                                }
                             }
-                            return content?.innerText || '';
+                            if (document.body) {
+                                walk(document.body);
+                            }
+                            return text.replace(/\n\s*\n/g, '\n').replace(/ {2,}/g, ' ').trim();
                         });
 
                         if (pageText.length > 15000) {
