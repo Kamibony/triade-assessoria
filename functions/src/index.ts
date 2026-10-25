@@ -4189,46 +4189,49 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                     await page.waitForTimeout(delay);
                 }
 
-                // Set up response interceptor to wait for the specific edital data API
-                const apiResponsePromise = page.waitForResponse(
-                    (res: any) => res.url().includes('api/public/') || res.url().includes('oportunidade'),
-                    { timeout: 15000 }
-                ).catch(() => null);
-
                 await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-
-                // Wait for the dynamic data to arrive
-                await apiResponsePromise;
 
                 const currentUrl = page.url();
                 if (currentUrl.includes('/users/sign_in')) {
                     throw new Error('Prosas session expired during batch iteration or target URL requires different access.');
                 }
 
-                // Smart waits for SPA
-                let lastLength = 0;
-                let stableCount = 0;
-                let pageText = '';
+                // Simple grace period for SPA hydration
+                await page.waitForTimeout(4000);
 
-                for (let poll = 0; poll < 20; poll++) {
-                    await page.waitForTimeout(1000);
-                    pageText = await page.evaluate(() => document.body.innerText);
+                const pageText = await page.evaluate(() => {
+                    let text = '';
+                    function walk(node: Node) {
+                        if (node.nodeType === Node.TEXT_NODE) {
+                            text += (node.textContent || '') + ' ';
+                        } else if (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+                            const el = node as Element;
+                            const tagName = el.tagName ? el.tagName.toLowerCase() : '';
 
-                    if (pageText.length > 3500 && pageText.length === lastLength) {
-                        stableCount++;
-                        if (stableCount >= 2) {
-                            break;
+                            if (tagName !== 'script' && tagName !== 'style') {
+                                // Add spacing for block elements
+                                const isBlock = ['p', 'div', 'br', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'tr', 'td', 'article', 'section'].includes(tagName);
+                                if (isBlock) text += '\n';
+
+                                if (el.shadowRoot) {
+                                    walk(el.shadowRoot);
+                                }
+                                for (let i = 0; i < node.childNodes.length; i++) {
+                                    const child = node.childNodes[i];
+                                    if (child) {
+                                        walk(child);
+                                    }
+                                }
+
+                                if (isBlock) text += '\n';
+                            }
                         }
-                    } else if (pageText.length > 400 && pageText.length === lastLength && poll > 5) {
-                        stableCount++;
-                        if (stableCount >= 3) {
-                            break;
-                        }
-                    } else {
-                        stableCount = 0;
                     }
-                    lastLength = pageText.length;
-                }
+                    if (document.body) {
+                        walk(document.body);
+                    }
+                    return text.replace(/\n\s*\n/g, '\n').replace(/ {2,}/g, ' ').trim();
+                });
 
                 combinedText = pageText;
 
