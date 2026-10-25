@@ -4191,7 +4191,7 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
 
                 // Set up response interceptor to wait for the specific edital data API
                 const apiResponsePromise = page.waitForResponse(
-                    (res: any) => res.url().includes('api/public/') || res.url().includes('oportunidade'),
+                    (res: any) => (res.url().includes('api/public/') || res.url().includes('oportunidade')) && res.request().method() === 'GET',
                     { timeout: 15000 }
                 ).catch(() => null);
 
@@ -4214,14 +4214,9 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                     await page.waitForTimeout(1000);
                     pageText = await page.evaluate(() => document.body.innerText);
 
-                    if (pageText.length > 3500 && pageText.length === lastLength) {
+                    if (pageText.length > 3000 && pageText.length === lastLength) {
                         stableCount++;
                         if (stableCount >= 2) {
-                            break;
-                        }
-                    } else if (pageText.length > 400 && pageText.length === lastLength && poll > 5) {
-                        stableCount++;
-                        if (stableCount >= 3) {
                             break;
                         }
                     } else {
