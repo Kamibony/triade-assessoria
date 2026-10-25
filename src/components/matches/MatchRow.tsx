@@ -63,7 +63,7 @@ export function MatchRow({ match, edital, osc, isExpanded, onToggleExpand, onFee
                     </td>
                 )}
                 <td className="px-6 py-4 text-center">
-                    <div className={`inline-flex items-center gap-1.5 font-medium px-2.5 py-1 rounded-full text-xs cursor-help ${gate1Class}`} title={!gate1Passed && (match.aiRationale || match.reasoning) ? (match.aiRationale || match.reasoning) : "Gate 1: Restrições burocráticas avaliadas."}>
+                    <div className={`inline-flex items-center gap-1.5 font-medium px-2.5 py-1 rounded-full text-xs cursor-help ${gate1Class}`} title={(!gate1Passed && (match.aiRationale || match.reasoning)) ? String(match.aiRationale || match.reasoning) : "Gate 1: Restrições burocráticas avaliadas."}>
                         {gate1Icon}
                         {gate1Text}
                     </div>
