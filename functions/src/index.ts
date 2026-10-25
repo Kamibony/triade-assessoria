@@ -4233,6 +4233,7 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                     return text.replace(/\n\s*\n/g, '\n').replace(/ {2,}/g, ' ').trim();
                 });
 
+                const pageText = await page.evaluate(() => document.body.innerText);
                 combinedText = pageText;
 
                 const rawLinks = await page.evaluate(() => {
