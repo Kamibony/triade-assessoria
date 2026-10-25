@@ -172,56 +172,23 @@ async function runStandaloneScraper() {
                     let workerPage: any = null;
                     try {
                         workerPage = await context.newPage();
-                        // Set up response interceptor to wait for the specific edital data API
-                        const apiResponsePromise = workerPage.waitForResponse(
-                            (res: any) => res.url().includes('api/public/') || res.url().includes('oportunidade'),
-                            { timeout: 15000 }
-                        ).catch(() => null);
-
                         await workerPage.goto(detailUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-                        // Wait for the dynamic data to arrive
-                        await apiResponsePromise;
+                        // Simple grace period for SPA hydration
+                        await workerPage.waitForTimeout(4000);
 
-                        let lastLength = 0;
-                        let stableCount = 0;
-                        let pageText = '';
+                        let pageText = await workerPage.evaluate(() => {
+                            const content: any = document.querySelector('prosas-detalhe-edital') ||
+                                            document.querySelector('prosas-oportunidade-detalhes') ||
+                                            document.querySelector('.layout-principal') ||
+                                            document.querySelector('main') ||
+                                            document.body;
 
-                        // Poll to ensure React/Vue has finished rendering the JSON into the DOM
-                        for (let poll = 0; poll < 20; poll++) {
-                            await workerPage.waitForTimeout(1000);
-                            pageText = await workerPage.evaluate(() => {
-                                const content: any = document.querySelector('prosas-detalhe-edital') ||
-                                                document.querySelector('prosas-oportunidade-detalhes') ||
-                                                document.querySelector('.layout-principal') ||
-                                                document.querySelector('main') ||
-                                                document.body;
-
-                                if (content && content.shadowRoot) {
-                                    return content.shadowRoot.textContent || '';
-                                }
-                                return content?.innerText || '';
-                            });
-
-                            // 3500 threshold guarantees we are past the generic SPA boilerplate (usually ~2500 chars)
-                            // or fallback to stability if it happens to be a very short edital.
-                            if (pageText.length > 3500 && pageText.length === lastLength) {
-                                stableCount++;
-                                // Require 2 seconds of absolute DOM stability
-                                if (stableCount >= 2) {
-                                    break;
-                                }
-                            } else if (pageText.length > 400 && pageText.length === lastLength && poll > 5) {
-                                // Fallback for genuinely short editais after waiting a bit
-                                stableCount++;
-                                if (stableCount >= 3) {
-                                    break;
-                                }
-                            } else {
-                                stableCount = 0;
+                            if (content && content.shadowRoot) {
+                                return content.shadowRoot.textContent || '';
                             }
-                            lastLength = pageText.length;
-                        }
+                            return content?.innerText || '';
+                        });
 
                         if (pageText.length > 15000) {
                             pageText = pageText.substring(0, 15000);
