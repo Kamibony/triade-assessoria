@@ -172,56 +172,78 @@ async function runStandaloneScraper() {
                     let workerPage: any = null;
                     try {
                         workerPage = await context.newPage();
-                        // Set up response interceptor to wait for the specific edital data API
-                        const apiResponsePromise = workerPage.waitForResponse(
-                            (res: any) => res.url().includes('api/public/') || res.url().includes('oportunidade'),
-                            { timeout: 15000 }
-                        ).catch(() => null);
+
+                        // Intercept API responses containing edital content
+                        const interceptedData: any[] = [];
+                        workerPage.on('response', async (res: any) => {
+                            const url = res.url();
+                            if ((url.includes('api/public/') || url.includes('oportunidade')) && res.request().method() === 'GET') {
+                                try {
+                                    const json = await res.json();
+                                    interceptedData.push(json);
+                                } catch (e) {
+                                    // Ignore parsing errors
+                                }
+                            }
+                        });
 
                         await workerPage.goto(detailUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-                        // Wait for the dynamic data to arrive
-                        await apiResponsePromise;
+                        // Simple grace period for SPA hydration
+                        await workerPage.waitForTimeout(4000);
 
-                        let lastLength = 0;
-                        let stableCount = 0;
-                        let pageText = '';
-
-                        // Poll to ensure React/Vue has finished rendering the JSON into the DOM
-                        for (let poll = 0; poll < 20; poll++) {
-                            await workerPage.waitForTimeout(1000);
-                            pageText = await workerPage.evaluate(() => {
-                                const content: any = document.querySelector('prosas-detalhe-edital') ||
-                                                document.querySelector('prosas-oportunidade-detalhes') ||
-                                                document.querySelector('.layout-principal') ||
-                                                document.querySelector('main') ||
-                                                document.body;
-
-                                if (content && content.shadowRoot) {
-                                    return content.shadowRoot.textContent || '';
+                        // Extract text from intercepted API JSON payloads
+                        let apiText = '';
+                        function extractStringsFromJSON(obj: any) {
+                            if (typeof obj === 'string') {
+                                apiText += obj.replace(/<[^>]*>?/gm, ' ') + ' '; // Strip HTML tags
+                            } else if (Array.isArray(obj)) {
+                                obj.forEach(extractStringsFromJSON);
+                            } else if (typeof obj === 'object' && obj !== null) {
+                                for (const key in obj) {
+                                    if (!['id', 'created_at', 'updated_at', 'url', 'slug', 'image_url', 'logo_url', 'color'].includes(key)) {
+                                        extractStringsFromJSON(obj[key]);
+                                    }
                                 }
-                                return content?.innerText || '';
-                            });
-
-                            // 3500 threshold guarantees we are past the generic SPA boilerplate (usually ~2500 chars)
-                            // or fallback to stability if it happens to be a very short edital.
-                            if (pageText.length > 3500 && pageText.length === lastLength) {
-                                stableCount++;
-                                // Require 2 seconds of absolute DOM stability
-                                if (stableCount >= 2) {
-                                    break;
-                                }
-                            } else if (pageText.length > 400 && pageText.length === lastLength && poll > 5) {
-                                // Fallback for genuinely short editais after waiting a bit
-                                stableCount++;
-                                if (stableCount >= 3) {
-                                    break;
-                                }
-                            } else {
-                                stableCount = 0;
                             }
-                            lastLength = pageText.length;
                         }
+                        interceptedData.forEach(extractStringsFromJSON);
+
+                        let pageText = await workerPage.evaluate(() => {
+                            let text = '';
+                            function walk(node: Node) {
+                                if (node.nodeType === Node.TEXT_NODE) {
+                                    text += (node.textContent || '') + ' ';
+                                } else if (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+                                    const el = node as Element;
+                                    const tagName = el.tagName ? el.tagName.toLowerCase() : '';
+
+                                    if (tagName !== 'script' && tagName !== 'style') {
+                                        const isBlock = ['p', 'div', 'br', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'tr', 'td', 'article', 'section'].includes(tagName);
+                                        if (isBlock) text += '\n';
+
+                                        if (el.shadowRoot) {
+                                            walk(el.shadowRoot);
+                                        }
+                                        for (let i = 0; i < node.childNodes.length; i++) {
+                                            const child = node.childNodes[i];
+                                            if (child) {
+                                                walk(child);
+                                            }
+                                        }
+
+                                        if (isBlock) text += '\n';
+                                    }
+                                }
+                            }
+                            if (document.body) {
+                                walk(document.body);
+                            }
+                            return text.replace(/\n\s*\n/g, '\n').replace(/ {2,}/g, ' ').trim();
+                        });
+
+                        // Combine DOM text with extracted API text
+                        pageText = pageText + '\n\n--- API DATA EXTRAPOLATION ---\n' + apiText.replace(/\s+/g, ' ').trim();
 
                         if (pageText.length > 15000) {
                             pageText = pageText.substring(0, 15000);
