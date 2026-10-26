@@ -36,11 +36,8 @@ async function runStandaloneScraper() {
         await page.locator('input[type="submit"][name="commit"]').last().click();
 
         await page.waitForLoadState('networkidle');
-        // Give it a moment to complete any redirect/cookie setting
         await page.waitForTimeout(5000);
 
-        // Wait until we are no longer on the login page or a logged-in indicator is present.
-        // If we are still on the login page after waiting, it likely failed.
         if (page.url().includes('/users/sign_in')) {
             throw new Error("[StandaloneProsasScraper] Failed to navigate past login page. Authentication likely failed.");
         }
@@ -83,7 +80,6 @@ async function runStandaloneScraper() {
                     break;
                 }
 
-                // Prevent duplicate payloads from being pushed if the API returns the same data
                 if (allItems.length > 0 && JSON.stringify(allItems.slice(-items.length)) === JSON.stringify(items)) {
                     console.warn(`[StandaloneProsasScraper] Page ${currentPage} returned duplicate items. Stopping pagination.`);
                     hasMore = false;
@@ -93,9 +89,8 @@ async function runStandaloneScraper() {
                 allItems.push(...items);
                 console.log(`[StandaloneProsasScraper] Captured page ${currentPage} with ${items.length} items.`);
 
-                await page.waitForTimeout(1000); // Allow DOM to settle before setting up next listener
+                await page.waitForTimeout(1000);
 
-                // Set up the promise BEFORE clicking to avoid race conditions
                 const nextApiPromise = waitNextApiResponse();
 
                 const nextClicked = await page.evaluate(() => {
@@ -120,11 +115,8 @@ async function runStandaloneScraper() {
                 if (nextClicked) {
                     apiPromise = nextApiPromise;
                     currentPage++;
-                    await page.waitForTimeout(1000); // polite delay
+                    await page.waitForTimeout(1000);
                 } else {
-                    // We didn't click next, so we don't need to await this promise. We can just ignore it.
-                    // Playwright will eventually timeout the promise, but we'll break out of the loop anyway.
-                    // To avoid unhandled rejection warnings from Playwright, we can catch it.
                     nextApiPromise.catch(() => {});
                     console.log("[StandaloneProsasScraper] No active 'Next' button found. Ending pagination.");
                     hasMore = false;
@@ -141,7 +133,6 @@ async function runStandaloneScraper() {
 
         console.log(`[StandaloneProsasScraper] Interception phase complete. Found ${allItems.length} items.`);
 
-        // Deduplicate items
         const uniqueMap = new Map<string, any>();
         allItems.forEach(item => uniqueMap.set(String(item.id), item));
         const deduplicatedItems = Array.from(uniqueMap.values());
@@ -151,12 +142,11 @@ async function runStandaloneScraper() {
         console.log(`[StandaloneProsasScraper] Starting deep scraping phase for up to ${maxDeepScrape} items...`);
 
         const itemsToDeepScrape = deduplicatedItems.slice(0, maxDeepScrape);
-        const concurrency = 2;
+        const concurrency = 2; // Znížené pre stabilnejší výkon v GitHub Actions
         let processedCount = 0;
         const totalItems = itemsToDeepScrape.length;
         const outPath = path.join(__dirname, '..', 'editais_prosas.json');
 
-        // Clone the array to use as a queue
         const queue = [...itemsToDeepScrape];
 
         await Promise.all(
@@ -167,78 +157,32 @@ async function runStandaloneScraper() {
 
                     const currentIndex = ++processedCount;
                     const detailUrl = `https://prosas.com.br/editais/${item.id}`;
-                    console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl}`);
-
+                    
                     let workerPage: any = null;
                     try {
                         workerPage = await context.newPage();
-
                         await workerPage.goto(detailUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
                         let pageText = '';
 
-                        // Active polling loop for SPA hydration
-                        for (let poll = 0; poll < 15; poll++) {
+                        // Polling slučka pre Hydration - sleduje kedy sa objaví text
+                        for (let poll = 0; poll < 10; poll++) {
                             await workerPage.waitForTimeout(1000);
                             pageText = await workerPage.evaluate(() => {
                                 let text = document.body.innerText || '';
-                                // Check simple top-level shadow roots just in case
                                 const list = document.querySelector('prosas-listagem-editais');
                                 const detail = document.querySelector('prosas-detalhe-edital') || document.querySelector('prosas-oportunidade-detalhes');
                                 if (list && list.shadowRoot) text += '\n' + (list.shadowRoot.textContent || '');
                                 if (detail && detail.shadowRoot) text += '\n' + (detail.shadowRoot.textContent || '');
-                                return text;
+                                return text.replace(/\n\s*\n/g, '\n').replace(/ {2,}/g, ' ').trim();
                             });
 
-                            // Only exit early if we've genuinely breached the boilerplate threshold
                             if (pageText.length > 3000) {
                                 break;
                             }
                         }
-                        interceptedData.forEach(extractStringsFromJSON);
 
-                        let pageText = await workerPage.evaluate(() => {
-                            let text = '';
-                            function walk(node: Node) {
-                                if (node.nodeType === Node.TEXT_NODE) {
-                                    text += (node.textContent || '') + ' ';
-                                } else if (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
-                                    const el = node as Element;
-                                    const tagName = el.tagName ? el.tagName.toLowerCase() : '';
-
-                                    if (tagName !== 'script' && tagName !== 'style') {
-                                        const isBlock = ['p', 'div', 'br', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'tr', 'td', 'article', 'section'].includes(tagName);
-                                        if (isBlock) text += '\n';
-
-                                        if (el.shadowRoot) {
-                                            walk(el.shadowRoot);
-                                        }
-                                        for (let i = 0; i < node.childNodes.length; i++) {
-                                            const child = node.childNodes[i];
-                                            if (child) {
-                                                walk(child);
-                                            }
-                                        }
-
-                                        if (isBlock) text += '\n';
-                                    }
-                                }
-                            }
-                            if (document.body) {
-                                walk(document.body);
-                            }
-                            return text.replace(/\n\s*\n/g, '\n').replace(/ {2,}/g, ' ').trim();
-                        });
-
-                        // Combine DOM text with extracted API text
-                        pageText = pageText + '\n\n--- API DATA EXTRAPOLATION ---\n' + apiText.replace(/\s+/g, ' ').trim();
-
-                        console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl} -> Extracted ${pageText.length} chars`);
-
-                        console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl} -> Extracted ${pageText.length} chars`);
-
-                        console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl} -> Extracted ${pageText.length} chars`);
-
+                        // Telemetria do logov!
                         console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl} -> Extracted ${pageText.length} chars`);
 
                         if (pageText.length > 15000) {
@@ -247,16 +191,12 @@ async function runStandaloneScraper() {
 
                         item.full_text = pageText;
 
-                        // Be polite
-                        await workerPage.waitForTimeout(1000);
                     } catch (err: any) {
                         console.error(`[StandaloneProsasScraper] Failed to deep scrape ${detailUrl}: ${err.message}`);
-                        // Continue to the next item instead of crashing
                     } finally {
                         if (workerPage) await workerPage.close();
                     }
 
-                    // Checkpointing to prevent complete data loss on OOM
                     if (currentIndex % 25 === 0) {
                         fs.writeFileSync(outPath, JSON.stringify(deduplicatedItems, null, 2));
                         console.log(`[StandaloneProsasScraper] Checkpoint saved at item ${currentIndex}`);
