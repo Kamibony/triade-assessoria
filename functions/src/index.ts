@@ -4189,45 +4189,32 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                     await page.waitForTimeout(delay);
                 }
 
-                // Set up response interceptor to wait for the specific edital data API
-                const apiResponsePromise = page.waitForResponse(
-                    (res: any) => res.url().includes('api/public/') || res.url().includes('oportunidade'),
-                    { timeout: 15000 }
-                ).catch(() => null);
-
                 await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-
-                // Wait for the dynamic data to arrive
-                await apiResponsePromise;
 
                 const currentUrl = page.url();
                 if (currentUrl.includes('/users/sign_in')) {
                     throw new Error('Prosas session expired during batch iteration or target URL requires different access.');
                 }
 
-                // Smart waits for SPA
-                let lastLength = 0;
-                let stableCount = 0;
                 let pageText = '';
 
-                for (let poll = 0; poll < 20; poll++) {
+                // Active polling loop for SPA hydration
+                for (let poll = 0; poll < 15; poll++) {
                     await page.waitForTimeout(1000);
-                    pageText = await page.evaluate(() => document.body.innerText);
+                    pageText = await page.evaluate(() => {
+                        let text = document.body.innerText || '';
+                        // Check simple top-level shadow roots just in case
+                        const list = document.querySelector('prosas-listagem-editais');
+                        const detail = document.querySelector('prosas-detalhe-edital') || document.querySelector('prosas-oportunidade-detalhes');
+                        if (list && list.shadowRoot) text += '\n' + (list.shadowRoot.textContent || '');
+                        if (detail && detail.shadowRoot) text += '\n' + (detail.shadowRoot.textContent || '');
+                        return text;
+                    });
 
-                    if (pageText.length > 3500 && pageText.length === lastLength) {
-                        stableCount++;
-                        if (stableCount >= 2) {
-                            break;
-                        }
-                    } else if (pageText.length > 400 && pageText.length === lastLength && poll > 5) {
-                        stableCount++;
-                        if (stableCount >= 3) {
-                            break;
-                        }
-                    } else {
-                        stableCount = 0;
+                    // Only exit early if we've genuinely breached the boilerplate threshold
+                    if (pageText.length > 3000) {
+                        break;
                     }
-                    lastLength = pageText.length;
                 }
 
                 combinedText = pageText;
