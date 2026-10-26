@@ -151,7 +151,7 @@ async function runStandaloneScraper() {
         console.log(`[StandaloneProsasScraper] Starting deep scraping phase for up to ${maxDeepScrape} items...`);
 
         const itemsToDeepScrape = deduplicatedItems.slice(0, maxDeepScrape);
-        const concurrency = 3;
+        const concurrency = 2;
         let processedCount = 0;
         const totalItems = itemsToDeepScrape.length;
         const outPath = path.join(__dirname, '..', 'editais_prosas.json');
@@ -172,56 +172,31 @@ async function runStandaloneScraper() {
                     let workerPage: any = null;
                     try {
                         workerPage = await context.newPage();
-                        // Set up response interceptor to wait for the specific edital data API
-                        const apiResponsePromise = workerPage.waitForResponse(
-                            (res: any) => res.url().includes('api/public/') || res.url().includes('oportunidade'),
-                            { timeout: 15000 }
-                        ).catch(() => null);
 
                         await workerPage.goto(detailUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-                        // Wait for the dynamic data to arrive
-                        await apiResponsePromise;
-
-                        let lastLength = 0;
-                        let stableCount = 0;
                         let pageText = '';
 
-                        // Poll to ensure React/Vue has finished rendering the JSON into the DOM
-                        for (let poll = 0; poll < 20; poll++) {
+                        // Active polling loop for SPA hydration
+                        for (let poll = 0; poll < 15; poll++) {
                             await workerPage.waitForTimeout(1000);
                             pageText = await workerPage.evaluate(() => {
-                                const content: any = document.querySelector('prosas-detalhe-edital') ||
-                                                document.querySelector('prosas-oportunidade-detalhes') ||
-                                                document.querySelector('.layout-principal') ||
-                                                document.querySelector('main') ||
-                                                document.body;
-
-                                if (content && content.shadowRoot) {
-                                    return content.shadowRoot.textContent || '';
-                                }
-                                return content?.innerText || '';
+                                let text = document.body.innerText || '';
+                                // Check simple top-level shadow roots just in case
+                                const list = document.querySelector('prosas-listagem-editais');
+                                const detail = document.querySelector('prosas-detalhe-edital') || document.querySelector('prosas-oportunidade-detalhes');
+                                if (list && list.shadowRoot) text += '\n' + (list.shadowRoot.textContent || '');
+                                if (detail && detail.shadowRoot) text += '\n' + (detail.shadowRoot.textContent || '');
+                                return text;
                             });
 
-                            // 3500 threshold guarantees we are past the generic SPA boilerplate (usually ~2500 chars)
-                            // or fallback to stability if it happens to be a very short edital.
-                            if (pageText.length > 3500 && pageText.length === lastLength) {
-                                stableCount++;
-                                // Require 2 seconds of absolute DOM stability
-                                if (stableCount >= 2) {
-                                    break;
-                                }
-                            } else if (pageText.length > 400 && pageText.length === lastLength && poll > 5) {
-                                // Fallback for genuinely short editais after waiting a bit
-                                stableCount++;
-                                if (stableCount >= 3) {
-                                    break;
-                                }
-                            } else {
-                                stableCount = 0;
+                            // Only exit early if we've genuinely breached the boilerplate threshold
+                            if (pageText.length > 3000) {
+                                break;
                             }
-                            lastLength = pageText.length;
                         }
+
+                        console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl} -> Extracted ${pageText.length} chars`);
 
                         if (pageText.length > 15000) {
                             pageText = pageText.substring(0, 15000);
