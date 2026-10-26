@@ -4216,8 +4216,44 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                         break;
                     }
                 }
+                interceptedData.forEach(extractStringsFromJSON);
 
-                combinedText = pageText;
+                const pageText = await page.evaluate(() => {
+                    let text = '';
+                    function walk(node: Node) {
+                        if (node.nodeType === Node.TEXT_NODE) {
+                            text += (node.textContent || '') + ' ';
+                        } else if (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+                            const el = node as Element;
+                            const tagName = el.tagName ? el.tagName.toLowerCase() : '';
+
+                            if (tagName !== 'script' && tagName !== 'style') {
+                                // Add spacing for block elements
+                                const isBlock = ['p', 'div', 'br', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'tr', 'td', 'article', 'section'].includes(tagName);
+                                if (isBlock) text += '\n';
+
+                                if (el.shadowRoot) {
+                                    walk(el.shadowRoot);
+                                }
+                                for (let i = 0; i < node.childNodes.length; i++) {
+                                    const child = node.childNodes[i];
+                                    if (child) {
+                                        walk(child);
+                                    }
+                                }
+
+                                if (isBlock) text += '\n';
+                            }
+                        }
+                    }
+                    if (document.body) {
+                        walk(document.body);
+                    }
+                    return text.replace(/\n\s*\n/g, '\n').replace(/ {2,}/g, ' ').trim();
+                });
+
+                // Combine DOM text with extracted API text
+                combinedText = pageText + '\n\n--- API DATA EXTRAPOLATION ---\n' + apiText.replace(/\s+/g, ' ').trim();
 
                 const rawLinks = await page.evaluate(() => {
                     return Array.from(document.querySelectorAll('a')).map((a: HTMLAnchorElement) => ({ href: a.href, text: a.innerText }));
