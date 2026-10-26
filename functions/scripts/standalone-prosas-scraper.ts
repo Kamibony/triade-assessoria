@@ -179,7 +179,7 @@ async function runStandaloneScraper() {
                                 let externalLink = '';
 
                                 // Recursive DOM walker that pierces shadow boundaries to find the "Acessar" link
-                                function findExternalLink(node: Node) {
+                                const findExternalLink = (node: any) => {
                                     if (!node) return;
 
                                     // Check if it's an element node
