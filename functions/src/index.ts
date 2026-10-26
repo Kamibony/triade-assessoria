@@ -4212,7 +4212,7 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                     });
 
                     // Only exit early if we've genuinely breached the boilerplate threshold
-                    if (pageText.length > 3000) {
+                    if (pageText.length > 8500) {
                         break;
                     }
                 }
