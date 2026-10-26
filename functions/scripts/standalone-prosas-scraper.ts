@@ -168,16 +168,75 @@ async function runStandaloneScraper() {
                         // Polling slučka pre Hydration - sleduje kedy sa objaví text
                         for (let poll = 0; poll < 10; poll++) {
                             await workerPage.waitForTimeout(1000);
-                            pageText = await workerPage.evaluate(() => {
+                            const extracted = await workerPage.evaluate(() => {
                                 let text = document.body.innerText || '';
                                 const list = document.querySelector('prosas-listagem-editais');
                                 const detail = document.querySelector('prosas-detalhe-edital') || document.querySelector('prosas-oportunidade-detalhes');
+
                                 if (list && list.shadowRoot) text += '\n' + (list.shadowRoot.textContent || '');
                                 if (detail && detail.shadowRoot) text += '\n' + (detail.shadowRoot.textContent || '');
-                                return text.replace(/\n\s*\n/g, '\n').replace(/ {2,}/g, ' ').trim();
+
+                                let externalLink = '';
+
+                                // Recursive DOM walker that pierces shadow boundaries to find the "Acessar" link
+                                function findExternalLink(node: Node) {
+                                    if (!node) return;
+
+                                    // Check if it's an element node
+                                    if (node.nodeType === 1) {
+                                        const el = node as Element;
+                                        if (el.tagName && el.tagName.toLowerCase() === 'a') {
+                                            const a = el as HTMLAnchorElement;
+                                            const hasAcessarText = a.textContent && a.textContent.toLowerCase().includes('acessar');
+                                            const isExternal = a.getAttribute('target') === '_blank' || (a.href && !a.href.includes('prosas.com.br') && !a.href.startsWith('javascript'));
+                                            if (hasAcessarText || isExternal) {
+                                                if (a.href) externalLink = a.href;
+                                            }
+                                        }
+                                    }
+
+                                    // Pierce shadow DOM
+                                    if (node.nodeType === 1) {
+                                         const el = node as Element;
+                                         if (el.shadowRoot) {
+                                             findExternalLink(el.shadowRoot);
+                                         }
+                                    }
+
+                                    // Explicitly check DOCUMENT_FRAGMENT_NODE (11) for ShadowRoot itself
+                                    if (node.nodeType === 11) {
+                                         const fragment = node as DocumentFragment;
+                                         const children = fragment.childNodes;
+                                         for (let i = 0; i < children.length; i++) {
+                                             findExternalLink(children[i]);
+                                         }
+                                    }
+
+                                    // Traverse standard children
+                                    const children = node.childNodes;
+                                    for (let i = 0; i < children.length; i++) {
+                                        if (externalLink) break;
+                                        findExternalLink(children[i]);
+                                    }
+                                }
+
+                                if (document.body) {
+                                    findExternalLink(document.body);
+                                }
+
+                                return {
+                                    text: text.replace(/\n\s*\n/g, '\n').replace(/ {2,}/g, ' ').trim(),
+                                    externalLink,
+                                    hasDetail: !!detail
+                                };
                             });
 
-                            if (pageText.length > 8500) {
+                            pageText = extracted.text;
+                            if (extracted.externalLink) {
+                                pageText += `\n\nEXTERNAL_EDITAL_LINK: ${extracted.externalLink}`;
+                            }
+
+                            if (pageText.length > 4000 || (extracted.hasDetail && pageText.length > 500) || extracted.externalLink) {
                                 break;
                             }
                         }
