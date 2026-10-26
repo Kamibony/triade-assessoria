@@ -4201,59 +4201,77 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                 // Active polling loop for SPA hydration
                 for (let poll = 0; poll < 15; poll++) {
                     await page.waitForTimeout(1000);
-                    pageText = await page.evaluate(() => {
+                    const extracted = await page.evaluate(() => {
                         let text = document.body.innerText || '';
                         // Check simple top-level shadow roots just in case
                         const list = document.querySelector('prosas-listagem-editais');
                         const detail = document.querySelector('prosas-detalhe-edital') || document.querySelector('prosas-oportunidade-detalhes');
+
                         if (list && list.shadowRoot) text += '\n' + (list.shadowRoot.textContent || '');
                         if (detail && detail.shadowRoot) text += '\n' + (detail.shadowRoot.textContent || '');
-                        return text;
+
+                        let externalLink = '';
+
+                        function findExternalLink(node: Node) {
+                            if (!node) return;
+
+                            if (node.nodeType === 1) {
+                                const el = node as Element;
+                                if (el.tagName && el.tagName.toLowerCase() === 'a') {
+                                    const a = el as HTMLAnchorElement;
+                                    const hasAcessarText = a.textContent && a.textContent.toLowerCase().includes('acessar');
+                                    const isExternal = a.getAttribute('target') === '_blank' || (a.href && !a.href.includes('prosas.com.br') && !a.href.startsWith('javascript'));
+                                    if (hasAcessarText || isExternal) {
+                                        if (a.href) externalLink = a.href;
+                                    }
+                                }
+                            }
+
+                            if (node.nodeType === 1) {
+                                 const el = node as Element;
+                                 if (el.shadowRoot) {
+                                     findExternalLink(el.shadowRoot);
+                                 }
+                            }
+
+                            if (node.nodeType === 11) {
+                                 const fragment = node as DocumentFragment;
+                                 const children = fragment.childNodes;
+                                 for (let i = 0; i < children.length; i++) {
+                                     findExternalLink(children[i] as Node);
+                                 }
+                            }
+
+                            const children = node.childNodes;
+                            for (let i = 0; i < children.length; i++) {
+                                if (externalLink) break;
+                                findExternalLink(children[i] as Node);
+                            }
+                        }
+
+                        if (document.body) {
+                            findExternalLink(document.body);
+                        }
+
+                        return {
+                            text: text.replace(/\n\s*\n/g, '\n').replace(/ {2,}/g, ' ').trim(),
+                            externalLink,
+                            hasDetail: !!detail
+                        };
                     });
 
-                    // Only exit early if we've genuinely breached the boilerplate threshold
-                    if (pageText.length > 8500) {
+                    pageText = extracted.text;
+                    if (extracted.externalLink) {
+                        pageText += `\n\nEXTERNAL_EDITAL_LINK: ${extracted.externalLink}`;
+                    }
+
+                    // Exit early if we've genuinely breached the boilerplate threshold, or if we have detailed text, or if we found an external link
+                    if (pageText.length > 4000 || (extracted.hasDetail && pageText.length > 500) || extracted.externalLink) {
                         break;
                     }
                 }
-                interceptedData.forEach(extractStringsFromJSON);
 
-                const pageText = await page.evaluate(() => {
-                    let text = '';
-                    function walk(node: Node) {
-                        if (node.nodeType === Node.TEXT_NODE) {
-                            text += (node.textContent || '') + ' ';
-                        } else if (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
-                            const el = node as Element;
-                            const tagName = el.tagName ? el.tagName.toLowerCase() : '';
-
-                            if (tagName !== 'script' && tagName !== 'style') {
-                                // Add spacing for block elements
-                                const isBlock = ['p', 'div', 'br', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'tr', 'td', 'article', 'section'].includes(tagName);
-                                if (isBlock) text += '\n';
-
-                                if (el.shadowRoot) {
-                                    walk(el.shadowRoot);
-                                }
-                                for (let i = 0; i < node.childNodes.length; i++) {
-                                    const child = node.childNodes[i];
-                                    if (child) {
-                                        walk(child);
-                                    }
-                                }
-
-                                if (isBlock) text += '\n';
-                            }
-                        }
-                    }
-                    if (document.body) {
-                        walk(document.body);
-                    }
-                    return text.replace(/\n\s*\n/g, '\n').replace(/ {2,}/g, ' ').trim();
-                });
-
-                // Combine DOM text with extracted API text
-                combinedText = pageText + '\n\n--- API DATA EXTRAPOLATION ---\n' + apiText.replace(/\s+/g, ' ').trim();
+                combinedText = pageText;
 
                 const rawLinks = await page.evaluate(() => {
                     return Array.from(document.querySelectorAll('a')).map((a: HTMLAnchorElement) => ({ href: a.href, text: a.innerText }));
