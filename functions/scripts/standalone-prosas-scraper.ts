@@ -142,7 +142,7 @@ async function runStandaloneScraper() {
         console.log(`[StandaloneProsasScraper] Starting deep scraping phase for up to ${maxDeepScrape} items...`);
 
         const itemsToDeepScrape = deduplicatedItems.slice(0, maxDeepScrape);
-        const concurrency = 2; // Znížené pre stabilnejší výkon v GitHub Actions
+        const concurrency = 2; 
         let processedCount = 0;
         const totalItems = itemsToDeepScrape.length;
         const outPath = path.join(__dirname, '..', 'editais_prosas.json');
@@ -165,9 +165,9 @@ async function runStandaloneScraper() {
 
                         let pageText = '';
 
-                        // Polling slučka pre Hydration - sleduje kedy sa objaví text
                         for (let poll = 0; poll < 10; poll++) {
                             await workerPage.waitForTimeout(1000);
+                            
                             const extracted = await workerPage.evaluate(() => {
                                 let text = document.body.innerText || '';
                                 const list = document.querySelector('prosas-listagem-editais');
@@ -178,55 +178,29 @@ async function runStandaloneScraper() {
 
                                 let externalLink = '';
 
-                                // Recursive DOM walker that pierces shadow boundaries to find the "Acessar" link
-                                const findExternalLink = (node: any) => {
-                                    if (!node) return;
+                                // Plochý prístup bez akýchkoľvek vnútorných funkcií (vyhnutie sa esbuild __name chybe)
+                                const roots = [document];
+                                if (detail && detail.shadowRoot) roots.push(detail.shadowRoot as any);
+                                if (list && list.shadowRoot) roots.push(list.shadowRoot as any);
 
-                                    // Check if it's an element node
-                                    if (node.nodeType === 1) {
-                                        const el = node as Element;
-                                        if (el.tagName && el.tagName.toLowerCase() === 'a') {
-                                            const a = el as HTMLAnchorElement;
-                                            const hasAcessarText = a.textContent && a.textContent.toLowerCase().includes('acessar');
-                                            const isExternal = a.getAttribute('target') === '_blank' || (a.href && !a.href.includes('prosas.com.br') && !a.href.startsWith('javascript'));
-                                            if (hasAcessarText || isExternal) {
-                                                if (a.href) externalLink = a.href;
-                                            }
+                                for (let i = 0; i < roots.length; i++) {
+                                    if (!roots[i]) continue;
+                                    const links = (roots[i] as any).querySelectorAll('a');
+                                    for (let j = 0; j < links.length; j++) {
+                                        const a = links[j] as HTMLAnchorElement;
+                                        const btnText = (a.textContent || '').toLowerCase();
+                                        // Hľadáme tlačidlo s textom Acessar
+                                        if (btnText.includes('acessar') && a.href) {
+                                            externalLink = a.href;
+                                            break;
                                         }
                                     }
-
-                                    // Pierce shadow DOM
-                                    if (node.nodeType === 1) {
-                                         const el = node as Element;
-                                         if (el.shadowRoot) {
-                                             findExternalLink(el.shadowRoot);
-                                         }
-                                    }
-
-                                    // Explicitly check DOCUMENT_FRAGMENT_NODE (11) for ShadowRoot itself
-                                    if (node.nodeType === 11) {
-                                         const fragment = node as DocumentFragment;
-                                         const children = fragment.childNodes;
-                                         for (let i = 0; i < children.length; i++) {
-                                             findExternalLink(children[i]);
-                                         }
-                                    }
-
-                                    // Traverse standard children
-                                    const children = node.childNodes;
-                                    for (let i = 0; i < children.length; i++) {
-                                        if (externalLink) break;
-                                        findExternalLink(children[i]);
-                                    }
-                                }
-
-                                if (document.body) {
-                                    findExternalLink(document.body);
+                                    if (externalLink) break;
                                 }
 
                                 return {
                                     text: text.replace(/\n\s*\n/g, '\n').replace(/ {2,}/g, ' ').trim(),
-                                    externalLink,
+                                    externalLink: externalLink,
                                     hasDetail: !!detail
                                 };
                             });
@@ -241,7 +215,6 @@ async function runStandaloneScraper() {
                             }
                         }
 
-                        // Telemetria do logov!
                         console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl} -> Extracted ${pageText.length} chars`);
 
                         if (pageText.length > 15000) {
