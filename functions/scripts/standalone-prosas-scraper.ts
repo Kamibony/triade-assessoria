@@ -151,7 +151,7 @@ async function runStandaloneScraper() {
         console.log(`[StandaloneProsasScraper] Starting deep scraping phase for up to ${maxDeepScrape} items...`);
 
         const itemsToDeepScrape = deduplicatedItems.slice(0, maxDeepScrape);
-        const concurrency = 3;
+        const concurrency = 2;
         let processedCount = 0;
         const totalItems = itemsToDeepScrape.length;
         const outPath = path.join(__dirname, '..', 'editais_prosas.json');
@@ -173,38 +173,26 @@ async function runStandaloneScraper() {
                     try {
                         workerPage = await context.newPage();
 
-                        // Intercept API responses containing edital content
-                        const interceptedData: any[] = [];
-                        workerPage.on('response', async (res: any) => {
-                            const url = res.url();
-                            if ((url.includes('api/public/') || url.includes('oportunidade')) && res.request().method() === 'GET') {
-                                try {
-                                    const json = await res.json();
-                                    interceptedData.push(json);
-                                } catch (e) {
-                                    // Ignore parsing errors
-                                }
-                            }
-                        });
-
                         await workerPage.goto(detailUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-                        // Simple grace period for SPA hydration
-                        await workerPage.waitForTimeout(4000);
+                        let pageText = '';
 
-                        // Extract text from intercepted API JSON payloads
-                        let apiText = '';
-                        function extractStringsFromJSON(obj: any) {
-                            if (typeof obj === 'string') {
-                                apiText += obj.replace(/<[^>]*>?/gm, ' ') + ' '; // Strip HTML tags
-                            } else if (Array.isArray(obj)) {
-                                obj.forEach(extractStringsFromJSON);
-                            } else if (typeof obj === 'object' && obj !== null) {
-                                for (const key in obj) {
-                                    if (!['id', 'created_at', 'updated_at', 'url', 'slug', 'image_url', 'logo_url', 'color'].includes(key)) {
-                                        extractStringsFromJSON(obj[key]);
-                                    }
-                                }
+                        // Active polling loop for SPA hydration
+                        for (let poll = 0; poll < 15; poll++) {
+                            await workerPage.waitForTimeout(1000);
+                            pageText = await workerPage.evaluate(() => {
+                                let text = document.body.innerText || '';
+                                // Check simple top-level shadow roots just in case
+                                const list = document.querySelector('prosas-listagem-editais');
+                                const detail = document.querySelector('prosas-detalhe-edital') || document.querySelector('prosas-oportunidade-detalhes');
+                                if (list && list.shadowRoot) text += '\n' + (list.shadowRoot.textContent || '');
+                                if (detail && detail.shadowRoot) text += '\n' + (detail.shadowRoot.textContent || '');
+                                return text;
+                            });
+
+                            // Only exit early if we've genuinely breached the boilerplate threshold
+                            if (pageText.length > 3000) {
+                                break;
                             }
                         }
                         interceptedData.forEach(extractStringsFromJSON);
@@ -244,6 +232,8 @@ async function runStandaloneScraper() {
 
                         // Combine DOM text with extracted API text
                         pageText = pageText + '\n\n--- API DATA EXTRAPOLATION ---\n' + apiText.replace(/\s+/g, ' ').trim();
+
+                        console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl} -> Extracted ${pageText.length} chars`);
 
                         if (pageText.length > 15000) {
                             pageText = pageText.substring(0, 15000);

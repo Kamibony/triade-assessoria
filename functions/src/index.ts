@@ -4189,20 +4189,6 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                     await page.waitForTimeout(delay);
                 }
 
-                // Intercept API responses containing edital content
-                const interceptedData: any[] = [];
-                page.on('response', async (res: any) => {
-                    const url = res.url();
-                    if ((url.includes('api/public/') || url.includes('oportunidade')) && res.request().method() === 'GET') {
-                        try {
-                            const json = await res.json();
-                            interceptedData.push(json);
-                        } catch (e) {
-                            // Ignore parsing errors for non-JSON or partial responses
-                        }
-                    }
-                });
-
                 await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
                 const currentUrl = page.url();
@@ -4210,23 +4196,24 @@ export const prosasAuthenticatedWorker = onTaskDispatched({
                     throw new Error('Prosas session expired during batch iteration or target URL requires different access.');
                 }
 
-                // Simple grace period for SPA hydration
-                await page.waitForTimeout(4000);
+                let pageText = '';
 
-                // Extract text from intercepted API JSON payloads
-                let apiText = '';
-                function extractStringsFromJSON(obj: any) {
-                    if (typeof obj === 'string') {
-                        apiText += obj.replace(/<[^>]*>?/gm, ' ') + ' '; // Strip HTML tags if present in JSON
-                    } else if (Array.isArray(obj)) {
-                        obj.forEach(extractStringsFromJSON);
-                    } else if (typeof obj === 'object' && obj !== null) {
-                        for (const key in obj) {
-                            // Skip known noisy/metadata keys to save tokens
-                            if (!['id', 'created_at', 'updated_at', 'url', 'slug', 'image_url', 'logo_url', 'color'].includes(key)) {
-                                extractStringsFromJSON(obj[key]);
-                            }
-                        }
+                // Active polling loop for SPA hydration
+                for (let poll = 0; poll < 15; poll++) {
+                    await page.waitForTimeout(1000);
+                    pageText = await page.evaluate(() => {
+                        let text = document.body.innerText || '';
+                        // Check simple top-level shadow roots just in case
+                        const list = document.querySelector('prosas-listagem-editais');
+                        const detail = document.querySelector('prosas-detalhe-edital') || document.querySelector('prosas-oportunidade-detalhes');
+                        if (list && list.shadowRoot) text += '\n' + (list.shadowRoot.textContent || '');
+                        if (detail && detail.shadowRoot) text += '\n' + (detail.shadowRoot.textContent || '');
+                        return text;
+                    });
+
+                    // Only exit early if we've genuinely breached the boilerplate threshold
+                    if (pageText.length > 3000) {
+                        break;
                     }
                 }
                 interceptedData.forEach(extractStringsFromJSON);
