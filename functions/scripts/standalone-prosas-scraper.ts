@@ -237,6 +237,8 @@ async function runStandaloneScraper() {
 
                         console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl} -> Extracted ${pageText.length} chars`);
 
+                        console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl} -> Extracted ${pageText.length} chars`);
+
                         if (pageText.length > 15000) {
                             pageText = pageText.substring(0, 15000);
                         }
