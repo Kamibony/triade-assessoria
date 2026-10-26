@@ -177,7 +177,7 @@ async function runStandaloneScraper() {
                                 return text.replace(/\n\s*\n/g, '\n').replace(/ {2,}/g, ' ').trim();
                             });
 
-                            if (pageText.length > 3000) {
+                            if (pageText.length > 8500) {
                                 break;
                             }
                         }
