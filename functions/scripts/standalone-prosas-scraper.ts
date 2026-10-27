@@ -167,7 +167,8 @@ async function runStandaloneScraper() {
 
                         let pageText = '';
 
-                        for (let poll = 0; poll < 10; poll++) {
+                        // Zvyseny pocet poll cyklov (15 sekund cakania na nabehnutie SPA)
+                        for (let poll = 0; poll < 15; poll++) {
                             await workerPage.waitForTimeout(1000);
                             
                             const extracted = await workerPage.evaluate(() => {
@@ -191,12 +192,11 @@ async function runStandaloneScraper() {
                                         const a = links[j] as HTMLAnchorElement;
                                         const btnText = (a.textContent || '').toLowerCase().trim();
                                         
-                                        // Ochrana proti falošným linkom z menu
+                                        // STRIKTNA PODMIENKA: Iba skutocne tlacidlo s textom acessar alebo inscreva-se
                                         const isAcessarPerfil = btnText.includes('acessar perfil');
-                                        const hasAcessar = btnText.includes('acessar');
-                                        const isExternal = a.getAttribute('target') === '_blank' || (a.href && !a.href.includes('prosas.com.br') && !a.href.startsWith('javascript'));
+                                        const hasAcessar = btnText.includes('acessar') || btnText.includes('inscreva-se');
 
-                                        if ((hasAcessar && !isAcessarPerfil) || isExternal) {
+                                        if (hasAcessar && !isAcessarPerfil) {
                                             if (a.href && !a.href.includes('users/sign_in')) {
                                                 externalLink = a.href;
                                                 break;
@@ -218,7 +218,8 @@ async function runStandaloneScraper() {
                                 pageText += `\n\nEXTERNAL_EDITAL_LINK: ${extracted.externalLink}`;
                             }
 
-                            if (pageText.length > 4000 || (extracted.hasDetail && pageText.length > 500) || extracted.externalLink) {
+                            // Preruš loop az vtedy, ked realne ziska linku alebo dostatocne dlhy text
+                            if (extracted.externalLink || (!isCentral && (extracted.hasDetail || pageText.length > 1000))) {
                                 break;
                             }
                         }
