@@ -3,6 +3,83 @@ import * as path from 'path';
 import { chromium } from 'playwright-extra';
 import stealth from 'puppeteer-extra-plugin-stealth';
 
+/**
+ * Simulates a physical user click on the "Acessar" or "Inscreva-se" button
+ * nested inside Shadow DOMs, and captures the resulting external URL.
+ *
+ * @param {import('playwright').Page} page - The current Playwright page.
+ * @param {import('playwright').BrowserContext} context - The Playwright browser context.
+ * @returns {Promise<string|null>} - The external URL, or null if failed/timed out.
+ */
+async function captureExternalUrl(page: any, context: any): Promise<string | null> {
+  try {
+    // 1. Locate the target button.
+    // Playwright natively pierces Shadow DOMs automatically.
+    // We use getByText to find the deepest node containing our target words,
+    // explicitly filtering out the global header button via regex.
+    const targetButton = page.getByText(/(acessar|inscreva-se)/i)
+      .filter({ hasNotText: /acessar perfil/i })
+      .first();
+
+    // Check if the button actually exists and is visible on the page
+    if (!(await targetButton.isVisible({ timeout: 3000 }).catch(() => false))) {
+      return null;
+    }
+
+    const currentUrl = page.url();
+    let isResolved = false;
+
+    // 2. Prepare listeners BEFORE clicking, to catch both navigation scenarios
+
+    // Scenario A: The click opens an external link in a new tab/window
+    const newPagePromise = context.waitForEvent('page', { timeout: 5000 })
+      .then(async (newPage: any) => {
+        if (isResolved) {
+          // If the race was already won (e.g. by a timeout), clean up this late-arriving tab
+          await newPage.close().catch(() => {});
+          return null;
+        }
+        // Wait briefly for the new tab to process any immediate redirects
+        await newPage.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
+        const url = newPage.url();
+        await newPage.close().catch(() => {}); // Clean up the popup to avoid memory leaks
+        return url;
+      })
+      .catch(() => null); // Catch timeouts to prevent Unhandled Rejection errors
+
+    // Scenario B: The click triggers a direct navigation/redirect in the same tab
+    const navigationPromise = page.waitForURL((url: URL) => url.href !== currentUrl, { timeout: 5000 })
+      .then(() => page.url())
+      .catch(() => null);
+
+    // Scenario C: Graceful fallback timeout (5 seconds max wait)
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000));
+
+    // 3. Execute the physical click
+    // We use force: true to bypass any transparent overlays often found in Web Components
+    await targetButton.click({ force: true, timeout: 3000 }).catch(() => {});
+
+    // 4. Race the outcomes to dynamically return whichever happens first
+    const resultingUrl = await Promise.race([
+      // If a promise resolved to null (it timed out internally), we replace it
+      // with a never-resolving promise so it doesn't mistakenly win the race.
+      newPagePromise.then((url: string | null) => url ? url : new Promise<null>(() => {})),
+      navigationPromise.then((url: string | null) => url ? url : new Promise<null>(() => {})),
+      timeoutPromise
+    ]);
+
+    // Flag as resolved so any lingering background events know to clean themselves up
+    isResolved = true;
+
+    return resultingUrl as string | null;
+
+  } catch (error: any) {
+    // Catch any unexpected exceptions to ensure the main scraping loop never breaks.
+    console.warn(`[captureExternalUrl] Failed to capture URL gracefully: ${error.message}`);
+    return null;
+  }
+}
+
 async function runStandaloneScraper() {
     const username = process.env.PROSAS_USERNAME;
     const password = process.env.PROSAS_PASSWORD;
@@ -159,44 +236,7 @@ async function runStandaloneScraper() {
                         for (let poll = 0; poll < 3; poll++) {
                             await workerPage.waitForTimeout(1000);
                             
-                            const extracted = await workerPage.evaluate(() => {
-                                let externalLink = '';
-                                
-                                const allLinks: HTMLAnchorElement[] = [];
-                                const queue = [document.body];
-                                
-                                while (queue.length > 0) {
-                                    const node = queue.shift();
-                                    if (!node) continue;
-                                    
-                                    if (node.tagName && node.tagName.toLowerCase() === 'a') {
-                                        allLinks.push(node as HTMLAnchorElement);
-                                    }
-                                    if (node.shadowRoot) queue.push(node.shadowRoot as any);
-                                    
-                                    const children = node.children || node.childNodes;
-                                    if (children) {
-                                        for (let i = 0; i < children.length; i++) queue.push(children[i] as any);
-                                    }
-                                }
-                                
-                                for (let i = 0; i < allLinks.length; i++) {
-                                    const a = allLinks[i];
-                                    const btnText = (a.textContent || '').toLowerCase().trim();
-                                    const href = a.href || a.getAttribute('href') || '';
-                                    
-                                    // ZAKÁZANÉ LINKY: nesmie to byť prosas.com.br, ani whatsapp podpora (wa.me), ani sociálne siete
-                                    if (href && href.startsWith('http') && !href.includes('prosas.com.br') && !href.includes('wa.me') && !href.includes('facebook') && !href.includes('instagram') && !href.includes('youtube')) {
-                                        if (btnText.includes('acessar') || btnText.includes('inscreva-se') || btnText.includes('edital')) {
-                                            externalLink = href;
-                                            break;
-                                        }
-                                        if (!externalLink) {
-                                            externalLink = href;
-                                        }
-                                    }
-                                }
-
+                            const text = await workerPage.evaluate(() => {
                                 let text = document.body.innerText || '';
                                 const allElements = document.querySelectorAll('*');
                                 for (let i = 0; i < allElements.length; i++) {
@@ -205,18 +245,25 @@ async function runStandaloneScraper() {
                                     }
                                 }
 
-                                return {
-                                    text: text.replace(/\n\s*\n/g, '\n').trim(),
-                                    externalLink: externalLink
-                                };
+                                return text.replace(/\n\s*\n/g, '\n').trim();
                             });
 
-                            pageText = extracted.text;
-                            if (extracted.externalLink) {
-                                finalExternalLink = extracted.externalLink;
-                                pageText += `\n\nEXTERNAL_EDITAL_LINK: ${extracted.externalLink}`;
+                            pageText = text;
+
+                            // Break early if we got enough text, otherwise wait for next poll
+                            if (pageText.length > 500) {
                                 break;
                             }
+                        }
+
+                        // Try clicking the button to capture external url
+                        const extUrl = await captureExternalUrl(workerPage, context);
+                        if (extUrl) {
+                            finalExternalLink = extUrl;
+                            pageText += `\n\nEXTERNAL_EDITAL_LINK: ${extUrl}`;
+
+                            // If navigation happened in same tab, we must go back or the next evaluation might break
+                            // if there is more logic, but here we close the workerPage in `finally` anyway.
                         }
 
                         console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl} -> Extracted ${pageText.length} chars | Link: ${finalExternalLink || 'None'}`);
