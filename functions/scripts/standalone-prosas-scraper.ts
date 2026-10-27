@@ -79,7 +79,6 @@ async function runStandaloneScraper() {
                 }
 
                 if (allItems.length > 0 && JSON.stringify(allItems.slice(-items.length)) === JSON.stringify(items)) {
-                    console.warn(`[StandaloneProsasScraper] Page ${currentPage} returned duplicate items. Stopping pagination.`);
                     hasMore = false;
                     break;
                 }
@@ -88,7 +87,6 @@ async function runStandaloneScraper() {
                 console.log(`[StandaloneProsasScraper] Captured page ${currentPage} with ${items.length} items.`);
 
                 await page.waitForTimeout(1000);
-
                 const nextApiPromise = waitNextApiResponse();
 
                 const nextClicked = await page.evaluate(() => {
@@ -116,20 +114,13 @@ async function runStandaloneScraper() {
                     await page.waitForTimeout(1000);
                 } else {
                     nextApiPromise.catch(() => {});
-                    console.log("[StandaloneProsasScraper] No active 'Next' button found. Ending pagination.");
                     hasMore = false;
                 }
             } catch (e: any) {
-                if (e.message && e.message.includes("403_FORBIDDEN")) {
-                    throw new Error(`[StandaloneProsasScraper] 403 Forbidden: WAF block or session expired during UI network interception on page ${currentPage}`);
-                }
-                console.warn(`[StandaloneProsasScraper] Expected timeout or non-fatal error waiting for page ${currentPage}. Likely reached end of list. Error:`, e.message);
                 hasMore = false;
                 break;
             }
         }
-
-        console.log(`[StandaloneProsasScraper] Interception phase complete. Found ${allItems.length} items.`);
 
         const uniqueMap = new Map<string, any>();
         allItems.forEach(item => uniqueMap.set(String(item.id), item));
@@ -137,14 +128,11 @@ async function runStandaloneScraper() {
         console.log(`[StandaloneProsasScraper] Deduplication complete. Found ${deduplicatedItems.length} unique items.`);
 
         const maxDeepScrape = process.env.MAX_DEEP_SCRAPE ? parseInt(process.env.MAX_DEEP_SCRAPE, 10) : 450;
-        console.log(`[StandaloneProsasScraper] Starting deep scraping phase for up to ${maxDeepScrape} items...`);
-
         const itemsToDeepScrape = deduplicatedItems.slice(0, maxDeepScrape);
         const concurrency = 2; 
         let processedCount = 0;
         const totalItems = itemsToDeepScrape.length;
         const outPath = path.join(__dirname, '..', 'editais_prosas.json');
-
         const queue = [...itemsToDeepScrape];
 
         await Promise.all(
@@ -154,7 +142,6 @@ async function runStandaloneScraper() {
                     if (!item) break;
 
                     const currentIndex = ++processedCount;
-                    
                     const isCentral = item.attributes && item.attributes['e_central?'] === true;
                     const detailUrl = isCentral 
                         ? `https://produtos.prosas.com.br/editais/edital?edital_id=${item.id}` 
@@ -163,73 +150,84 @@ async function runStandaloneScraper() {
                     let workerPage: any = null;
                     try {
                         workerPage = await context.newPage();
-                        await workerPage.goto(detailUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+                        // Počkáme kým sa sieť úplne upokojí (zabezpečí načítanie Informações tabu)
+                        await workerPage.goto(detailUrl, { waitUntil: 'networkidle', timeout: 60000 });
+                        await workerPage.waitForTimeout(3000); // 3 sekundy rezerva na vykreslenie tlačidiel
 
                         let pageText = '';
+                        let finalExternalLink = '';
 
-                        // Zvyseny pocet poll cyklov (15 sekund cakania na nabehnutie SPA)
-                        for (let poll = 0; poll < 15; poll++) {
+                        for (let poll = 0; poll < 3; poll++) {
                             await workerPage.waitForTimeout(1000);
                             
                             const extracted = await workerPage.evaluate(() => {
-                                let text = document.body.innerText || '';
-                                const list = document.querySelector('prosas-listagem-editais');
-                                const detail = document.querySelector('prosas-detalhe-edital') || document.querySelector('prosas-oportunidade-detalhes');
-
-                                if (list && list.shadowRoot) text += '\n' + (list.shadowRoot.textContent || '');
-                                if (detail && detail.shadowRoot) text += '\n' + (detail.shadowRoot.textContent || '');
-
                                 let externalLink = '';
-
-                                const roots = [document];
-                                if (detail && detail.shadowRoot) roots.push(detail.shadowRoot as any);
-                                if (list && list.shadowRoot) roots.push(list.shadowRoot as any);
-
-                                for (let i = 0; i < roots.length; i++) {
-                                    if (!roots[i]) continue;
-                                    const links = (roots[i] as any).querySelectorAll('a');
-                                    for (let j = 0; j < links.length; j++) {
-                                        const a = links[j] as HTMLAnchorElement;
-                                        const btnText = (a.textContent || '').toLowerCase().trim();
-                                        
-                                        // STRIKTNA PODMIENKA: Iba skutocne tlacidlo s textom acessar alebo inscreva-se
-                                        const isAcessarPerfil = btnText.includes('acessar perfil');
-                                        const hasAcessar = btnText.includes('acessar') || btnText.includes('inscreva-se');
-
-                                        if (hasAcessar && !isAcessarPerfil) {
-                                            if (a.href && !a.href.includes('users/sign_in')) {
-                                                externalLink = a.href;
-                                                break;
-                                            }
+                                
+                                // Plochý zberač všetkých <a> tagov na stránke (vrátane Shadow DOM)
+                                const allLinks: HTMLAnchorElement[] = [];
+                                const queue = [document.body];
+                                
+                                while (queue.length > 0) {
+                                    const node = queue.shift();
+                                    if (!node) continue;
+                                    
+                                    if (node.tagName && node.tagName.toLowerCase() === 'a') {
+                                        allLinks.push(node as HTMLAnchorElement);
+                                    }
+                                    if (node.shadowRoot) queue.push(node.shadowRoot as any);
+                                    
+                                    const children = node.children || node.childNodes;
+                                    if (children) {
+                                        for (let i = 0; i < children.length; i++) queue.push(children[i] as any);
+                                    }
+                                }
+                                
+                                // Hľadáme link, ktorý má v sebe Acessar ALEBO je to prvý reálny externý odkaz
+                                for (let i = 0; i < allLinks.length; i++) {
+                                    const a = allLinks[i];
+                                    const btnText = (a.textContent || '').toLowerCase().trim();
+                                    const href = a.href || a.getAttribute('href') || '';
+                                    
+                                    // ŽELEZNÉ PRAVIDLO: Link nesmie smerovať späť na Prosas
+                                    if (href && href.startsWith('http') && !href.includes('prosas.com.br')) {
+                                        // Prioritne berieme ten, čo má text acessar/inscreva-se
+                                        if (btnText.includes('acessar') || btnText.includes('inscreva-se') || btnText.includes('edital')) {
+                                            externalLink = href;
+                                            break;
+                                        }
+                                        // Ak sme zatiaľ nič nenašli, uložíme si aspoň tento (okrem soc. sietí)
+                                        if (!externalLink && !href.includes('facebook') && !href.includes('instagram') && !href.includes('youtube')) {
+                                            externalLink = href;
                                         }
                                     }
-                                    if (externalLink) break;
+                                }
+
+                                // Vytiahnutie celého textu zo stránky
+                                let text = document.body.innerText || '';
+                                const allElements = document.querySelectorAll('*');
+                                for (let i = 0; i < allElements.length; i++) {
+                                    if (allElements[i].shadowRoot) {
+                                        text += '\n' + (allElements[i].shadowRoot.textContent || '');
+                                    }
                                 }
 
                                 return {
-                                    text: text.replace(/\n\s*\n/g, '\n').replace(/ {2,}/g, ' ').trim(),
-                                    externalLink: externalLink,
-                                    hasDetail: !!detail
+                                    text: text.replace(/\n\s*\n/g, '\n').trim(),
+                                    externalLink: externalLink
                                 };
                             });
 
                             pageText = extracted.text;
                             if (extracted.externalLink) {
+                                finalExternalLink = extracted.externalLink;
                                 pageText += `\n\nEXTERNAL_EDITAL_LINK: ${extracted.externalLink}`;
-                            }
-
-                            // Preruš loop az vtedy, ked realne ziska linku alebo dostatocne dlhy text
-                            if (extracted.externalLink || (!isCentral && (extracted.hasDetail || pageText.length > 1000))) {
-                                break;
+                                break; // Našli sme ne-prosas linku, môžeme okamžite skončiť čakanie
                             }
                         }
 
-                        console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl} -> Extracted ${pageText.length} chars`);
+                        console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl} -> Extracted ${pageText.length} chars | Link: ${finalExternalLink || 'None'}`);
 
-                        if (pageText.length > 15000) {
-                            pageText = pageText.substring(0, 15000);
-                        }
-
+                        if (pageText.length > 15000) pageText = pageText.substring(0, 15000);
                         item.full_text = pageText;
 
                     } catch (err: any) {
@@ -246,14 +244,13 @@ async function runStandaloneScraper() {
             })
         );
 
-        console.log(`[StandaloneProsasScraper] Deep scraping phase complete. Writing final output to editais_prosas.json...`);
+        console.log(`[StandaloneProsasScraper] Deep scraping phase complete. Writing final output...`);
         fs.writeFileSync(outPath, JSON.stringify(deduplicatedItems, null, 2));
-        console.log(`[StandaloneProsasScraper] Done! Saved to ${outPath}`);
+        console.log(`[StandaloneProsasScraper] Done!`);
 
     } finally {
         if (context) await context.close();
         if (browser) await browser.close();
-        console.log("[StandaloneProsasScraper] Playwright browser and context closed safely.");
     }
 }
 
