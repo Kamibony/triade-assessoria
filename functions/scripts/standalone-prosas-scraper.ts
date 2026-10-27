@@ -150,9 +150,8 @@ async function runStandaloneScraper() {
                     let workerPage: any = null;
                     try {
                         workerPage = await context.newPage();
-                        // Počkáme kým sa sieť úplne upokojí (zabezpečí načítanie Informações tabu)
                         await workerPage.goto(detailUrl, { waitUntil: 'networkidle', timeout: 60000 });
-                        await workerPage.waitForTimeout(3000); // 3 sekundy rezerva na vykreslenie tlačidiel
+                        await workerPage.waitForTimeout(3000);
 
                         let pageText = '';
                         let finalExternalLink = '';
@@ -163,7 +162,6 @@ async function runStandaloneScraper() {
                             const extracted = await workerPage.evaluate(() => {
                                 let externalLink = '';
                                 
-                                // Plochý zberač všetkých <a> tagov na stránke (vrátane Shadow DOM)
                                 const allLinks: HTMLAnchorElement[] = [];
                                 const queue = [document.body];
                                 
@@ -182,27 +180,23 @@ async function runStandaloneScraper() {
                                     }
                                 }
                                 
-                                // Hľadáme link, ktorý má v sebe Acessar ALEBO je to prvý reálny externý odkaz
                                 for (let i = 0; i < allLinks.length; i++) {
                                     const a = allLinks[i];
                                     const btnText = (a.textContent || '').toLowerCase().trim();
                                     const href = a.href || a.getAttribute('href') || '';
                                     
-                                    // ŽELEZNÉ PRAVIDLO: Link nesmie smerovať späť na Prosas
-                                    if (href && href.startsWith('http') && !href.includes('prosas.com.br')) {
-                                        // Prioritne berieme ten, čo má text acessar/inscreva-se
+                                    // ZAKÁZANÉ LINKY: nesmie to byť prosas.com.br, ani whatsapp podpora (wa.me), ani sociálne siete
+                                    if (href && href.startsWith('http') && !href.includes('prosas.com.br') && !href.includes('wa.me') && !href.includes('facebook') && !href.includes('instagram') && !href.includes('youtube')) {
                                         if (btnText.includes('acessar') || btnText.includes('inscreva-se') || btnText.includes('edital')) {
                                             externalLink = href;
                                             break;
                                         }
-                                        // Ak sme zatiaľ nič nenašli, uložíme si aspoň tento (okrem soc. sietí)
-                                        if (!externalLink && !href.includes('facebook') && !href.includes('instagram') && !href.includes('youtube')) {
+                                        if (!externalLink) {
                                             externalLink = href;
                                         }
                                     }
                                 }
 
-                                // Vytiahnutie celého textu zo stránky
                                 let text = document.body.innerText || '';
                                 const allElements = document.querySelectorAll('*');
                                 for (let i = 0; i < allElements.length; i++) {
@@ -221,7 +215,7 @@ async function runStandaloneScraper() {
                             if (extracted.externalLink) {
                                 finalExternalLink = extracted.externalLink;
                                 pageText += `\n\nEXTERNAL_EDITAL_LINK: ${extracted.externalLink}`;
-                                break; // Našli sme ne-prosas linku, môžeme okamžite skončiť čakanie
+                                break;
                             }
                         }
 
