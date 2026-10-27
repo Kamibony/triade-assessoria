@@ -4,10 +4,10 @@ import { chromium } from 'playwright-extra';
 import stealth from 'puppeteer-extra-plugin-stealth';
 
 /**
- * Jules's Routine: Simulates a physical user click on the "Acessar" or "Inscreva-se" button
- * nested inside Shadow DOMs, and captures the resulting external URL.
+ * Bezpečná rutina na fyzické kliknutie na "Acessar"
+ * Zabraňuje "hanging promises", ktoré zhadzujú Playwright po zatvorení stránky.
  */
-async function captureExternalUrl(page: any, context: any) {
+async function captureExternalUrl(page: any) {
   try {
     const targetButton = page.getByText(/(acessar|inscreva-se)/i)
       .filter({ hasNotText: /acessar perfil/i })
@@ -18,46 +18,34 @@ async function captureExternalUrl(page: any, context: any) {
     }
 
     const currentUrl = page.url();
-    let isResolved = false;
 
-    const newPagePromise = context.waitForEvent('page', { timeout: 5000 })
-      .then(async (newPage: any) => {
-        if (isResolved) {
-          await newPage.close().catch(() => {});
-          return null;
-        }
-        await newPage.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
-        const url = newPage.url();
-        await newPage.close().catch(() => {});
-        return url;
-      })
-      .catch(() => null);
-
-    const navigationPromise = page.waitForURL((url: any) => url.href !== currentUrl, { timeout: 5000 })
-      .then(() => page.url())
-      .catch(() => null);
-
-    const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve(null), 5000));
-
-    await targetButton.click({ force: true, timeout: 3000 }).catch(() => {});
-
-    const resultingUrl = await Promise.race([
-      newPagePromise.then((url: any) => url ? url : new Promise(() => {})),
-      navigationPromise.then((url: any) => url ? url : new Promise(() => {})),
-      timeoutPromise
+    // Promise.all bezpečne počká max 5 sekúnd na novú kartu (popup)
+    // Neukončí sa predčasne, takže nezanechá procesy bežiace na pozadí.
+    const [popup] = await Promise.all([
+      page.waitForEvent('popup', { timeout: 5000 }).catch(() => null),
+      targetButton.click({ force: true, timeout: 3000 }).catch(() => {})
     ]);
 
-    isResolved = true; 
-    
-    // Záchranný filter, aby nám nevrátilo prosas alebo linkedin
-    if (resultingUrl && (resultingUrl.includes('prosas.com.br') || resultingUrl.includes('linkedin.com'))) {
-        return null;
+    // Ak sa otvorila nová karta s externým linkom (napr. PDF)
+    if (popup) {
+        await popup.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
+        const u = popup.url();
+        await popup.close().catch(() => {});
+        
+        if (u && !u.includes('prosas.com.br') && !u.includes('linkedin.com')) {
+            return u;
+        }
     }
 
-    return resultingUrl;
+    // Ak nedošlo k otvoreniu novej karty, počkáme chvíľu, či nenastalo presmerovanie v aktuálnej karte
+    await page.waitForTimeout(2000);
+    const newCurrentUrl = page.url();
+    if (newCurrentUrl !== currentUrl && !newCurrentUrl.includes('prosas.com.br') && !newCurrentUrl.includes('linkedin.com')) {
+        return newCurrentUrl;
+    }
 
+    return null;
   } catch (error: any) {
-    console.warn(`[captureExternalUrl] Failed to capture URL gracefully: ${error.message}`);
     return null;
   }
 }
@@ -210,9 +198,9 @@ async function runStandaloneScraper() {
                     try {
                         workerPage = await context.newPage();
                         await workerPage.goto(detailUrl, { waitUntil: 'networkidle', timeout: 60000 });
-                        await workerPage.waitForTimeout(2000); // Wait for the tab content to fully render
+                        await workerPage.waitForTimeout(2000);
 
-                        // NAJPRV extrahujeme full_text celej stránky, nech to máme uložené
+                        // Extrakcia základného textu
                         let pageText = await workerPage.evaluate(() => {
                             let text = document.body.innerText || '';
                             const allElements = document.querySelectorAll('*');
@@ -224,14 +212,44 @@ async function runStandaloneScraper() {
                             return text.replace(/\n\s*\n/g, '\n').trim();
                         });
 
-                        // NÁSLEDNE spustíme Julesovu funkciu pre fyzický klik
-                        const externalLink = await captureExternalUrl(workerPage, context);
+                        // Fyzický klik pre získanie schovaného linku
+                        let externalLink = await captureExternalUrl(workerPage);
+                        
+                        // Ak sme nezachytili dynamicky link, skúsime starú statickú metódu (pre klasické prosas editaly)
+                        if (!externalLink) {
+                            externalLink = await workerPage.evaluate(() => {
+                                let fallback = '';
+                                const allElements = document.querySelectorAll('*');
+                                const allLinks: HTMLAnchorElement[] = [];
+                                
+                                for (let i = 0; i < allElements.length; i++) {
+                                    if (allElements[i].tagName === 'A') allLinks.push(allElements[i] as HTMLAnchorElement);
+                                    if (allElements[i].shadowRoot) {
+                                        const shadowLinks = allElements[i].shadowRoot!.querySelectorAll('a');
+                                        for(let j=0; j<shadowLinks.length; j++) allLinks.push(shadowLinks[j]);
+                                    }
+                                }
+                                
+                                for (let i = 0; i < allLinks.length; i++) {
+                                    const a = allLinks[i];
+                                    const btnText = (a.textContent || '').toLowerCase().trim();
+                                    const href = a.href || a.getAttribute('href') || '';
+                                    
+                                    if (href && href.startsWith('http') && !href.includes('prosas.com.br') && !href.includes('wa.me') && !href.includes('linkedin.com')) {
+                                        if (btnText.includes('acessar') || btnText.includes('inscreva-se') || btnText.includes('edital')) {
+                                            fallback = href;
+                                            break;
+                                        }
+                                        if (!fallback) fallback = href;
+                                    }
+                                }
+                                return fallback;
+                            });
+                        }
 
                         if (externalLink) {
                             pageText += `\n\nEXTERNAL_EDITAL_LINK: ${externalLink}`;
                         }
-
-                        // Ako varoval Jules: Ak to bol Same-Tab redirect, musíme sa vrátiť (ale pre nás to nevadí, lebo my ten tab hneď na to zavrieme vo finally bloku)
 
                         console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl} -> Extracted ${pageText.length} chars | Link: ${externalLink || 'None'}`);
 
@@ -241,7 +259,7 @@ async function runStandaloneScraper() {
                     } catch (err: any) {
                         console.error(`[StandaloneProsasScraper] Failed to deep scrape ${detailUrl}: ${err.message}`);
                     } finally {
-                        if (workerPage) await workerPage.close(); // Toto bezpečne zatvorí tab po každom kliku
+                        if (workerPage) await workerPage.close();
                     }
 
                     if (currentIndex % 25 === 0) {
@@ -254,11 +272,12 @@ async function runStandaloneScraper() {
 
         console.log(`[StandaloneProsasScraper] Deep scraping phase complete. Writing final output...`);
         fs.writeFileSync(outPath, JSON.stringify(deduplicatedItems, null, 2));
-        console.log(`[StandaloneProsasScraper] Done!`);
+        console.log(`[StandaloneProsasScraper] Done! Saved to ${outPath}`);
 
     } finally {
         if (context) await context.close();
         if (browser) await browser.close();
+        console.log("[StandaloneProsasScraper] Playwright browser and context closed safely.");
     }
 }
 
