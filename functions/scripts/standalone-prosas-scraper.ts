@@ -27,54 +27,43 @@ async function captureExternalUrl(page: any, context: any): Promise<string | nul
     }
 
     const currentUrl = page.url();
-    let isResolved = false;
+    let resultingUrl: string | null = null;
+    let newTab: any = null;
 
-    // 2. Prepare listeners BEFORE clicking, to catch both navigation scenarios
+    // We use an explicit listener instead of waitForEvent/waitForURL to avoid dangling promises
+    // that crash the CDP session if the worker page closes while they are pending.
+    const pageListener = (newPage: any) => {
+      newTab = newPage;
+    };
+    context.on('page', pageListener);
 
-    // Scenario A: The click opens an external link in a new tab/window
-    const newPagePromise = context.waitForEvent('page', { timeout: 5000 })
-      .then(async (newPage: any) => {
-        if (isResolved) {
-          // If the race was already won (e.g. by a timeout), clean up this late-arriving tab
-          await newPage.close().catch(() => {});
-          return null;
+    try {
+      // Execute the physical click
+      await targetButton.click({ force: true, timeout: 3000 }).catch(() => {});
+
+      // Poll for up to 5 seconds to see if a new tab opened or if the current URL changed
+      for (let i = 0; i < 10; i++) {
+        await new Promise(r => setTimeout(r, 500));
+
+        if (newTab) {
+          // Scenario A: Opened a new tab
+          await newTab.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => {});
+          resultingUrl = newTab.url();
+          await newTab.close().catch(() => {});
+          break;
+        } else if (page.url() !== currentUrl) {
+          // Scenario B: Navigated in the same tab
+          resultingUrl = page.url();
+          break;
         }
-        // Wait briefly for the new tab to process any immediate redirects
-        await newPage.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
-        const url = newPage.url();
-        await newPage.close().catch(() => {}); // Clean up the popup to avoid memory leaks
-        return url;
-      })
-      .catch(() => null); // Catch timeouts to prevent Unhandled Rejection errors
+      }
+    } finally {
+      context.off('page', pageListener);
+    }
 
-    // Scenario B: The click triggers a direct navigation/redirect in the same tab
-    const navigationPromise = page.waitForURL((url: URL) => url.href !== currentUrl, { timeout: 5000 })
-      .then(() => page.url())
-      .catch(() => null);
-
-    // Scenario C: Graceful fallback timeout (5 seconds max wait)
-    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000));
-
-    // 3. Execute the physical click
-    // We use force: true to bypass any transparent overlays often found in Web Components
-    await targetButton.click({ force: true, timeout: 3000 }).catch(() => {});
-
-    // 4. Race the outcomes to dynamically return whichever happens first
-    const resultingUrl = await Promise.race([
-      // If a promise resolved to null (it timed out internally), we replace it
-      // with a never-resolving promise so it doesn't mistakenly win the race.
-      newPagePromise.then((url: string | null) => url ? url : new Promise<null>(() => {})),
-      navigationPromise.then((url: string | null) => url ? url : new Promise<null>(() => {})),
-      timeoutPromise
-    ]);
-
-    // Flag as resolved so any lingering background events know to clean themselves up
-    isResolved = true;
-
-    return resultingUrl as string | null;
+    return resultingUrl;
 
   } catch (error: any) {
-    // Catch any unexpected exceptions to ensure the main scraping loop never breaks.
     console.warn(`[captureExternalUrl] Failed to capture URL gracefully: ${error.message}`);
     return null;
   }
