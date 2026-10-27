@@ -34,27 +34,37 @@ async function captureExternalUrl(page: any) {
 
     // 3. Active Polling Loop (no Promise.race)
     for (let i = 0; i < 10; i++) {
-      await page.waitForTimeout(500); // Poll every 500ms
+      try {
+        await page.waitForTimeout(500); // Poll every 500ms
+      } catch (e) {
+        break;
+      }
 
       // Condition A: New Tab / Popup detected
       if (capturedPopup) {
-        let u = capturedPopup.url();
-        if (u === 'about:blank') {
-          // Briefly wait if it's still about:blank, but without hanging the whole loop
-          await capturedPopup.waitForLoadState('domcontentloaded', { timeout: 2000 }).catch(() => {});
-          u = capturedPopup.url();
-        }
-        if (u && !u.includes('prosas.com.br') && !u.includes('linkedin.com') && !u.includes('wa.me')) {
-          finalUrl = u;
-        }
+        try {
+          let u = capturedPopup.url();
+          if (u === 'about:blank') {
+            // Briefly wait if it's still about:blank, but without hanging the whole loop
+            await capturedPopup.waitForLoadState('domcontentloaded', { timeout: 2000 }).catch(() => {});
+            u = capturedPopup.url();
+          }
+          if (u && !u.includes('prosas.com.br') && !u.includes('linkedin.com') && !u.includes('wa.me')) {
+            finalUrl = u;
+          }
+        } catch (e) {}
         break; // Stop polling once we process the popup
       }
 
       // Condition B: Same-Tab Redirect detected
-      const currentUrl = page.url();
-      if (currentUrl !== initialUrl && !currentUrl.includes('prosas.com.br') && !currentUrl.includes('linkedin.com') && !currentUrl.includes('wa.me')) {
-        finalUrl = currentUrl;
-        break; // Stop polling once we process the redirect
+      try {
+        const currentUrl = page.url();
+        if (currentUrl !== initialUrl && !currentUrl.includes('prosas.com.br') && !currentUrl.includes('linkedin.com') && !currentUrl.includes('wa.me')) {
+          finalUrl = currentUrl;
+          break; // Stop polling once we process the redirect
+        }
+      } catch (e) {
+        break;
       }
     }
 
@@ -64,9 +74,13 @@ async function captureExternalUrl(page: any) {
     return null;
   } finally {
     // 4. Strict Teardown & Cleanup
-    page.off('popup', pageListener);
+    try {
+      page.off('popup', pageListener);
+    } catch (e) {}
     if (capturedPopup) {
-      await capturedPopup.close().catch(() => {});
+      try {
+        await capturedPopup.close();
+      } catch (e) {}
     }
   }
 }
@@ -283,7 +297,9 @@ async function runStandaloneScraper() {
                     } finally {
                         // Bezpečné uzatvorenie stránky
                         if (workerPage) {
-                            await workerPage.close().catch(() => {});
+                            try {
+                                await workerPage.close();
+                            } catch (e) {}
                         }
                     }
 
@@ -300,8 +316,16 @@ async function runStandaloneScraper() {
         console.log(`[StandaloneProsasScraper] Done! Saved to ${outPath}`);
 
     } finally {
-        if (context) await context.close().catch(() => {});
-        if (browser) await browser.close().catch(() => {});
+        if (context) {
+            try {
+                await context.close();
+            } catch (e) {}
+        }
+        if (browser) {
+            try {
+                await browser.close();
+            } catch (e) {}
+        }
         console.log("[StandaloneProsasScraper] Playwright browser and context closed safely.");
     }
 }
