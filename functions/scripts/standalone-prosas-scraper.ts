@@ -18,9 +18,7 @@ async function runStandaloneScraper() {
     let context: any;
 
     try {
-        browser = await chromium.launch({
-            headless: true,
-        });
+        browser = await chromium.launch({ headless: true });
         context = await browser.newContext();
         const page = await context.newPage();
 
@@ -157,7 +155,6 @@ async function runStandaloneScraper() {
 
                     const currentIndex = ++processedCount;
                     
-                    // Upravena logika URL na zaklade e_central
                     const isCentral = item.attributes && item.attributes['e_central?'] === true;
                     const detailUrl = isCentral 
                         ? `https://produtos.prosas.com.br/editais/edital?edital_id=${item.id}` 
@@ -183,7 +180,6 @@ async function runStandaloneScraper() {
 
                                 let externalLink = '';
 
-                                // Plochý prístup bez akýchkoľvek vnútorných funkcií (vyhnutie sa esbuild __name chybe)
                                 const roots = [document];
                                 if (detail && detail.shadowRoot) roots.push(detail.shadowRoot as any);
                                 if (list && list.shadowRoot) roots.push(list.shadowRoot as any);
@@ -193,11 +189,18 @@ async function runStandaloneScraper() {
                                     const links = (roots[i] as any).querySelectorAll('a');
                                     for (let j = 0; j < links.length; j++) {
                                         const a = links[j] as HTMLAnchorElement;
-                                        const btnText = (a.textContent || '').toLowerCase();
-                                        // Hľadáme tlačidlo s textom Acessar
-                                        if (btnText.includes('acessar') && a.href) {
-                                            externalLink = a.href;
-                                            break;
+                                        const btnText = (a.textContent || '').toLowerCase().trim();
+                                        
+                                        // Ochrana proti falošným linkom z menu
+                                        const isAcessarPerfil = btnText.includes('acessar perfil');
+                                        const hasAcessar = btnText.includes('acessar');
+                                        const isExternal = a.getAttribute('target') === '_blank' || (a.href && !a.href.includes('prosas.com.br') && !a.href.startsWith('javascript'));
+
+                                        if ((hasAcessar && !isAcessarPerfil) || isExternal) {
+                                            if (a.href && !a.href.includes('users/sign_in')) {
+                                                externalLink = a.href;
+                                                break;
+                                            }
                                         }
                                     }
                                     if (externalLink) break;
