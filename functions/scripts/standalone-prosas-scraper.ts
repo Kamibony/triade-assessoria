@@ -217,10 +217,19 @@ async function runStandaloneScraper() {
                     try {
                         workerPage = await context.newPage();
                         await workerPage.goto(detailUrl, { waitUntil: 'networkidle', timeout: 60000 });
-                        await workerPage.waitForTimeout(3000);
+                        await workerPage.waitForTimeout(2000);
 
-                        let pageText = '';
-                        let finalExternalLink = '';
+                        // Extrakcia základného textu
+                        let pageText = await workerPage.evaluate(() => {
+                            let text = document.body.innerText || '';
+                            const allElements = document.querySelectorAll('*');
+                            for (let i = 0; i < allElements.length; i++) {
+                                if (allElements[i].shadowRoot) {
+                                    text += '\n' + (allElements[i].shadowRoot.textContent || '');
+                                }
+                            }
+                            return text.replace(/\n\s*\n/g, '\n').trim();
+                        });
 
                         for (let poll = 0; poll < 3; poll++) {
                             await workerPage.waitForTimeout(1000);
@@ -236,6 +245,7 @@ async function runStandaloneScraper() {
 
                                 return text.replace(/\n\s*\n/g, '\n').trim();
                             });
+                        }
 
                             pageText = text;
 
@@ -276,11 +286,12 @@ async function runStandaloneScraper() {
 
         console.log(`[StandaloneProsasScraper] Deep scraping phase complete. Writing final output...`);
         fs.writeFileSync(outPath, JSON.stringify(deduplicatedItems, null, 2));
-        console.log(`[StandaloneProsasScraper] Done!`);
+        console.log(`[StandaloneProsasScraper] Done! Saved to ${outPath}`);
 
     } finally {
         if (context) await context.close();
         if (browser) await browser.close();
+        console.log("[StandaloneProsasScraper] Playwright browser and context closed safely.");
     }
 }
 
