@@ -8,11 +8,26 @@ import stealth from 'puppeteer-extra-plugin-stealth';
  * Bezpečne odchytí nové okná aj presmerovania v aktuálnom okne.
  */
 async function captureExternalUrl(page: any) {
-  let capturedPopup: any = null;
   let finalUrl: string | null = null;
-  const initialUrl = page.url();
-  
-  // Passive listener explicitly scoped to this page's popups
+  let navigationIntercepted = false;
+
+  const routeHandler = async (route: any, request: any) => {
+    try {
+      if (request.isNavigationRequest()) {
+        const url = request.url();
+        if (!url.includes('prosas.com.br') && !url.includes('linkedin.com') && !url.includes('wa.me') && url !== 'about:blank') {
+          finalUrl = url;
+          navigationIntercepted = true;
+          await route.abort('aborted').catch(() => {});
+          return;
+        }
+      }
+      await route.continue().catch(() => {});
+    } catch (e) {}
+  };
+
+  // Passive listener explicitly scoped to this page's popups (fallback for target="_blank" that might not be caught by route on the same page depending on PW config)
+  let capturedPopup: any = null;
   const pageListener = (newPage: any) => {
     capturedPopup = newPage;
   };
@@ -26,26 +41,18 @@ async function captureExternalUrl(page: any) {
       return null;
     }
 
-    // 1. Setup passive listener on the current page
     page.on('popup', pageListener);
+    await page.route('**/*', routeHandler);
 
-    // 2. Physical click
     await targetButton.click({ force: true, timeout: 3000 }).catch(() => {});
 
-    // 3. Active Polling Loop (no Promise.race)
+    // Wait and check if intercepted or popup captured
     for (let i = 0; i < 10; i++) {
-      try {
-        await page.waitForTimeout(500); // Poll every 500ms
-      } catch (e) {
-        break;
-      }
-
-      // Condition A: New Tab / Popup detected
+      if (navigationIntercepted) break;
       if (capturedPopup) {
         try {
           let u = capturedPopup.url();
           if (u === 'about:blank') {
-            // Briefly wait if it's still about:blank, but without hanging the whole loop
             await capturedPopup.waitForLoadState('domcontentloaded', { timeout: 2000 }).catch(() => {});
             u = capturedPopup.url();
           }
@@ -53,19 +60,9 @@ async function captureExternalUrl(page: any) {
             finalUrl = u;
           }
         } catch (e) {}
-        break; // Stop polling once we process the popup
-      }
-
-      // Condition B: Same-Tab Redirect detected
-      try {
-        const currentUrl = page.url();
-        if (currentUrl !== initialUrl && !currentUrl.includes('prosas.com.br') && !currentUrl.includes('linkedin.com') && !currentUrl.includes('wa.me')) {
-          finalUrl = currentUrl;
-          break; // Stop polling once we process the redirect
-        }
-      } catch (e) {
         break;
       }
+      await page.waitForTimeout(300).catch(() => {});
     }
 
     return finalUrl;
@@ -73,9 +70,11 @@ async function captureExternalUrl(page: any) {
     console.warn(`[captureExternalUrl] Failed: ${error.message}`);
     return null;
   } finally {
-    // 4. Strict Teardown & Cleanup
     try {
       page.off('popup', pageListener);
+    } catch (e) {}
+    try {
+      await page.unroute('**/*', routeHandler);
     } catch (e) {}
     if (capturedPopup) {
       try {
@@ -215,28 +214,37 @@ async function runStandaloneScraper() {
         let processedCount = 0;
         const totalItems = itemsToDeepScrape.length;
         const outPath = path.join(__dirname, '..', 'editais_prosas.json');
-        const queue = [...itemsToDeepScrape];
 
-        await Promise.all(
-            Array.from({ length: concurrency }).map(async () => {
-                while (queue.length > 0) {
-                    const item = queue.shift();
-                    if (!item) break;
+        const chunkSize = 50;
+        for (let i = 0; i < itemsToDeepScrape.length; i += chunkSize) {
+            const chunk = itemsToDeepScrape.slice(i, i + chunkSize);
+            let chunkContext: any = null;
 
-                    const currentIndex = ++processedCount;
-                    const isCentral = item.attributes && item.attributes['e_central?'] === true;
-                    const detailUrl = isCentral 
-                        ? `https://produtos.prosas.com.br/editais/edital?edital_id=${item.id}` 
-                        : `https://prosas.com.br/editais/${item.id}`;
-                    
-                    let workerPage: any = null;
-                    try {
-                        workerPage = await context.newPage();
-                        await workerPage.goto(detailUrl, { waitUntil: 'networkidle', timeout: 60000 });
-                        await workerPage.waitForTimeout(2000);
+            try {
+                chunkContext = await browser.newContext();
+                const queue = [...chunk];
 
-                        // Extrakcia plného textu
-                        let pageText = await workerPage.evaluate(() => {
+                await Promise.all(
+                    Array.from({ length: concurrency }).map(async () => {
+                        while (queue.length > 0) {
+                            const item = queue.shift();
+                            if (!item) break;
+
+                            const currentIndex = ++processedCount;
+                            const isCentral = item.attributes && item.attributes['e_central?'] === true;
+                            const detailUrl = isCentral
+                                ? `https://produtos.prosas.com.br/editais/edital?edital_id=${item.id}`
+                                : `https://prosas.com.br/editais/${item.id}`;
+
+                            let workerPage: any = null;
+                            try {
+                                workerPage = await chunkContext.newPage();
+                                workerPage.on('dialog', async (dialog: any) => { await dialog.dismiss().catch(() => {}); });
+                                await workerPage.goto(detailUrl, { waitUntil: 'networkidle', timeout: 60000 });
+                                await workerPage.waitForTimeout(2000).catch(() => {});
+
+                                // Extrakcia plného textu
+                                let pageText = await workerPage.evaluate(() => {
                             let text = document.body.innerText || '';
                             const allElements = document.querySelectorAll('*');
                             for (let i = 0; i < allElements.length; i++) {
@@ -289,27 +297,35 @@ async function runStandaloneScraper() {
 
                         console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl} -> Extracted ${pageText.length} chars | Link: ${externalLink || 'None'}`);
 
-                        if (pageText.length > 15000) pageText = pageText.substring(0, 15000);
-                        item.full_text = pageText;
+                                if (pageText.length > 15000) pageText = pageText.substring(0, 15000);
+                                item.full_text = pageText;
 
-                    } catch (err: any) {
-                        console.error(`[StandaloneProsasScraper] Failed to deep scrape ${detailUrl}: ${err.message}`);
-                    } finally {
-                        // Bezpečné uzatvorenie stránky
-                        if (workerPage) {
-                            try {
-                                await workerPage.close();
-                            } catch (e) {}
+                            } catch (err: any) {
+                                console.error(`[StandaloneProsasScraper] Failed to deep scrape ${detailUrl}: ${err.message}`);
+                            } finally {
+                                // Bezpečné uzatvorenie stránky
+                                if (workerPage) {
+                                    try {
+                                        await workerPage.close();
+                                    } catch (e) {}
+                                }
+                            }
+
+                            if (currentIndex % 25 === 0) {
+                                fs.writeFileSync(outPath, JSON.stringify(deduplicatedItems, null, 2));
+                                console.log(`[StandaloneProsasScraper] Checkpoint saved at item ${currentIndex}`);
+                            }
                         }
-                    }
-
-                    if (currentIndex % 25 === 0) {
-                        fs.writeFileSync(outPath, JSON.stringify(deduplicatedItems, null, 2));
-                        console.log(`[StandaloneProsasScraper] Checkpoint saved at item ${currentIndex}`);
-                    }
+                    })
+                );
+            } finally {
+                if (chunkContext) {
+                    try {
+                        await chunkContext.close();
+                    } catch (e) {}
                 }
-            })
-        );
+            }
+        }
 
         console.log(`[StandaloneProsasScraper] Deep scraping phase complete. Writing final output...`);
         fs.writeFileSync(outPath, JSON.stringify(deduplicatedItems, null, 2));
