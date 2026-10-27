@@ -156,7 +156,12 @@ async function runStandaloneScraper() {
                     if (!item) break;
 
                     const currentIndex = ++processedCount;
-                    const detailUrl = `https://prosas.com.br/editais/${item.id}`;
+                    
+                    // Upravena logika URL na zaklade e_central
+                    const isCentral = item.attributes && item.attributes['e_central?'] === true;
+                    const detailUrl = isCentral 
+                        ? `https://produtos.prosas.com.br/editais/edital?edital_id=${item.id}` 
+                        : `https://prosas.com.br/editais/${item.id}`;
                     
                     let workerPage: any = null;
                     try {
