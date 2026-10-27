@@ -4,48 +4,67 @@ import { chromium } from 'playwright-extra';
 import stealth from 'puppeteer-extra-plugin-stealth';
 
 /**
- * Bezpečná rutina na fyzické kliknutie na "Acessar"
- * Zabraňuje "hanging promises", ktoré zhadzujú Playwright po zatvorení stránky.
+ * Simulates a physical user click on the "Acessar" or "Inscreva-se" button
+ * nested inside Shadow DOMs, and captures the resulting external URL.
+ *
+ * @param {import('playwright').Page} page - The current Playwright page.
+ * @param {import('playwright').BrowserContext} context - The Playwright browser context.
+ * @returns {Promise<string|null>} - The external URL, or null if failed/timed out.
  */
-async function captureExternalUrl(page: any) {
+async function captureExternalUrl(page: any, context: any): Promise<string | null> {
   try {
+    // 1. Locate the target button.
+    // Playwright natively pierces Shadow DOMs automatically.
+    // We use getByText to find the deepest node containing our target words,
+    // explicitly filtering out the global header button via regex.
     const targetButton = page.getByText(/(acessar|inscreva-se)/i)
       .filter({ hasNotText: /acessar perfil/i })
       .first();
 
+    // Check if the button actually exists and is visible on the page
     if (!(await targetButton.isVisible({ timeout: 3000 }).catch(() => false))) {
       return null;
     }
 
     const currentUrl = page.url();
+    let resultingUrl: string | null = null;
+    let newTab: any = null;
 
-    // Promise.all bezpečne počká max 5 sekúnd na novú kartu (popup)
-    // Neukončí sa predčasne, takže nezanechá procesy bežiace na pozadí.
-    const [popup] = await Promise.all([
-      page.waitForEvent('popup', { timeout: 5000 }).catch(() => null),
-      targetButton.click({ force: true, timeout: 3000 }).catch(() => {})
-    ]);
+    // We use an explicit listener instead of waitForEvent/waitForURL to avoid dangling promises
+    // that crash the CDP session if the worker page closes while they are pending.
+    const pageListener = (newPage: any) => {
+      newTab = newPage;
+    };
+    context.on('page', pageListener);
 
-    // Ak sa otvorila nová karta s externým linkom (napr. PDF)
-    if (popup) {
-        await popup.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
-        const u = popup.url();
-        await popup.close().catch(() => {});
-        
-        if (u && !u.includes('prosas.com.br') && !u.includes('linkedin.com')) {
-            return u;
+    try {
+      // Execute the physical click
+      await targetButton.click({ force: true, timeout: 3000 }).catch(() => {});
+
+      // Poll for up to 5 seconds to see if a new tab opened or if the current URL changed
+      for (let i = 0; i < 10; i++) {
+        await new Promise(r => setTimeout(r, 500));
+
+        if (newTab) {
+          // Scenario A: Opened a new tab
+          await newTab.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => {});
+          resultingUrl = newTab.url();
+          await newTab.close().catch(() => {});
+          break;
+        } else if (page.url() !== currentUrl) {
+          // Scenario B: Navigated in the same tab
+          resultingUrl = page.url();
+          break;
         }
+      }
+    } finally {
+      context.off('page', pageListener);
     }
 
-    // Ak nedošlo k otvoreniu novej karty, počkáme chvíľu, či nenastalo presmerovanie v aktuálnej karte
-    await page.waitForTimeout(2000);
-    const newCurrentUrl = page.url();
-    if (newCurrentUrl !== currentUrl && !newCurrentUrl.includes('prosas.com.br') && !newCurrentUrl.includes('linkedin.com')) {
-        return newCurrentUrl;
-    }
+    return resultingUrl;
 
-    return null;
   } catch (error: any) {
+    console.warn(`[captureExternalUrl] Failed to capture URL gracefully: ${error.message}`);
     return null;
   }
 }
@@ -212,46 +231,41 @@ async function runStandaloneScraper() {
                             return text.replace(/\n\s*\n/g, '\n').trim();
                         });
 
-                        // Fyzický klik pre získanie schovaného linku
-                        let externalLink = await captureExternalUrl(workerPage);
-                        
-                        // Ak sme nezachytili dynamicky link, skúsime starú statickú metódu (pre klasické prosas editaly)
-                        if (!externalLink) {
-                            externalLink = await workerPage.evaluate(() => {
-                                let fallback = '';
+                        for (let poll = 0; poll < 3; poll++) {
+                            await workerPage.waitForTimeout(1000);
+                            
+                            const text = await workerPage.evaluate(() => {
+                                let text = document.body.innerText || '';
                                 const allElements = document.querySelectorAll('*');
-                                const allLinks: HTMLAnchorElement[] = [];
-                                
                                 for (let i = 0; i < allElements.length; i++) {
-                                    if (allElements[i].tagName === 'A') allLinks.push(allElements[i] as HTMLAnchorElement);
                                     if (allElements[i].shadowRoot) {
-                                        const shadowLinks = allElements[i].shadowRoot!.querySelectorAll('a');
-                                        for(let j=0; j<shadowLinks.length; j++) allLinks.push(shadowLinks[j]);
+                                        text += '\n' + (allElements[i].shadowRoot.textContent || '');
                                     }
                                 }
-                                
-                                for (let i = 0; i < allLinks.length; i++) {
-                                    const a = allLinks[i];
-                                    const btnText = (a.textContent || '').toLowerCase().trim();
-                                    const href = a.href || a.getAttribute('href') || '';
-                                    
-                                    if (href && href.startsWith('http') && !href.includes('prosas.com.br') && !href.includes('wa.me') && !href.includes('linkedin.com')) {
-                                        if (btnText.includes('acessar') || btnText.includes('inscreva-se') || btnText.includes('edital')) {
-                                            fallback = href;
-                                            break;
-                                        }
-                                        if (!fallback) fallback = href;
-                                    }
-                                }
-                                return fallback;
+
+                                return text.replace(/\n\s*\n/g, '\n').trim();
                             });
                         }
 
-                        if (externalLink) {
-                            pageText += `\n\nEXTERNAL_EDITAL_LINK: ${externalLink}`;
+                            pageText = text;
+
+                            // Break early if we got enough text, otherwise wait for next poll
+                            if (pageText.length > 500) {
+                                break;
+                            }
                         }
 
-                        console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl} -> Extracted ${pageText.length} chars | Link: ${externalLink || 'None'}`);
+                        // Try clicking the button to capture external url
+                        const extUrl = await captureExternalUrl(workerPage, context);
+                        if (extUrl) {
+                            finalExternalLink = extUrl;
+                            pageText += `\n\nEXTERNAL_EDITAL_LINK: ${extUrl}`;
+
+                            // If navigation happened in same tab, we must go back or the next evaluation might break
+                            // if there is more logic, but here we close the workerPage in `finally` anyway.
+                        }
+
+                        console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl} -> Extracted ${pageText.length} chars | Link: ${finalExternalLink || 'None'}`);
 
                         if (pageText.length > 15000) pageText = pageText.substring(0, 15000);
                         item.full_text = pageText;
