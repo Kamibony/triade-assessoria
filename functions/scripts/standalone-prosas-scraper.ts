@@ -7,21 +7,14 @@ import stealth from 'puppeteer-extra-plugin-stealth';
  * Julesova optimalizovaná rutina na fyzické kliknutie na "Acessar"
  * Bezpečne odchytí nové okná aj presmerovania v aktuálnom okne.
  */
-async function captureExternalUrl(page: any, context: any) {
-  let newPageUrl: string | null = null;
+async function captureExternalUrl(page: any) {
+  let capturedPopup: any = null;
+  let finalUrl: string | null = null;
+  const initialUrl = page.url();
   
-  // Definovanie listenera, ktorý bezpečne prečíta URL z nového okna a hneď ho zavrie
-  const pageListener = async (newPage: any) => {
-    try {
-      await newPage.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
-      const u = newPage.url();
-      if (u && !u.includes('prosas.com.br') && !u.includes('linkedin.com') && !u.includes('wa.me')) {
-        newPageUrl = u;
-      }
-      await newPage.close().catch(() => {});
-    } catch (e) {
-      // Ignorujeme chyby v popup okne
-    }
+  // Passive listener explicitly scoped to this page's popups
+  const pageListener = (newPage: any) => {
+    capturedPopup = newPage;
   };
 
   try {
@@ -33,37 +26,48 @@ async function captureExternalUrl(page: any, context: any) {
       return null;
     }
 
-    const currentUrl = page.url();
+    // 1. Setup passive listener on the current page
+    page.on('popup', pageListener);
 
-    // 1. Zavesíme listener na kontext (počúva otvorenie nového tabu)
-    context.on('page', pageListener);
-
-    // 2. Fyzický klik na tlačidlo
+    // 2. Physical click
     await targetButton.click({ force: true, timeout: 3000 }).catch(() => {});
 
-    // 3. Bezpečný Polling (max 5 sekúnd). Žiadne Promise.race!
+    // 3. Active Polling Loop (no Promise.race)
     for (let i = 0; i < 10; i++) {
-      await page.waitForTimeout(500); // 10 x 500ms = 5 sekúnd
+      await page.waitForTimeout(500); // Poll every 500ms
 
-      // Ak listener zachytil otvorenú kartu s externým linkom, vráti ho
-      if (newPageUrl) {
-        return newPageUrl;
+      // Condition A: New Tab / Popup detected
+      if (capturedPopup) {
+        let u = capturedPopup.url();
+        if (u === 'about:blank') {
+          // Briefly wait if it's still about:blank, but without hanging the whole loop
+          await capturedPopup.waitForLoadState('domcontentloaded', { timeout: 2000 }).catch(() => {});
+          u = capturedPopup.url();
+        }
+        if (u && !u.includes('prosas.com.br') && !u.includes('linkedin.com') && !u.includes('wa.me')) {
+          finalUrl = u;
+        }
+        break; // Stop polling once we process the popup
       }
 
-      // Alebo ak sa aktuálna stránka presmerovala na externý link v tom istom tabe
-      const newCurrentUrl = page.url();
-      if (newCurrentUrl !== currentUrl && !newCurrentUrl.includes('prosas.com.br') && !newCurrentUrl.includes('linkedin.com') && !newCurrentUrl.includes('wa.me')) {
-        return newCurrentUrl;
+      // Condition B: Same-Tab Redirect detected
+      const currentUrl = page.url();
+      if (currentUrl !== initialUrl && !currentUrl.includes('prosas.com.br') && !currentUrl.includes('linkedin.com') && !currentUrl.includes('wa.me')) {
+        finalUrl = currentUrl;
+        break; // Stop polling once we process the redirect
       }
     }
 
-    return null;
+    return finalUrl;
   } catch (error: any) {
     console.warn(`[captureExternalUrl] Failed: ${error.message}`);
     return null;
   } finally {
-    // 4. ABSOLÚTNE KĽÚČOVÉ: Vypnutie listenera! Zabraňuje chybám "Target page closed".
-    context.off('page', pageListener);
+    // 4. Strict Teardown & Cleanup
+    page.off('popup', pageListener);
+    if (capturedPopup) {
+      await capturedPopup.close().catch(() => {});
+    }
   }
 }
 
@@ -230,7 +234,7 @@ async function runStandaloneScraper() {
                         });
 
                         // 1. Spustenie spoľahlivej Julesovej funkcie pre klik
-                        let externalLink = await captureExternalUrl(workerPage, context);
+                        let externalLink = await captureExternalUrl(workerPage);
                         
                         // 2. Fallback (pre staré domény prosas.com.br) ak klik nič nenašiel
                         if (!externalLink) {
