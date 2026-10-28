@@ -245,60 +245,63 @@ async function runStandaloneScraper() {
 
                                 // Extrakcia plného textu
                                 let pageText = await workerPage.evaluate(() => {
-                            let text = document.body.innerText || '';
-                            const allElements = document.querySelectorAll('*');
-                            for (let i = 0; i < allElements.length; i++) {
-                                if (allElements[i].shadowRoot) {
-                                    text += '\n' + (allElements[i].shadowRoot.textContent || '');
-                                }
-                            }
-                            return text.replace(/\n\s*\n/g, '\n').trim();
-                        });
-
-                        // 1. Spustenie spoľahlivej Julesovej funkcie pre klik
-                        let externalLink = await captureExternalUrl(workerPage);
-                        
-                        // 2. Fallback (pre staré domény prosas.com.br) ak klik nič nenašiel
-                        if (!externalLink) {
-                            externalLink = await workerPage.evaluate(() => {
-                                let fallback = '';
-                                const allElements = document.querySelectorAll('*');
-                                const allLinks: HTMLAnchorElement[] = [];
-                                
-                                for (let i = 0; i < allElements.length; i++) {
-                                    if (allElements[i].tagName === 'A') allLinks.push(allElements[i] as HTMLAnchorElement);
-                                    if (allElements[i].shadowRoot) {
-                                        const shadowLinks = allElements[i].shadowRoot!.querySelectorAll('a');
-                                        for(let j=0; j<shadowLinks.length; j++) allLinks.push(shadowLinks[j]);
-                                    }
-                                }
-                                
-                                for (let i = 0; i < allLinks.length; i++) {
-                                    const a = allLinks[i];
-                                    const btnText = (a.textContent || '').toLowerCase().trim();
-                                    const href = a.href || a.getAttribute('href') || '';
-                                    
-                                    if (href && href.startsWith('http') && !href.includes('prosas.com.br') && !href.includes('wa.me') && !href.includes('linkedin.com')) {
-                                        if (btnText.includes('acessar') || btnText.includes('inscreva-se') || btnText.includes('edital')) {
-                                            fallback = href;
-                                            break;
+                                    let text = document.body.innerText || '';
+                                    const allElements = document.querySelectorAll('*');
+                                    for (let i = 0; i < allElements.length; i++) {
+                                        if (allElements[i].shadowRoot) {
+                                            text += '\n' + (allElements[i].shadowRoot.textContent || '');
                                         }
-                                        if (!fallback) fallback = href;
                                     }
+                                    return text.replace(/\n\s*\n/g, '\n').trim();
+                                });
+
+                                // 1. Spustenie spoľahlivej Julesovej funkcie pre klik
+                                let externalLink = await captureExternalUrl(workerPage);
+                                
+                                // 2. Fallback (pre staré domény prosas.com.br) ak klik nič nenašiel
+                                if (!externalLink) {
+                                    externalLink = await workerPage.evaluate(() => {
+                                        let fallback = '';
+                                        const allElements = document.querySelectorAll('*');
+                                        const allLinks: HTMLAnchorElement[] = [];
+                                        
+                                        for (let i = 0; i < allElements.length; i++) {
+                                            if (allElements[i].tagName === 'A') allLinks.push(allElements[i] as HTMLAnchorElement);
+                                            if (allElements[i].shadowRoot) {
+                                                const shadowLinks = allElements[i].shadowRoot!.querySelectorAll('a');
+                                                for(let j=0; j<shadowLinks.length; j++) allLinks.push(shadowLinks[j]);
+                                            }
+                                        }
+                                        
+                                        for (let i = 0; i < allLinks.length; i++) {
+                                            const a = allLinks[i];
+                                            const btnText = (a.textContent || '').toLowerCase().trim();
+                                            const href = a.href || a.getAttribute('href') || '';
+                                            
+                                            if (href && href.startsWith('http') && !href.includes('prosas.com.br') && !href.includes('wa.me') && !href.includes('linkedin.com')) {
+                                                if (btnText.includes('acessar') || btnText.includes('inscreva-se') || btnText.includes('edital')) {
+                                                    fallback = href;
+                                                    break;
+                                                }
+                                                if (!fallback) fallback = href;
+                                            }
+                                        }
+                                        return fallback;
+                                    });
                                 }
-                                return fallback;
-                            });
-                        }
 
-                        // Prilepenie linku k textu
-                        if (externalLink) {
-                            pageText += `\n\nEXTERNAL_EDITAL_LINK: ${externalLink}`;
-                        }
+                                // Prilepenie linku k textu
+                                if (externalLink) {
+                                    pageText += `\n\nEXTERNAL_EDITAL_LINK: ${externalLink}`;
+                                }
 
-                        console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl} -> Extracted ${pageText.length} chars | Link: ${externalLink || 'None'}`);
+                                console.log(`[StandaloneProsasScraper] Deep scraping (${currentIndex}/${totalItems}): ${detailUrl} -> Extracted ${pageText.length} chars | Link: ${externalLink || 'None'}`);
 
                                 if (pageText.length > 15000) pageText = pageText.substring(0, 15000);
                                 item.full_text = pageText;
+
+                                // PRIDANÝ RIADOK: Uloženie stabilnej verejnej URL adresy do výstupného JSONu
+                                item.public_url = detailUrl;
 
                             } catch (err: any) {
                                 console.error(`[StandaloneProsasScraper] Failed to deep scrape ${detailUrl}: ${err.message}`);
